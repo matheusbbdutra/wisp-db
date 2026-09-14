@@ -76,11 +76,19 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
 
     function buildDsn(): {driver: string; dsn: string} | null {
         if (rawDsnMode) {
-            if (!rawDsn.trim()) {
+            const trimmedDsn = rawDsn.trim();
+            if (!trimmedDsn) {
                 setError('Cole a DSN/link de conexão completo.');
                 return null;
             }
-            return {driver, dsn: rawDsn.trim()};
+            if (driver === 'postgres' && !/^postgres(ql)?:\/\//i.test(trimmedDsn)) {
+                setError(
+                    'DSN do Postgres precisa começar com "postgres://" — formato: ' +
+                    'postgres://usuario:senha@host:porta/banco (ex: postgres://wisp:wisp@localhost:5432/wisp_test).'
+                );
+                return null;
+            }
+            return {driver, dsn: trimmedDsn};
         }
 
         if (driver === 'sqlite') {
