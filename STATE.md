@@ -45,12 +45,18 @@ Projeto criado em 2026-09-14. Fase: **Fase 1 em andamento** — skeleton Wails g
 4. ✅ `frontend/src/components/ConnectionBar.tsx` — UI para salvar a conexão atual e reconectar a partir de conexões salvas (chips com botão de deletar), extraído da topbar por SRP.
 5. ✅ Build completo (`wails build -tags webkit2_41`) validado. Warning inofensivo do bindgen do Wails sobre `time.Time` (campo `CreatedAt` vira `any` no TS — não usado na UI ainda, sem impacto).
 
+## Feito em sessão seguinte (PostgresDriver validado contra Postgres real)
+1. ✅ `testdata/docker-compose.yml` + `testdata/postgres-seed.sql` — Postgres 16 local com seed cobrindo PK simples (`customers`), PK composta (`order_items`) e coluna gerada (`invoice_lines.total`), exatamente os casos do ADR 0004.
+2. ✅ `PostgresDriver` validado com execução real contra o container: `Execute`, `ListSchemas`, `ListTables`, `Introspect` (PK simples ✅, PK composta detectou as duas colunas ✅, coluna gerada marcou `IsGenerated: true` ✅).
+3. ✅ **Cancelamento real confirmado**: `SELECT pg_sleep(30)` cancelado via `CancelRunningQuery` após 500ms, retornou com `SQLSTATE 57014 — canceling statement due to user request` (erro nativo do Postgres, não timeout local) — valida o requisito mais crítico do `CLAUDE.md` ("Cancelamento Real").
+4. ✅ README atualizado com instruções de subir/derrubar o Postgres de teste e a DSN pronta para colar na UI.
+
 ## Próximos passos (não iniciados)
-1. Validar `PostgresDriver` contra instância Postgres real — usuário vai subir via Docker em breve.
-2. Data grid virtualizado real (Glide Data Grid) quando volume de linhas justificar.
-3. Autocomplete no Monaco alimentado pelo schema cache (Fase 2) — hoje o editor só tem highlighting léxico de SQL, sem language service próprio.
-4. Histórico de queries (`query_history`) — schema já existe no Store, sem binding/UI ainda.
-5. Schema cache com TTL (`schema_cache`) — hoje `ListSchemas`/`ListTables` sempre fazem fetch direto, sem cache em nenhuma camada.
+1. Data grid virtualizado real (Glide Data Grid) quando volume de linhas justificar.
+2. Autocomplete no Monaco alimentado pelo schema cache (Fase 2) — hoje o editor só tem highlighting léxico de SQL, sem language service próprio.
+3. Histórico de queries (`query_history`) — schema já existe no Store, sem binding/UI ainda.
+4. Schema cache com TTL (`schema_cache`) — hoje `ListSchemas`/`ListTables` sempre fazem fetch direto, sem cache em nenhuma camada.
+5. Botão "Cancelar" na UI (hoje `CancelQuery` existe como binding mas não está ligado a nenhum botão — `Execute` na UI atual não é cancelável enquanto roda).
 
 ## Pendências/perguntas em aberto
 - Nenhuma bloqueante. Próxima decisão real é a lib de keychain cross-platform ao implementar o Credential Vault.
