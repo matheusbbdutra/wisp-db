@@ -1,0 +1,10 @@
+#App {
+    height: 100vh;
+    text-align: center;
+}
+
+.result {
+    height: 20px;
+    line-height: 20px;
+    margin: 1.5rem auto;
+}
