@@ -1,0 +1,43 @@
+# Maintainer: Matheus Dutra <matheusbbdutra@gmail.com>
+pkgname=wisp
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Cliente SQL desktop leve e nativo (Go + Wails), suporte a PostgreSQL e SQLite"
+arch=('x86_64')
+url="https://github.com/matheusdutra/wisp"
+license=('unknown')
+depends=('webkit2gtk-4.1' 'gtk3')
+makedepends=('go' 'npm' 'nodejs' 'pkgconf')
+options=('!lto')
+source=("$pkgname-$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+# SKIP é aceitável para build local/beta (source vem de um tarball local via
+# `git archive`, não de download). Antes de publicar no AUR de verdade,
+# gerar o hash real com `updpkgsums` contra a tarball publicada numa release.
+
+prepare() {
+  export GOPATH="$srcdir/go"
+  export GOBIN="$GOPATH/bin"
+  mkdir -p "$GOBIN"
+  # wails CLI não é pacote do sistema — instalado isolado dentro do
+  # diretório de build, não polui o ambiente do usuário que empacota.
+  go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0
+}
+
+build() {
+  cd "$srcdir/$pkgname-$pkgver"
+  export PATH="$srcdir/go/bin:$PATH"
+  export GOPATH="$srcdir/go"
+  export HOME="$srcdir"
+  # webkit2_41: este sistema (Arch) só tem webkit2gtk-4.1, não 4.0 — ver
+  # README.md e docs/adr para o porquê dessa tag ser obrigatória aqui.
+  wails build -tags webkit2_41 -clean
+}
+
+package() {
+  cd "$srcdir/$pkgname-$pkgver"
+  install -Dm755 build/bin/wisp "$pkgdir/usr/bin/wisp"
+  install -Dm644 packaging/assets/wisp.desktop "$pkgdir/usr/share/applications/wisp.desktop"
+  install -Dm644 build/appicon.png "$pkgdir/usr/share/icons/hicolor/1024x1024/apps/wisp.png"
+}

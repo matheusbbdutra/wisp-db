@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Wisp
+Comment=Cliente SQL desktop leve e nativo
+Exec=wisp
+Icon=wisp
+Terminal=false
+Type=Application
+Categories=Development;Database;
