@@ -344,6 +344,23 @@ func (a *App) ConnectSaved(tabID string, connectionID string) error {
 	return a.connect(tabID, driverName, dsn, connectionID)
 }
 
+// TestConnection tenta conectar e imediatamente fecha, sem persistir nada
+// nem abrir sessão de aba — usado pelo modal de conexão para validar antes
+// de salvar (evita salvar uma conexão com erro de digitação, ex. nome de
+// banco errado). Timeout de 10s para não travar em host inalcançável.
+func (a *App) TestConnection(driverName string, dsn string) error {
+	driver, err := db.New(db.DriverName(driverName))
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := driver.Connect(ctx, dsn); err != nil {
+		return err
+	}
+	return driver.Close()
+}
+
 // DeleteSavedConnection remove uma conexão salva permanentemente.
 func (a *App) DeleteSavedConnection(connectionID string) error {
 	if a.store == nil {

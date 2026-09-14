@@ -1,5 +1,5 @@
 import {useState, useEffect} from 'react';
-import {SaveConnection, ConnectSaved, DeleteSavedConnection, PickSQLiteFile, ListSavedConnections} from '../../wailsjs/go/main/App';
+import {SaveConnection, ConnectSaved, DeleteSavedConnection, PickSQLiteFile, ListSavedConnections, TestConnection} from '../../wailsjs/go/main/App';
 import type {store} from '../../wailsjs/go/models';
 
 interface Props {
@@ -15,6 +15,11 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
     const [driver, setDriver] = useState<'sqlite' | 'postgres'>('sqlite');
     const [name, setName] = useState('');
 
+    // Alterna entre preencher campos estruturados ou colar a DSN/link de
+    // conexão completo direto — pedido do usuário, os dois jeitos coexistem.
+    const [rawDsnMode, setRawDsnMode] = useState(false);
+    const [rawDsn, setRawDsn] = useState('');
+
     // SQLite states
     const [sqlitePath, setSqlitePath] = useState('');
 
@@ -29,11 +34,14 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
     const [savedList, setSavedList] = useState<store.SavedConnection[]>([]);
     const [error, setError] = useState('');
     const [saving, setSaving] = useState(false);
+    const [testing, setTesting] = useState(false);
+    const [testResult, setTestResult] = useState<{ok: boolean; message: string} | null>(null);
 
     useEffect(() => {
         if (isOpen) {
             loadSaved();
             setError('');
+            setTestResult(null);
         }
     }, [isOpen]);
 
@@ -67,9 +75,17 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
     }
 
     function buildDsn(): {driver: string; dsn: string} | null {
+        if (rawDsnMode) {
+            if (!rawDsn.trim()) {
+                setError('Cole a DSN/link de conexão completo.');
+                return null;
+            }
+            return {driver, dsn: rawDsn.trim()};
+        }
+
         if (driver === 'sqlite') {
             if (!sqlitePath.trim()) {
-                setError('Selecione um arquivo de banco de dados SQLite.');
+                setError('Escolha ou digite o caminho de um arquivo de banco SQLite.');
                 return null;
             }
             return {driver: 'sqlite', dsn: sqlitePath.trim()};
@@ -91,6 +107,30 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
         return {driver: 'postgres', dsn};
     }
 
+    // Testa a conexão sem persistir nada — só abre e fecha. Existe pra dar
+    // confiança antes de salvar (evita salvar uma conexão com erro de
+    // digitação, ex. nome de banco errado).
+    async function handleTest() {
+        setError('');
+        setTestResult(null);
+        const built = buildDsn();
+        if (!built) return;
+
+        setTesting(true);
+        try {
+            await TestConnection(built.driver, built.dsn);
+            setTestResult({ok: true, message: 'Conexão bem-sucedida.'});
+        } catch (err) {
+            setTestResult({ok: false, message: String(err)});
+        } finally {
+            setTesting(false);
+        }
+    }
+
+    // Sempre valida a conexão antes de persistir (mesma checagem de
+    // handleTest) — salvar uma conexão quebrada silenciosamente já causou
+    // confusão real (precisava depois ir excluir manualmente na aba
+    // "Conexões Salvas").
     async function handleSave(connectAfter = false) {
         setError('');
         const trimmedName = name.trim();
@@ -104,6 +144,8 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
 
         setSaving(true);
         try {
+            await TestConnection(built.driver, built.dsn);
+
             const newId = await SaveConnection(trimmedName, built.driver, built.dsn);
             onConnectionsChanged();
 
@@ -116,11 +158,13 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                 setName('');
                 setSqlitePath('');
                 setPgPassword('');
+                setRawDsn('');
+                setTestResult(null);
                 await loadSaved();
                 setActiveTab('manage');
             }
         } catch (err) {
-            setError(`Erro ao salvar conexão: ${err}`);
+            setError(`Erro ao conectar — nada foi salvo: ${err}`);
         } finally {
             setSaving(false);
         }
@@ -181,7 +225,7 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                                 <button
                                     type="button"
                                     className={`driver-pill-btn ${driver === 'sqlite' ? 'active' : ''}`}
-                                    onClick={() => setDriver('sqlite')}
+                                    onClick={() => {setDriver('sqlite'); setTestResult(null);}}
                                 >
                                     <span className="driver-pill-title">SQLite</span>
                                     <span className="driver-pill-desc">Arquivo local (.db, .sqlite)</span>
@@ -189,7 +233,7 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                                 <button
                                     type="button"
                                     className={`driver-pill-btn ${driver === 'postgres' ? 'active' : ''}`}
-                                    onClick={() => setDriver('postgres')}
+                                    onClick={() => {setDriver('postgres'); setTestResult(null);}}
                                 >
                                     <span className="driver-pill-title">PostgreSQL</span>
                                     <span className="driver-pill-desc">Servidor de banco relacional</span>
@@ -208,15 +252,44 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                             />
                         </div>
 
-                        {driver === 'sqlite' ? (
+                        <div className="form-group">
+                            <button
+                                type="button"
+                                className="raw-dsn-toggle"
+                                onClick={() => {setRawDsnMode(v => !v); setTestResult(null); setError('');}}
+                            >
+                                {rawDsnMode ? '← Voltar a preencher campos separados' : 'Prefere colar a DSN/link de conexão direto? →'}
+                            </button>
+                        </div>
+
+                        {rawDsnMode ? (
+                            <div className="form-group">
+                                <label className="form-label">
+                                    DSN de Conexão Completa *
+                                </label>
+                                <input
+                                    className="input-control modal-input"
+                                    value={rawDsn}
+                                    onChange={e => setRawDsn(e.target.value)}
+                                    placeholder={driver === 'sqlite'
+                                        ? '/caminho/para/banco.db'
+                                        : 'postgres://usuario:senha@host:5432/banco?sslmode=disable'}
+                                />
+                                <span className="form-hint">
+                                    {driver === 'sqlite'
+                                        ? 'Caminho absoluto do arquivo SQLite.'
+                                        : 'Link completo de conexão — usuário e senha com caracteres especiais devem estar url-encoded.'}
+                                </span>
+                            </div>
+                        ) : driver === 'sqlite' ? (
                             <div className="form-group">
                                 <label className="form-label">Arquivo de Banco SQLite *</label>
                                 <div className="file-picker-field">
                                     <input
                                         className="input-control modal-input file-path-input"
                                         value={sqlitePath}
-                                        readOnly
-                                        placeholder="Nenhum arquivo selecionado..."
+                                        onChange={e => setSqlitePath(e.target.value)}
+                                        placeholder="Nenhum arquivo selecionado ou digite o caminho..."
                                     />
                                     <button
                                         type="button"
@@ -229,7 +302,7 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                                         Procurar arquivo...
                                     </button>
                                 </div>
-                                <span className="form-hint">Usa o seletor de arquivos nativo do sistema operacional.</span>
+                                <span className="form-hint">Use o seletor nativo ou digite o caminho manualmente.</span>
                             </div>
                         ) : (
                             <div className="postgres-form-grid">
@@ -294,6 +367,12 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                             </div>
                         )}
 
+                        {testResult && (
+                            <div className={`test-result-banner ${testResult.ok ? 'ok' : 'error'}`}>
+                                {testResult.ok ? '✓' : '✕'} {testResult.message}
+                            </div>
+                        )}
+
                         <div className="modal-footer">
                             <button type="button" className="btn btn-secondary" onClick={onClose} disabled={saving}>
                                 Cancelar
@@ -301,21 +380,30 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                             <button
                                 type="button"
                                 className="btn btn-secondary"
-                                onClick={() => handleSave(false)}
-                                disabled={saving}
+                                onClick={handleTest}
+                                disabled={saving || testing}
+                                title="Testa a conexão sem salvar nada"
                             >
-                                Salvar
+                                {testing ? 'Testando...' : 'Testar conexão'}
+                            </button>
+                            <button
+                                type="button"
+                                className="btn btn-secondary"
+                                onClick={() => handleSave(false)}
+                                disabled={saving || testing}
+                            >
+                                {saving ? 'Salvando...' : 'Salvar'}
                             </button>
                             <button
                                 type="button"
                                 className="btn btn-primary"
                                 onClick={() => handleSave(true)}
-                                disabled={saving}
+                                disabled={saving || testing}
                             >
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                     <path d="M12 2v8M4.93 10.93l1.41 1.41M2 18h2M20 18h2M19.07 10.93l-1.41 1.41M22 22H2M15 15l4 4M9 15l-4 4" />
                                 </svg>
-                                {saving ? 'Salvando...' : 'Salvar e Conectar'}
+                                {saving ? 'Conectando...' : 'Salvar e Conectar'}
                             </button>
                         </div>
                     </div>

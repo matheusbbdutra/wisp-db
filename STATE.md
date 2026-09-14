@@ -132,11 +132,20 @@ Gerenciamento de conexões testado na janela: "aparentemente OK" — sem detalha
 1. Autocomplete no Monaco alimentado pelo schema cache (Fase 2) — usar `ListSchemas`/`ListTables` (já cacheados) para alimentar `monaco.languages.registerCompletionItemProvider`.
 2. **Confirmação visual pelo usuário pendente** — todo o fluxo desta sessão (editor editável de novo, Ctrl+Shift+Enter, fetch em streaming com "Carregar mais", badge de duração) ainda não foi visto rodando na janela por ninguém. Prioridade alta pro próximo teste, já que envolveu um bug crítico (editor travado).
 
+## Feito em sessão seguinte (testar conexão sem salvar + colar DSN direto)
+Reportado pelo usuário: tentou salvar uma conexão Postgres com o nome do banco errado (`wisp_teste` em vez de `wisp_test`), o erro apareceu mas ele não tinha como saber se a conexão tinha sido salva mesmo assim — e pediu pra poder colar a DSN direto em vez de só preencher campos.
+1. ✅ **Bug real corrigido**: `ConnectionModal.handleSave(connectAfter=true)` ("Salvar e Conectar") chamava `SaveConnection` **antes** de tentar `ConnectSaved` — uma conexão com erro de digitação ficava salva mesmo falhando ao conectar. Corrigido: agora sempre chama `TestConnection` (novo binding) antes de `SaveConnection`, nos dois botões (Salvar e Salvar e Conectar) — nada é persistido se a conexão falhar.
+2. ✅ Novo binding `App.TestConnection(driver, dsn) error` — conecta e fecha imediatamente, sem sessão, sem persistência, timeout de 10s. Botão "Testar conexão" no modal, separado dos botões de salvar, para o usuário validar antes de decidir salvar.
+3. ✅ Modo de colar DSN direto: toggle "Prefere colar a DSN/link de conexão direto?" no modal — alterna entre os campos estruturados (host/porta/user/senha) e um único campo de DSN completa, para os dois drivers. Campo de caminho do SQLite também deixou de ser `readOnly` (dá pra digitar direto, não só usar o file picker).
+4. ✅ Validado com execução real: reproduzi o erro exato do usuário (`database "wisp_teste" does not exist`) via `TestConnection`, confirmei que com a nova ordem `SaveConnection` nunca é chamado nesse caso (0 conexões persistidas), e que o caminho correto (`wisp_test`) e casos de SQLite (arquivo existente/inexistente) continuam funcionando.
+5. ✅ Conferido o banco real do app (`~/.config/wisp/wisp.db`) — sem sobra de conexão quebrada da tentativa anterior do usuário.
+6. ✅ Build completo (`go vet`/`gofmt`/`tsc`/`wails build -tags webkit2_41`) validado.
+
 ## Pendências/perguntas em aberto
 - Nenhuma bloqueante.
 
 ## Última atualização
-2026-09-14 — Bug crítico do editor corrigido (travava em somente-leitura), Ctrl+Shift+Enter implementado, fetch em streaming real (cursor + lotes configuráveis) substituindo o Execute que trazia tudo de uma vez, bug latente de contexto de cancelamento corrigido junto. Tudo validado com execução real; falta confirmação visual.
+2026-09-14 — Ordem de salvar/testar conexão corrigida (nunca mais salva uma conexão quebrada), binding TestConnection + botão dedicado, modo de colar DSN direto além dos campos estruturados. Ainda pendente: confirmação visual do usuário de toda a leva anterior (editor, streaming/paginação) e desta leva (modal de conexão).
 
 
 
