@@ -36,7 +36,7 @@ Projeto criado em 2026-09-14. Fase: **Fase 1 em andamento** — skeleton Wails g
 4. ✅ Layout real (topbar de conexão + sidebar + editor + grid) substituindo a UI de teste manual anterior.
 5. ✅ Corrigido `tsconfig.json` (`moduleResolution: "Bundler"`) e `vite.config.ts` (`worker: {format: 'es'}`) exigidos pelo Monaco.
 6. ✅ Vulnerabilidade moderada em `dompurify` (transitiva via monaco-editor) corrigida via `overrides` no `package.json`, sem downgrade do monaco — `npm audit` limpo.
-7. ✅ Build completo (`wails build -tags webkit2_41`) validado, binário sobe sem crash. **UI não foi verificada visualmente por mim** — só confirmei que builda e o processo roda; pedi confirmação visual ao usuário.
+7. ✅ Build completo (`wails build -tags webkit2_41`) validado. **UI confirmada visualmente pelo usuário** (2026-09-14): topbar, sidebar, Monaco com highlight SQL e grid de resultado renderizando corretamente, Connect/Execute funcionando ponta a ponta contra `testdata/sample.db`.
 
 ## Próximos passos (não iniciados)
 1. Validar `PostgresDriver` contra instância Postgres real (Docker local) — só foi compilado, não exercitado.
