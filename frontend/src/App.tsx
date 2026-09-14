@@ -1,6 +1,6 @@
 import {useState} from 'react';
 import './App.css';
-import {Connect, Execute, Disconnect} from '../wailsjs/go/main/App';
+import {Connect, Execute, Disconnect, CancelQuery} from '../wailsjs/go/main/App';
 import SqlEditor from './components/SqlEditor';
 import ResultGrid from './components/ResultGrid';
 import Sidebar from './components/Sidebar';
@@ -16,6 +16,7 @@ function App() {
     const [status, setStatus] = useState('desconectado');
     const [columns, setColumns] = useState<string[]>([]);
     const [rows, setRows] = useState<any[][]>([]);
+    const [running, setRunning] = useState(false);
 
     async function handleConnect() {
         try {
@@ -41,6 +42,7 @@ function App() {
     }
 
     async function handleRun() {
+        setRunning(true);
         try {
             const result = await Execute(TAB_ID, query);
             setColumns(result.Columns ?? []);
@@ -48,7 +50,13 @@ function App() {
             setStatus(`ok — ${result.Rows?.length ?? 0} linha(s)`);
         } catch (err) {
             setStatus(`erro ao executar: ${err}`);
+        } finally {
+            setRunning(false);
         }
+    }
+
+    async function handleCancel() {
+        await CancelQuery(TAB_ID);
     }
 
     function handleSelectTable(schema: string, table: string) {
@@ -78,7 +86,9 @@ function App() {
                         <SqlEditor value={query} onChange={setQuery} onRunRequested={handleRun} readOnly={!connected} />
                     </div>
                     <div className="editor-actions">
-                        <button onClick={handleRun} disabled={!connected}>Executar (Ctrl+Enter)</button>
+                        {running
+                            ? <button onClick={handleCancel}>Cancelar</button>
+                            : <button onClick={handleRun} disabled={!connected}>Executar (Ctrl+Enter)</button>}
                     </div>
                     <ResultGrid columns={columns} rows={rows} />
                 </main>
