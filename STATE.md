@@ -66,15 +66,31 @@ Projeto criado em 2026-09-14. Fase: **Fase 1 em andamento** — skeleton Wails g
 ## Confirmado visualmente pelo usuário (2026-09-14)
 Redesign do agy + correção do bundle do Monaco renderizando corretamente: topbar organizada, chips de conexão salva, sidebar com empty state ilustrado, editor Monaco com highlight de SQL funcionando (confirma que o registro manual via `languages/definitions/sql/sql` substituiu o `basic-languages` agregado sem regressão), grid com empty state. Um glitch visual de hot-reload do `wails dev` apareceu momentaneamente e sumiu sozinho — não é bug do app.
 
+## Feito em sessão seguinte (Histórico de queries — binding + UI)
+1. ✅ `internal/store/store.go` — `QueryHistoryEntry` + `RecordQuery` (ignora `connectionID` vazio, sem erro) + `ListQueryHistory(limit)` (`ORDER BY executed_at DESC`).
+2. ✅ `app.go` — `Execute` grava histórico (`ok`/`error`, duração via `time.Since`, `rowCount`; falha só logada, retorno inalterado) + binding `GetQueryHistory(limit)`.
+3. ✅ `frontend/src/components/QueryHistory.tsx` — painel lateral direito com toggle no toolbar do editor, resumo truncado em 60 chars, status colorido, duração, horário; clique preenche o editor; atualiza após cada execução (`refreshToken`).
+4. ✅ Validado: `go build ./...`, `go vet ./...`, `gofmt` limpo, `wails build -tags webkit2_41` (bindings regenerados) e `npx tsc --noEmit` — todos passando.
+5. ✅ **Limitação corrigida por mim depois**: `RecordQuery` recebia `connectionID` sempre vazio → painel sempre vazio na prática. Adicionei `Session.ConnectionID` (`internal/session`), `App.connect` interno compartilhado por `Connect`/`ConnectSaved` que propaga o id, e `Execute` agora usa `s.ConnectionID`. Validado com execução real: conexão salva → executa → aparece no histórico (3 linhas); conexão ad-hoc → corretamente não grava nada.
+6. Nota histórica: o "ajuste colateral" mencionado abaixo (opencode adaptando `Manager.Open` pra 3 args) foi absorvido pela minha implementação completa do schema cache logo em seguida — `Manager.Open` agora tem assinatura final com `cacheKey` + `connectionID`.
+
+## Feito em sessão seguinte (Schema cache com TTL — Claude Code direto)
+1. ✅ `internal/schemacache/cache.go` — pacote novo: `Catalog{Schemas, Tables}`, cache em duas camadas (memória + `PersistentStore` opcional, satisfeito estruturalmente por `*store.Store` sem import cruzado), `Key(driver, dsn)` como SHA-256 (nunca DSN em texto puro), `Get`/`Set`/`Invalidate`.
+2. ✅ `internal/store/store.go` — `schema_cache` migrado de `connection_id` (FK) para `cache_key` (hash, sem FK — conexões ad-hoc também cacheiam). `GetSchemaCacheJSON`/`SetSchemaCacheJSON` (upsert com `ON CONFLICT`, respeita TTL)/`DeleteSchemaCacheJSON`.
+3. ✅ `internal/session/manager.go` — `Session.CacheKey` e `Session.ConnectionID`, `Manager.Open` com assinatura final (`tabID, driver, cacheKey, connectionID`).
+4. ✅ `app.go` — `App.schemaCache` (TTL 15min), `ListSchemas`/`ListTables` consultam cache antes de ir ao driver e gravam depois de um fetch real; `Execute` invalida o cache da conexão quando detecta DDL (`isDDL`: primeiro token `CREATE`/`ALTER`/`DROP`/`TRUNCATE`, checagem léxica simples, não parser); novo binding `RefreshSchema(tabID)` para invalidação manual.
+5. ✅ `frontend/src/components/Sidebar.tsx` — botão "Atualizar" agora chama `RefreshSchema` antes de `ListSchemas` (senão serviria do cache em vez de forçar fetch real) e limpa o estado de tabelas expandidas.
+6. ✅ Validado com execução real (não mock): miss inicial, hit em memória, hit via SQLite persistido simulando reinício do app, expiração por TTL (2s), invalidação manual, invalidação propagando pra camada persistente — os 6 cenários passaram.
+7. ✅ Build completo (`wails build -tags webkit2_41`) validado com histórico + schema cache juntos.
+
 ## Próximos passos (não iniciados)
-1. Data grid virtualizado real (Glide Data Grid) quando volume de linhas justificar.
-2. Autocomplete no Monaco alimentado pelo schema cache (Fase 2) — hoje o editor só tem highlighting léxico de SQL, sem language service próprio.
-3. Histórico de queries (`query_history`) — schema já existe no Store, sem binding/UI ainda.
-4. Schema cache com TTL (`schema_cache`) — hoje `ListSchemas`/`ListTables` sempre fazem fetch direto, sem cache em nenhuma camada.
+1. Data grid virtualizado real (Glide Data Grid) — **delegado ao agy**, prompt já entregue ao usuário, aguardando execução (ver relatório esperado em `docs/reports/agy-glide-data-grid.md`).
+2. Autocomplete no Monaco alimentado pelo schema cache (Fase 2) — agora que o cache existe de verdade, isso é o próximo passo natural: usar `ListSchemas`/`ListTables` (já cacheados) para alimentar `monaco.languages.registerCompletionItemProvider`.
+3. Nenhuma confirmação visual do usuário ainda sobre histórico de queries nem schema cache rodando na janela — só build/execução real verificados por mim, não visto na UI.
 
 ## Pendências/perguntas em aberto
 - Nenhuma bloqueante.
 
 ## Última atualização
-2026-09-14 — Botão de cancelamento (OpenCode) e redesign visual (agy) integrados; bug de bundle do Monaco (93 chunks/~14MB → 2 chunks/~3.2MB) encontrado na verificação e corrigido. Pendente: confirmação visual do usuário, incluindo highlight de SQL.
+2026-09-14 — Histórico de queries (OpenCode + correção de connectionID) e schema cache com TTL (Claude Code direto) implementados e validados com execução real. Glide Data Grid pendente de execução pelo usuário via agy.
 

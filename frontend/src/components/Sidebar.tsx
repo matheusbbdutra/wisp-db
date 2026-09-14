@@ -1,11 +1,13 @@
 import {useState} from 'react';
-import {ListSchemas, ListTables} from '../../wailsjs/go/main/App';
+import {ListSchemas, ListTables, RefreshSchema} from '../../wailsjs/go/main/App';
 import type {db} from '../../wailsjs/go/models';
 
 // Árvore de schemas/tabelas com introspecção lazy: só busca tabelas de um
 // schema quando ele é expandido, nunca faz dump completo do catálogo de
-// uma vez (ver docs/ARCHITECTURE.md, "Fluxo de metadados"). Cache de schema
-// (TTL + invalidação) é Fase 2 — aqui é sempre fetch on-demand.
+// uma vez (ver docs/ARCHITECTURE.md, "Fluxo de metadados"). ListSchemas/
+// ListTables consultam o schema cache (TTL + invalidação, ver
+// internal/schemacache) — "Atualizar" chama RefreshSchema primeiro pra
+// forçar um fetch real em vez de servir do cache.
 interface Props {
     tabId: string;
     connected: boolean;
@@ -18,11 +20,14 @@ export default function Sidebar({tabId, connected, onSelectTable}: Props) {
     const [expanded, setExpanded] = useState<Set<string>>(new Set());
     const [loading, setLoading] = useState(false);
 
-    async function loadSchemas() {
+    async function handleRefresh() {
         setLoading(true);
         try {
+            await RefreshSchema(tabId);
             const result = await ListSchemas(tabId);
             setSchemas(result ?? []);
+            setTablesBySchema({});
+            setExpanded(new Set());
         } finally {
             setLoading(false);
         }
@@ -63,7 +68,7 @@ export default function Sidebar({tabId, connected, onSelectTable}: Props) {
         <aside className="sidebar">
             <div className="sidebar-header">
                 <span className="sidebar-heading">Schemas & Tabelas</span>
-                <button className="sidebar-refresh-btn" onClick={loadSchemas} disabled={loading} title="Recarregar catálogo">
+                <button className="sidebar-refresh-btn" onClick={handleRefresh} disabled={loading} title="Recarregar catálogo (ignora o cache)">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" />
                     </svg>

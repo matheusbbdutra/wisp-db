@@ -15,10 +15,14 @@ export function Disconnect(arg1:string):Promise<void>;
 
 export function Execute(arg1:string,arg2:string):Promise<db.QueryResult>;
 
+export function GetQueryHistory(arg1:number):Promise<Array<store.QueryHistoryEntry>>;
+
 export function ListSavedConnections():Promise<Array<store.SavedConnection>>;
 
 export function ListSchemas(arg1:string):Promise<Array<string>>;
 
 export function ListTables(arg1:string,arg2:string):Promise<Array<db.Table>>;
+
+export function RefreshSchema(arg1:string):Promise<void>;
 
 export function SaveConnection(arg1:string,arg2:string,arg3:string):Promise<string>;

@@ -15,7 +15,15 @@ import (
 type Session struct {
 	TabID  string
 	Driver db.DatabaseDriver
-	cancel context.CancelFunc
+	// CacheKey identifica a conexão (driver+DSN) de forma estável para o
+	// schema cache (ver internal/schemacache) — nunca a DSN em texto puro.
+	CacheKey string
+	// ConnectionID é o id da conexão salva associada (store.SavedConnection),
+	// ou "" quando a sessão foi aberta por DSN direta sem SaveConnection —
+	// usado para registrar o histórico de queries (query_history) ligado à
+	// conexão certa.
+	ConnectionID string
+	cancel       context.CancelFunc
 }
 
 // Manager mantém o mapeamento tabId -> Session. Seguro para uso concorrente:
@@ -30,8 +38,10 @@ func NewManager() *Manager {
 }
 
 // Open registra uma nova sessão para tabId, encerrando qualquer sessão
-// anterior com o mesmo id (reconexão da mesma aba).
-func (m *Manager) Open(tabID string, driver db.DatabaseDriver) (context.Context, error) {
+// anterior com o mesmo id (reconexão da mesma aba). cacheKey identifica a
+// conexão para o schema cache (ver internal/schemacache); connectionID é o
+// id da conexão salva associada, ou "" para conexão por DSN direta.
+func (m *Manager) Open(tabID string, driver db.DatabaseDriver, cacheKey string, connectionID string) (context.Context, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -41,7 +51,7 @@ func (m *Manager) Open(tabID string, driver db.DatabaseDriver) (context.Context,
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	m.sessions[tabID] = &Session{TabID: tabID, Driver: driver, cancel: cancel}
+	m.sessions[tabID] = &Session{TabID: tabID, Driver: driver, CacheKey: cacheKey, ConnectionID: connectionID, cancel: cancel}
 	return ctx, nil
 }
 

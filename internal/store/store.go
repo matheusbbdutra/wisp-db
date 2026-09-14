@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS query_history (
 );
 
 CREATE TABLE IF NOT EXISTS schema_cache (
-	connection_id   TEXT PRIMARY KEY REFERENCES connections(id),
+	cache_key       TEXT PRIMARY KEY,
 	catalog_json    TEXT NOT NULL,
 	fetched_at      DATETIME NOT NULL,
 	ttl_expires_at  DATETIME NOT NULL
@@ -57,6 +57,18 @@ type SavedConnection struct {
 	Name      string
 	Driver    string
 	CreatedAt time.Time
+}
+
+// QueryHistoryEntry é uma execução registrada em query_history.
+type QueryHistoryEntry struct {
+	ID           int64
+	ConnectionID string
+	TabID        string
+	QueryText    string
+	Status       string
+	DurationMs   int64
+	RowCount     int
+	ExecutedAt   time.Time
 }
 
 // Store encapsula o *sql.DB do arquivo local do Wisp e o Vault usado para
@@ -140,5 +152,86 @@ func (s *Store) ResolveConnection(id string) (driver string, dsn string, err err
 // DeleteConnection remove uma conexão salva.
 func (s *Store) DeleteConnection(id string) error {
 	_, err := s.db.Exec(`DELETE FROM connections WHERE id = ?`, id)
+	return err
+}
+
+// RecordQuery grava uma execução em query_history. Um connectionID vazio
+// significa que a sessão ativa não está associada a nenhuma conexão salva
+// (Connect direto por DSN) — como connection_id é NOT NULL com FK para
+// connections(id), nesse caso nada é inserido e nil é retornado sem erro.
+func (s *Store) RecordQuery(connectionID, tabID, queryText, status string, durationMs int64, rowCount int) error {
+	if connectionID == "" {
+		return nil
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO query_history (connection_id, tab_id, query_text, duration_ms, status, row_count) VALUES (?, ?, ?, ?, ?, ?)`,
+		connectionID, tabID, queryText, durationMs, status, rowCount,
+	)
+	if err != nil {
+		return fmt.Errorf("gravando histórico de query: %w", err)
+	}
+	return nil
+}
+
+// ListQueryHistory retorna as últimas N entradas do histórico, da mais
+// recente para a mais antiga.
+func (s *Store) ListQueryHistory(limit int) ([]QueryHistoryEntry, error) {
+	rows, err := s.db.Query(
+		`SELECT id, connection_id, tab_id, query_text, executed_at, duration_ms, status, row_count FROM query_history ORDER BY executed_at DESC LIMIT ?`,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("listando histórico de queries: %w", err)
+	}
+	defer rows.Close()
+
+	var result []QueryHistoryEntry
+	for rows.Next() {
+		var e QueryHistoryEntry
+		if err := rows.Scan(&e.ID, &e.ConnectionID, &e.TabID, &e.QueryText, &e.ExecutedAt, &e.DurationMs, &e.Status, &e.RowCount); err != nil {
+			return nil, err
+		}
+		result = append(result, e)
+	}
+	return result, rows.Err()
+}
+
+// GetSchemaCacheJSON, SetSchemaCacheJSON e DeleteSchemaCacheJSON implementam
+// a camada persistente do schema cache (ver internal/schemacache.Cache —
+// este Store satisfaz schemacache.PersistentStore estruturalmente, sem
+// import direto entre os pacotes). cacheKey nunca é a DSN em texto puro —
+// é um hash calculado pelo chamador (ver schemacache.Key).
+func (s *Store) GetSchemaCacheJSON(cacheKey string) (catalogJSON string, found bool, err error) {
+	var ttlExpiresAt time.Time
+	err = s.db.QueryRow(
+		`SELECT catalog_json, ttl_expires_at FROM schema_cache WHERE cache_key = ?`, cacheKey,
+	).Scan(&catalogJSON, &ttlExpiresAt)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("lendo schema cache: %w", err)
+	}
+	if time.Now().After(ttlExpiresAt) {
+		return "", false, nil
+	}
+	return catalogJSON, true, nil
+}
+
+func (s *Store) SetSchemaCacheJSON(cacheKey string, catalogJSON string, ttl time.Duration) error {
+	now := time.Now()
+	_, err := s.db.Exec(
+		`INSERT INTO schema_cache (cache_key, catalog_json, fetched_at, ttl_expires_at) VALUES (?, ?, ?, ?)
+		 ON CONFLICT(cache_key) DO UPDATE SET catalog_json = excluded.catalog_json, fetched_at = excluded.fetched_at, ttl_expires_at = excluded.ttl_expires_at`,
+		cacheKey, catalogJSON, now, now.Add(ttl),
+	)
+	if err != nil {
+		return fmt.Errorf("gravando schema cache: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) DeleteSchemaCacheJSON(cacheKey string) error {
+	_, err := s.db.Exec(`DELETE FROM schema_cache WHERE cache_key = ?`, cacheKey)
 	return err
 }

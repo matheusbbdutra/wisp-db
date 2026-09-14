@@ -75,6 +75,51 @@ export namespace db {
 
 export namespace store {
 	
+	export class QueryHistoryEntry {
+	    ID: number;
+	    ConnectionID: string;
+	    TabID: string;
+	    QueryText: string;
+	    Status: string;
+	    DurationMs: number;
+	    RowCount: number;
+	    // Go type: time
+	    ExecutedAt: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new QueryHistoryEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ID = source["ID"];
+	        this.ConnectionID = source["ConnectionID"];
+	        this.TabID = source["TabID"];
+	        this.QueryText = source["QueryText"];
+	        this.Status = source["Status"];
+	        this.DurationMs = source["DurationMs"];
+	        this.RowCount = source["RowCount"];
+	        this.ExecutedAt = this.convertValues(source["ExecutedAt"], null);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class SavedConnection {
 	    ID: string;
 	    Name: string;

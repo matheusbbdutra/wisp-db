@@ -26,6 +26,10 @@ export function Execute(arg1, arg2) {
   return window['go']['main']['App']['Execute'](arg1, arg2);
 }
 
+export function GetQueryHistory(arg1) {
+  return window['go']['main']['App']['GetQueryHistory'](arg1);
+}
+
 export function ListSavedConnections() {
   return window['go']['main']['App']['ListSavedConnections']();
 }
@@ -36,6 +40,10 @@ export function ListSchemas(arg1) {
 
 export function ListTables(arg1, arg2) {
   return window['go']['main']['App']['ListTables'](arg1, arg2);
+}
+
+export function RefreshSchema(arg1) {
+  return window['go']['main']['App']['RefreshSchema'](arg1);
 }
 
 export function SaveConnection(arg1, arg2, arg3) {

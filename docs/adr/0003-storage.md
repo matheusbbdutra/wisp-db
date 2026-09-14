@@ -21,6 +21,17 @@ schema_cache(connection_id, catalog_json, fetched_at, ttl_expires_at)
 - `encrypted_secret`: cifrado com chave derivada; chave mestra fica no keychain do SO (`go-keyring` ou equivalente), nunca em texto plano no SQLite.
 - `catalog_json`: blob JSON por conexão — aceitável aqui porque é write-once/read-often por conexão, não uma entidade relacional com múltiplos writers concorrentes.
 
+## Atualização 2 (schema cache, 2026-09-14)
+`schema_cache` também mudou do rascunho original: em vez de `connection_id
+TEXT PRIMARY KEY REFERENCES connections(id)`, a chave é `cache_key` — um
+hash SHA-256 de `driver|dsn` (ver `internal/schemacache.Key`), sem FK.
+Motivo: conexões ad-hoc (por DSN direta, sem `SaveConnection`) também se
+beneficiam de cache, e não têm `connection_id`. Implementado em
+`internal/schemacache` (cache em duas camadas: memória + `Store`, TTL de 15
+minutos, invalidação manual e por DDL detectado — ver `app.go`, `isDDL`).
+Validado com execução real: hit/miss, persistência entre "reinícios"
+simulados do app, expiração por TTL e invalidação manual/propagada.
+
 ## Atualização (implementação real, 2026-09-14)
 O schema de `connections` implementado difere do rascunho acima: em vez de
 `host/port/database/username` separados, a **DSN completa é cifrada como um

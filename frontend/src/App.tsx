@@ -4,6 +4,7 @@ import {Connect, Execute, Disconnect, CancelQuery} from '../wailsjs/go/main/App'
 import SqlEditor from './components/SqlEditor';
 import ResultGrid from './components/ResultGrid';
 import Sidebar from './components/Sidebar';
+import QueryHistory from './components/QueryHistory';
 import ConnectionBar from './components/ConnectionBar';
 
 const TAB_ID = 'tab-dev-1';
@@ -17,6 +18,8 @@ function App() {
     const [columns, setColumns] = useState<string[]>([]);
     const [rows, setRows] = useState<any[][]>([]);
     const [running, setRunning] = useState(false);
+    const [showHistory, setShowHistory] = useState(false);
+    const [historyToken, setHistoryToken] = useState(0);
 
     async function handleConnect() {
         try {
@@ -52,6 +55,7 @@ function App() {
             setStatus(`erro ao executar: ${err}`);
         } finally {
             setRunning(false);
+            setHistoryToken(t => t + 1);
         }
     }
 
@@ -105,11 +109,22 @@ function App() {
                             )}
                         </div>
                         <div className="editor-actions-right">
+                            <button
+                                className="btn btn-secondary"
+                                onClick={() => setShowHistory(v => !v)}
+                                title="Mostrar/ocultar histórico de queries"
+                            >
+                                Histórico
+                            </button>
                             <span title="ID da sessão ativa">{TAB_ID}</span>
                         </div>
                     </div>
                     <ResultGrid columns={columns} rows={rows} />
                 </main>
+
+                {showHistory && (
+                    <QueryHistory onSelectQuery={setQuery} refreshToken={historyToken} />
+                )}
             </div>
         </div>
     )
