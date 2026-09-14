@@ -92,10 +92,12 @@ Redesign do agy + correção do bundle do Monaco renderizando corretamente: topb
 6. ✅ Relatório gerado em `docs/reports/agy-connection-management.md`, e também via memory-mcp (`wisp-agy-connection-management-result`, agent=antigravity) — primeira vez usando o MCP compartilhado pra ida e volta da delegação, funcionou.
 7. ✅ **Verificado independentemente por mim** (não só aceito o relatório): reli o diff completo (`ConnectionModal.tsx`, `ConnectionBar.tsx`, `App.tsx`, `app.go`) — sem código morto deixado para trás. Rebuild próprio (`go vet`/`gofmt`/`tsc`/`wails build`) todos limpos. **Validação crítica da montagem de DSN**: reproduzi o `encodeURIComponent` real do JS em Go (não confundir com `url.QueryEscape`, que usa `+` em vez de `%20` para espaço — errei isso na primeira tentativa e o teste falhou até corrigir) e testei senha com todos os caracteres perigosos (`@ : / espaço ! * ' ( )`) — sobrevive ida e volta perfeita pelo `pgx.ParseConfig`. Testei o fluxo completo (montar DSN → `SaveConnection` → `ResolveConnection` → `Connect` → `Execute`) contra o Postgres real do Docker: funcionou de ponta a ponta.
 
+## Confirmado visualmente pelo usuário (parcial, 2026-09-15)
+Gerenciamento de conexões testado na janela: "aparentemente OK" — sem detalhamento de quais fluxos específicos (modal, file picker, select) foram exercitados. Tratar como confirmação fraca, não equivalente às confirmações anteriores (que tiveram prints).
+
 ## Próximos passos (não iniciados)
-1. Data grid virtualizado real (Glide Data Grid) — ver relatório esperado em `docs/reports/agy-glide-data-grid.md`.
+1. **Data grid virtualizado real (Glide Data Grid)** — prompt já entregue ao usuário (ver histórico da conversa), **ainda não executado** — `docs/reports/agy-glide-data-grid.md` não existe.
 2. Autocomplete no Monaco alimentado pelo schema cache (Fase 2) — usar `ListSchemas`/`ListTables` (já cacheados) para alimentar `monaco.languages.registerCompletionItemProvider`.
-3. Confirmação visual pelo usuário das novas telas de gerenciamento de conexões.
 
 ## Pendências/perguntas em aberto
 - Nenhuma bloqueante.
