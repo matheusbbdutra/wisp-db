@@ -9,8 +9,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "monaco-editor": "^0.56.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
+  },
+  "overrides": {
+    "dompurify": "^3.4.15"
   },
   "devDependencies": {
     "@types/react": "^19.1.0",

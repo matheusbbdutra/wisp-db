@@ -97,3 +97,22 @@ func (a *App) CancelQuery(tabID string) error {
 func (a *App) Disconnect(tabID string) error {
 	return a.sessions.Close(tabID)
 }
+
+// ListSchemas retorna os schemas visíveis na conexão da aba tabId (usado
+// pela sidebar — introspecção lazy, ver docs/ARCHITECTURE.md).
+func (a *App) ListSchemas(tabID string) ([]string, error) {
+	s, err := a.sessions.Get(tabID)
+	if err != nil {
+		return nil, err
+	}
+	return s.Driver.ListSchemas(a.ctx)
+}
+
+// ListTables retorna as tabelas de um schema na conexão da aba tabId.
+func (a *App) ListTables(tabID string, schema string) ([]db.Table, error) {
+	s, err := a.sessions.Get(tabID)
+	if err != nil {
+		return nil, err
+	}
+	return s.Driver.ListTables(a.ctx, schema)
+}

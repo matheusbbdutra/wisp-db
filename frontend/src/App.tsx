@@ -1,10 +1,10 @@
 import {useState} from 'react';
 import './App.css';
 import {Connect, Execute, Disconnect} from '../wailsjs/go/main/App';
+import SqlEditor from './components/SqlEditor';
+import ResultGrid from './components/ResultGrid';
+import Sidebar from './components/Sidebar';
 
-// UI mínima de teste manual do skeleton (Fase 1). Editor Monaco e data grid
-// virtualizado entram nas Fases 1-2 reais (ver docs/ROADMAP.md) — isto aqui
-// só existe para validar Connect/Execute/Disconnect ponta a ponta.
 const TAB_ID = 'tab-dev-1';
 
 function App() {
@@ -45,11 +45,13 @@ function App() {
         }
     }
 
+    function handleSelectTable(schema: string, table: string) {
+        setQuery(`SELECT * FROM ${schema === 'main' ? table : `${schema}.${table}`} LIMIT 200`);
+    }
+
     return (
         <div id="App">
-            <h2>Wisp — teste manual do skeleton</h2>
-
-            <div className="panel">
+            <header className="topbar">
                 <select value={driver} onChange={e => setDriver(e.target.value)} disabled={connected}>
                     <option value="sqlite">sqlite</option>
                     <option value="postgres">postgres</option>
@@ -63,30 +65,22 @@ function App() {
                 {!connected
                     ? <button onClick={handleConnect}>Conectar</button>
                     : <button onClick={handleDisconnect}>Desconectar</button>}
+                <span className="status">{status}</span>
+            </header>
+
+            <div className="workspace">
+                <Sidebar tabId={TAB_ID} connected={connected} onSelectTable={handleSelectTable} />
+
+                <main className="main-panel">
+                    <div className="editor-pane">
+                        <SqlEditor value={query} onChange={setQuery} onRunRequested={handleRun} readOnly={!connected} />
+                    </div>
+                    <div className="editor-actions">
+                        <button onClick={handleRun} disabled={!connected}>Executar (Ctrl+Enter)</button>
+                    </div>
+                    <ResultGrid columns={columns} rows={rows} />
+                </main>
             </div>
-
-            <textarea
-                rows={4}
-                value={query}
-                onChange={e => setQuery(e.target.value)}
-                disabled={!connected}
-            />
-            <button onClick={handleRun} disabled={!connected}>Executar</button>
-
-            <p className="status">{status}</p>
-
-            {columns.length > 0 && (
-                <table>
-                    <thead>
-                        <tr>{columns.map(c => <th key={c}>{c}</th>)}</tr>
-                    </thead>
-                    <tbody>
-                        {rows.map((row, i) => (
-                            <tr key={i}>{row.map((v, j) => <td key={j}>{String(v)}</td>)}</tr>
-                        ))}
-                    </tbody>
-                </table>
-            )}
         </div>
     )
 }

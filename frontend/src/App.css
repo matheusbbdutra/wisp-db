@@ -1,33 +1,100 @@
 #App {
-    min-height: 100vh;
-    padding: 1.5rem;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
     text-align: left;
 }
 
-.panel {
+.topbar {
     display: flex;
+    align-items: center;
     gap: 0.5rem;
-    margin-bottom: 0.75rem;
+    padding: 0.5rem;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.3);
 }
 
-.panel input {
+.topbar input {
     flex: 1;
 }
 
-textarea {
+.topbar .status {
+    margin-left: auto;
+    font-size: 0.85rem;
+    opacity: 0.75;
+}
+
+.workspace {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+}
+
+.sidebar {
+    width: 240px;
+    border-right: 1px solid rgba(128, 128, 128, 0.3);
+    overflow-y: auto;
+    padding: 0.5rem;
+}
+
+.sidebar-empty {
+    opacity: 0.6;
+    font-size: 0.85rem;
+}
+
+.sidebar ul {
+    list-style: none;
+    margin: 0;
+    padding-left: 0.75rem;
+}
+
+.sidebar-refresh {
     width: 100%;
-    font-family: monospace;
     margin-bottom: 0.5rem;
 }
 
-.status {
-    opacity: 0.8;
+.tree-node {
+    cursor: pointer;
+    padding: 2px 0;
+    font-weight: 600;
+}
+
+.tree-leaf {
+    cursor: pointer;
+    padding: 2px 0;
     font-size: 0.9rem;
+    opacity: 0.85;
+}
+
+.tree-leaf:hover, .tree-node:hover {
+    opacity: 1;
+    text-decoration: underline;
+}
+
+.main-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.editor-pane {
+    height: 200px;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.3);
+}
+
+.editor-actions {
+    padding: 0.4rem 0.5rem;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.3);
+}
+
+.result-grid {
+    flex: 1;
+    overflow: auto;
+    padding: 0.5rem;
 }
 
 table {
     border-collapse: collapse;
-    margin-top: 1rem;
     width: 100%;
 }
 
@@ -35,4 +102,5 @@ th, td {
     border: 1px solid rgba(128, 128, 128, 0.4);
     padding: 4px 8px;
     text-align: left;
+    font-size: 0.9rem;
 }

@@ -17,3 +17,11 @@ export function Disconnect(arg1) {
 export function Execute(arg1, arg2) {
   return window['go']['main']['App']['Execute'](arg1, arg2);
 }
+
+export function ListSchemas(arg1) {
+  return window['go']['main']['App']['ListSchemas'](arg1);
+}
+
+export function ListTables(arg1, arg2) {
+  return window['go']['main']['App']['ListTables'](arg1, arg2);
+}

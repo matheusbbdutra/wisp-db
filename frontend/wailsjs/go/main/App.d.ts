@@ -9,3 +9,7 @@ export function Connect(arg1:string,arg2:string,arg3:string):Promise<void>;
 export function Disconnect(arg1:string):Promise<void>;
 
 export function Execute(arg1:string,arg2:string):Promise<db.QueryResult>;
+
+export function ListSchemas(arg1:string):Promise<Array<string>>;
+
+export function ListTables(arg1:string,arg2:string):Promise<Array<db.Table>>;

@@ -29,11 +29,21 @@ Projeto criado em 2026-09-14. Fase: **Fase 1 em andamento** — skeleton Wails g
 5. ✅ UI de teste manual em `frontend/src/App.tsx` (não é a UI final — Monaco/Glide Data Grid ainda não entraram) para validar o fluxo ponta a ponta pela janela.
 6. ✅ `testdata/seed.sql` — script reproduzível pra gerar banco SQLite de teste (`sqlite3 testdata/sample.db < testdata/seed.sql`).
 
+## Feito em sessão seguinte (UI real com Monaco + sidebar)
+1. ✅ `frontend/src/components/SqlEditor.tsx` — Monaco Editor bundlado 100% local (sem CDN, workers via `?worker` do Vite), Ctrl+Enter executa.
+2. ✅ `frontend/src/components/Sidebar.tsx` — árvore de schemas/tabelas com introspecção lazy real (`ListSchemas`/`ListTables`, novos bindings em `app.go`), clique em tabela preenche `SELECT * FROM ... LIMIT 200` no editor.
+3. ✅ `frontend/src/components/ResultGrid.tsx` — tabela de resultado simples (ainda não é Glide Data Grid virtualizado — fica para quando o volume de linhas justificar).
+4. ✅ Layout real (topbar de conexão + sidebar + editor + grid) substituindo a UI de teste manual anterior.
+5. ✅ Corrigido `tsconfig.json` (`moduleResolution: "Bundler"`) e `vite.config.ts` (`worker: {format: 'es'}`) exigidos pelo Monaco.
+6. ✅ Vulnerabilidade moderada em `dompurify` (transitiva via monaco-editor) corrigida via `overrides` no `package.json`, sem downgrade do monaco — `npm audit` limpo.
+7. ✅ Build completo (`wails build -tags webkit2_41`) validado, binário sobe sem crash. **UI não foi verificada visualmente por mim** — só confirmei que builda e o processo roda; pedi confirmação visual ao usuário.
+
 ## Próximos passos (não iniciados)
 1. Validar `PostgresDriver` contra instância Postgres real (Docker local) — só foi compilado, não exercitado.
 2. Credential Vault (cifragem de `encrypted_secret` + chave mestra no keychain do SO — `go-keyring` é candidato, não validado em profundidade ainda).
-3. UI real: Monaco Editor + Glide Data Grid substituindo a UI de teste manual atual.
+3. Data grid virtualizado real (Glide Data Grid) quando volume de linhas justificar.
 4. Persistir conexões testadas no Store (`connections` table) — hoje `Connect` não grava nada, é só sessão em memória.
+5. Autocomplete no Monaco alimentado pelo schema cache (Fase 2) — hoje o editor só tem highlighting léxico de SQL, sem language service próprio.
 
 ## Pendências/perguntas em aberto
 - Nenhuma bloqueante. Próxima decisão real é a lib de keychain cross-platform ao implementar o Credential Vault.
