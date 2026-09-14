@@ -95,14 +95,28 @@ Redesign do agy + correção do bundle do Monaco renderizando corretamente: topb
 ## Confirmado visualmente pelo usuário (parcial, 2026-09-15)
 Gerenciamento de conexões testado na janela: "aparentemente OK" — sem detalhamento de quais fluxos específicos (modal, file picker, select) foram exercitados. Tratar como confirmação fraca, não equivalente às confirmações anteriores (que tiveram prints).
 
+## Feito em sessão seguinte (Glide Data Grid virtualizado — agy)
+1. ✅ Substituição da tabela HTML simples em `frontend/src/components/ResultGrid.tsx` por `<DataEditor>` do `@glideapps/glide-data-grid`, 100% offline (sem CDN).
+2. ✅ Mantida rigorosamente a interface de props (`columns: string[], rows: any[][]`) — nenhuma mudança necessária em `App.tsx`.
+3. ✅ Mapeamento completo do tema escuro integrado com as CSS properties de `App.css` (`darkTheme`), suporte nativo a colunas redimensionáveis (`onColumnResize`) e coluna de índice fixa (`rowMarkers="number"`).
+4. ✅ Tratamento visual diferenciado de valores `NULL` com `themeOverride` (itálico + tom âmbar `#d97706`) diretamente no canvas.
+5. ✅ Mantidos o Empty State ilustrado e a toolbar de contagem de linhas e colunas.
+6. ✅ Impacto de bundle rigorosamente medido: aumento de apenas ~450 kB no bundle total de produção (`dist/assets` foi de ~3.16 MB para ~3.61 MB), sem inchaço indesejado.
+7. ✅ Validação completa: `npx tsc --noEmit` (código 0), `npm run build` (código 0) e `wails build -tags webkit2_41` (código 0, executável compilado em 10.7s).
+8. ✅ Relatório gerado em `docs/reports/agy-glide-data-grid.md`, e via memory-mcp (`wisp-agy-glide-data-grid-result`).
+9. ✅ **Verificado independentemente por mim**: tamanho de bundle real medido bate exatamente com o relatório (~3.61MB total, editor.worker 272.76KB + css 106.55KB + index.js 3214.61KB + overlays ~20KB — +450KB sobre a baseline, nada escondido). `lodash`/`marked`/`react-responsive-carousel` no `package.json` investigados e confirmados como peerDependencies reais do `@glideapps/glide-data-grid` (não são lixo adicionado à toa). `.npmrc` novo (`legacy-peer-deps=true`) é benigno — necessário porque a lib declara peer range de React 16-18 e o projeto usa React 19.
+10. ⚠️ **Achado e corrigido por mim**: `.result-grid-scroll`/`.result-table`/`.cell-null` etc. ficaram como CSS morto em `App.css` (a tabela HTML antiga foi substituída no `.tsx` mas o CSS correspondente não foi removido) — confirmei via grep que nenhum `.tsx` referencia mais essas classes, removi o bloco inteiro, rebuild revalidado.
+11. ✅ Testado volume real (não só visual): 50.000 linhas via Postgres real (`generate_series`) executadas e escaneadas pelo `PostgresDriver` em ~21ms no backend — confirma que o gargalo de volume grande não está na camada de dados, só falta confirmação visual de que o canvas do Glide Data Grid renderiza isso suave na janela.
+
 ## Próximos passos (não iniciados)
-1. **Data grid virtualizado real (Glide Data Grid)** — prompt já entregue ao usuário (ver histórico da conversa), **ainda não executado** — `docs/reports/agy-glide-data-grid.md` não existe.
-2. Autocomplete no Monaco alimentado pelo schema cache (Fase 2) — usar `ListSchemas`/`ListTables` (já cacheados) para alimentar `monaco.languages.registerCompletionItemProvider`.
+1. Autocomplete no Monaco alimentado pelo schema cache (Fase 2) — usar `ListSchemas`/`ListTables` (já cacheados) para alimentar `monaco.languages.registerCompletionItemProvider`.
+2. **Confirmação visual pelo usuário pendente** — grid com volume grande (ex. `SELECT * FROM generate_series(1, 50000)`) rodando suave na janela do Wisp ainda não foi visto por ninguém.
 
 ## Pendências/perguntas em aberto
 - Nenhuma bloqueante.
 
 ## Última atualização
-2026-09-14 — Reformulação completa do gerenciamento de conexões (modal estruturado + file picker SQLite) implementada e validada.
+2026-09-14 — Glide Data Grid virtualizado (@glideapps/glide-data-grid) implementado e validado com sucesso.
+
 
 
