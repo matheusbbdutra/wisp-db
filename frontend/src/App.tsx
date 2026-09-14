@@ -12,6 +12,12 @@ const TAB_ID = 'tab-dev-1';
 function App() {
     const [driver, setDriver] = useState('sqlite');
     const [dsn, setDsn] = useState('/home/matheusdutra/Projects/wisp/testdata/sample.db');
+    // Lembra o último DSN digitado por driver — trocar sqlite<->postgres no
+    // dropdown não deve perder o que já foi digitado em cada um (mas também
+    // nunca mistura os dois: cada driver tem seu próprio DSN lembrado).
+    const [dsnByDriver, setDsnByDriver] = useState<Record<string, string>>({
+        sqlite: '/home/matheusdutra/Projects/wisp/testdata/sample.db',
+    });
     const [query, setQuery] = useState('SELECT * FROM customers ORDER BY id');
     const [connected, setConnected] = useState(false);
     const [status, setStatus] = useState('desconectado');
@@ -63,6 +69,17 @@ function App() {
         await CancelQuery(TAB_ID);
     }
 
+    function handleDriverChange(newDriver: string) {
+        setDsnByDriver(prev => ({...prev, [driver]: dsn}));
+        setDriver(newDriver);
+        setDsn(dsnByDriver[newDriver] ?? '');
+    }
+
+    function handleDsnChange(newDsn: string) {
+        setDsn(newDsn);
+        setDsnByDriver(prev => ({...prev, [driver]: newDsn}));
+    }
+
     function handleSelectTable(schema: string, table: string) {
         setQuery(`SELECT * FROM ${schema === 'main' ? table : `${schema}.${table}`} LIMIT 200`);
     }
@@ -75,8 +92,8 @@ function App() {
                 dsn={dsn}
                 connected={connected}
                 status={status}
-                onDriverChange={setDriver}
-                onDsnChange={setDsn}
+                onDriverChange={handleDriverChange}
+                onDsnChange={handleDsnChange}
                 onConnect={handleConnect}
                 onDisconnect={handleDisconnect}
                 onConnected={handleConnected}

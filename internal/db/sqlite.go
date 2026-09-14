@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -19,7 +21,25 @@ func NewSQLiteDriver() *SQLiteDriver {
 	return &SQLiteDriver{}
 }
 
+// Connect exige que o arquivo já exista — o driver subjacente (database/sql
+// + modernc.org/sqlite) cria silenciosamente um banco novo vazio se o
+// caminho não existir, o que faz "Conectar" a um caminho errado parecer
+// bem-sucedido e só falhar depois, de forma confusa (ex.: "no such table"),
+// em vez de avisar na hora. ":memory:" é a exceção óbvia (não é arquivo).
 func (d *SQLiteDriver) Connect(ctx context.Context, dsn string) error {
+	if dsn != ":memory:" {
+		path := dsn
+		if idx := strings.IndexByte(path, '?'); idx >= 0 {
+			path = path[:idx]
+		}
+		if _, err := os.Stat(path); err != nil {
+			if os.IsNotExist(err) {
+				return fmt.Errorf("arquivo sqlite não encontrado: %s", path)
+			}
+			return fmt.Errorf("verificando arquivo sqlite %q: %w", path, err)
+		}
+	}
+
 	pool, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return fmt.Errorf("abrindo sqlite %q: %w", dsn, err)

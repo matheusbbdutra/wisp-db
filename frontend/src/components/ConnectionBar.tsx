@@ -60,14 +60,7 @@ export default function ConnectionBar({
                 <select
                     className="input-control driver-select"
                     value={driver}
-                    onChange={e => {
-                        // Limpa a DSN ao trocar de driver — um DSN de SQLite
-                        // (caminho de arquivo) nunca é válido para Postgres e
-                        // vice-versa; manter o valor antigo só gera erro de
-                        // parse confuso no momento de conectar.
-                        onDriverChange(e.target.value);
-                        onDsnChange('');
-                    }}
+                    onChange={e => onDriverChange(e.target.value)}
                     disabled={connected}
                     title="Dialeto de banco de dados"
                 >
