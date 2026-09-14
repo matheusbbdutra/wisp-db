@@ -32,7 +32,9 @@ build() {
   export HOME="$srcdir"
   # webkit2_41: este sistema (Arch) só tem webkit2gtk-4.1, não 4.0 — ver
   # README.md e docs/adr para o porquê dessa tag ser obrigatória aqui.
-  wails build -tags webkit2_41 -clean
+  # -trimpath: evita embutir o caminho absoluto de $srcdir no binário final
+  # (detectado por makepkg: "pacote contém referência a $srcdir").
+  wails build -tags webkit2_41 -clean -trimpath
 }
 
 package() {
