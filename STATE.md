@@ -141,11 +141,21 @@ Reportado pelo usuário: tentou salvar uma conexão Postgres com o nome do banco
 5. ✅ Conferido o banco real do app (`~/.config/wisp/wisp.db`) — sem sobra de conexão quebrada da tentativa anterior do usuário.
 6. ✅ Build completo (`go vet`/`gofmt`/`tsc`/`wails build -tags webkit2_41`) validado.
 
+## Feito em sessão seguinte (bug crítico: conexão morria ao rodar query sem esgotar a anterior)
+Reportado pelo usuário: `erro ao executar: failed to deallocate cached statement(s): conn closed` ao rodar uma query, e também dificuldade de editar o campo "buscar N por vez" (não deixava apagar pra digitar "50000").
+
+1. ✅ **Causa raiz encontrada com certeza** (não suposição — 5 scripts de verificação real contra Postgres real até isolar): `session.Manager.StartQuery` cancelava automaticamente o `QueryCtx` da query anterior toda vez que uma nova query começava — **mesmo que o cursor da anterior ainda estivesse aberto** (usuário só carregou os primeiros 200 de um resultado maior e rodou outra query sem esgotar a primeira, fluxo normal de uso). Confirmado que cancelar o `ctx` de uma query com cursor genuinamente aberto faz o `pgx` fechar a conexão inteira como efeito colateral de segurança do protocolo — comportamento documentado dele, não bug do pgx.
+2. ✅ **Corrigido**: `StartQuery` não cancela mais o `QueryCtx` anterior — `ExecuteStreaming` já libera o cursor anterior sozinho via `CloseCursor()` interno, no nível SQL, sem tocar em `ctx`. Confirmado com execução real que isso resolve o cenário exato (query 1 com cursor aberto → query 2 → funciona normal, sem "conn closed").
+3. ✅ **`Cancel()` também corrigido**: não cancela mais `QueryCtx` — só dispara `CancelRunningQuery` (nativo). Validado que isso sozinho desbloqueia um `FetchNext` genuinamente bloqueado (~9ms pra abortar um fetch de milhões de linhas) **e a conexão sobrevive**, ao contrário de cancelar via `ctx` (que também mata a conexão). Limitação conhecida documentada no código: SQLite não tem cancelamento nativo, cancelar uma query SQLite em andamento não é totalmente suportado hoje (impacto baixo — queries locais costumam ser rápidas).
+4. ✅ **Bug do campo "buscar N por vez" corrigido**: `Number('') || 200` sempre voltava pra 200 no meio da digitação (assim que o campo ficava vazio), impossibilitando trocar o valor. Corrigido com estado de texto separado (`batchSizeInput`) do número válido (`batchSize`), só reconciliando no blur se o campo ficar inválido.
+5. ✅ Validado end-to-end com `session.Manager` real (não só os drivers isolados): cenário completo — query 1 com cursor aberto → query 2 → Cancelar numa query 3 em voo → query 4 → tudo funcionou sem erro.
+6. ✅ Build completo (`go vet`/`gofmt`/`tsc`/`wails build -tags webkit2_41`) validado.
+
 ## Pendências/perguntas em aberto
 - Nenhuma bloqueante.
 
 ## Última atualização
-2026-09-14 — Ordem de salvar/testar conexão corrigida (nunca mais salva uma conexão quebrada), binding TestConnection + botão dedicado, modo de colar DSN direto além dos campos estruturados. Ainda pendente: confirmação visual do usuário de toda a leva anterior (editor, streaming/paginação) e desta leva (modal de conexão).
+2026-09-14 — Bug crítico de conexão Postgres morrendo corrigido (causa raiz: cancelamento de ctx desnecessário no fluxo normal de trocar de query), campo de tamanho de lote editável corrigido. Ainda pendente: confirmação visual do usuário de toda a leva de mudanças recentes (editor, streaming/paginação, modal de conexão, estas duas últimas correções).
 
 
 

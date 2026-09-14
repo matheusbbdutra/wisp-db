@@ -21,6 +21,11 @@ function App() {
     const [fetching, setFetching] = useState(false);
     const [durationMs, setDurationMs] = useState<number | null>(null);
     const [batchSize, setBatchSize] = useState(DEFAULT_BATCH_SIZE);
+    // Texto bruto do campo, separado do número válido (batchSize) — permite
+    // apagar o campo pra digitar um novo valor sem ele "saltar" de volta pro
+    // default a cada tecla (bug real: Number('') || DEFAULT era sempre 200
+    // no meio da digitação, nunca dava pra trocar por um número novo).
+    const [batchSizeInput, setBatchSizeInput] = useState(String(DEFAULT_BATCH_SIZE));
     const [showHistory, setShowHistory] = useState(false);
     const [historyToken, setHistoryToken] = useState(0);
 
@@ -160,8 +165,23 @@ function App() {
                                     type="number"
                                     min={1}
                                     max={1000000}
-                                    value={batchSize}
-                                    onChange={e => setBatchSize(Math.max(1, Number(e.target.value) || DEFAULT_BATCH_SIZE))}
+                                    value={batchSizeInput}
+                                    onChange={e => {
+                                        const raw = e.target.value;
+                                        setBatchSizeInput(raw);
+                                        const parsed = parseInt(raw, 10);
+                                        if (!Number.isNaN(parsed) && parsed >= 1) {
+                                            setBatchSize(parsed);
+                                        }
+                                    }}
+                                    onBlur={() => {
+                                        // Campo vazio/inválido ao perder o foco: volta a
+                                        // mostrar o último valor válido em vez de ficar em branco.
+                                        const parsed = parseInt(batchSizeInput, 10);
+                                        if (Number.isNaN(parsed) || parsed < 1) {
+                                            setBatchSizeInput(String(batchSize));
+                                        }
+                                    }}
                                     disabled={busy}
                                 />
                                 por vez

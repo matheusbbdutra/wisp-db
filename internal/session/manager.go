@@ -95,9 +95,16 @@ func (m *Manager) Get(tabID string) (*Session, error) {
 }
 
 // StartQuery prepara um QueryCtx novo (derivado do Ctx da sessão) para uma
-// nova execução, cancelando qualquer query anterior ainda em voo na mesma
-// aba — evita cursor vazando se o usuário disparar uma query nova sem
-// esperar a anterior terminar ou cancelar explicitamente.
+// nova execução. NÃO cancela o QueryCtx de uma query anterior automaticamente
+// — descoberto na prática (pgx real, não suposição) que cancelar o ctx de
+// uma query cujo cursor ainda está aberto (hasMore=true, usuário rodou outra
+// query sem esgotar a anterior) faz o pgx fechar a conexão inteira como
+// efeito colateral de segurança do protocolo, quebrando a sessão sem o
+// usuário ter pedido isso. Quem libera o cursor anterior com segurança é
+// ExecuteStreaming (via CloseCursor interno, no nível SQL, sem tocar em
+// ctx) — chamado automaticamente a cada nova execução. Cancelamento via ctx
+// fica reservado só para Cancel() (ação explícita do usuário), que aceita
+// esse efeito colateral como parte do preço de interromper de verdade.
 func (m *Manager) StartQuery(tabID string) (context.Context, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -106,26 +113,25 @@ func (m *Manager) StartQuery(tabID string) (context.Context, error) {
 	if !ok {
 		return nil, fmt.Errorf("nenhuma sessão ativa para tabId %q", tabID)
 	}
-	if s.queryCancel != nil {
-		s.queryCancel()
-	}
 	qctx, qcancel := context.WithCancel(s.Ctx)
 	s.QueryCtx = qctx
 	s.queryCancel = qcancel
 	return qctx, nil
 }
 
-// Cancel interrompe a query em andamento da aba: cancela o QueryCtx (derruba
-// a chamada local, incluindo um FetchNext em andamento) e dispara o
-// cancelamento nativo do driver quando suportado. Não afeta a sessão em si
-// — dá pra rodar outra query na mesma conexão logo em seguida.
+// Cancel interrompe a query em andamento da aba via o cancelamento nativo
+// do driver (ex. pgx CancelRequest). NÃO cancela o QueryCtx — verificado na
+// prática (pgx real) que isso desbloqueia um FetchNext em andamento sozinho
+// (ex.: ~9ms pra abortar um fetch de milhões de linhas) sem o efeito
+// colateral de cancelar o ctx, que faz o pgx fechar a conexão inteira,
+// exigindo reconectar. Limitação conhecida: SQLite não tem cancelamento
+// nativo (CancelRunningQuery é no-op lá) — cancelar uma query SQLite em
+// andamento não é totalmente suportado hoje (queries locais/rápidas, então
+// o impacto prático é baixo; reabrir se virar problema real).
 func (m *Manager) Cancel(ctx context.Context, tabID string) error {
 	s, err := m.Get(tabID)
 	if err != nil {
 		return err
-	}
-	if s.queryCancel != nil {
-		s.queryCancel()
 	}
 	return s.Driver.CancelRunningQuery(ctx)
 }
