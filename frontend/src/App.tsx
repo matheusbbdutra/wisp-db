@@ -36,10 +36,13 @@ function App() {
         setRows([]);
     }
 
-    async function handleRun() {
+    // textOverride roda um trecho específico (seleção ou statement sob o
+    // cursor, ver SqlEditor.onRunSelectionRequested) sem substituir o
+    // conteúdo do editor — sem override, roda o editor inteiro.
+    async function handleRun(textOverride?: string) {
         setRunning(true);
         try {
-            const result = await Execute(TAB_ID, query);
+            const result = await Execute(TAB_ID, textOverride ?? query);
             setColumns(result.Columns ?? []);
             setRows(result.Rows ?? []);
             setStatus(`ok — ${result.Rows?.length ?? 0} linha(s)`);
@@ -75,7 +78,13 @@ function App() {
 
                 <main className="main-panel">
                     <div className="editor-pane">
-                        <SqlEditor value={query} onChange={setQuery} onRunRequested={handleRun} readOnly={!connected} />
+                        <SqlEditor
+                            value={query}
+                            onChange={setQuery}
+                            onRunRequested={() => handleRun()}
+                            onRunSelectionRequested={text => handleRun(text)}
+                            readOnly={!connected}
+                        />
                     </div>
                     <div className="editor-actions">
                         <div className="editor-actions-left">
@@ -87,12 +96,13 @@ function App() {
                                     Cancelar
                                 </button>
                             ) : (
-                                <button className="btn btn-success" onClick={handleRun} disabled={!connected} title="Executar consulta (Ctrl+Enter)">
+                                <button className="btn btn-success" onClick={() => handleRun()} disabled={!connected} title="Executar tudo (Ctrl+Enter) — ou selecione um trecho e use Ctrl+Shift+Enter para rodar só ele">
                                     <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                                         <polygon points="5 3 19 12 5 21 5 3" />
                                     </svg>
                                     Executar
                                     <kbd className="kbd-shortcut">Ctrl+Enter</kbd>
+                                    <kbd className="kbd-shortcut" title="Executar seleção ou statement atual">Ctrl+Shift+Enter</kbd>
                                 </button>
                             )}
                         </div>

@@ -36,16 +36,22 @@ interface Props {
     value: string;
     onChange: (value: string) => void;
     onRunRequested: () => void;
+    // onRunSelectionRequested roda só o texto selecionado (ou, sem seleção,
+    // o "statement" sob o cursor — delimitado por ';'). Ctrl+Enter continua
+    // rodando o editor inteiro; Ctrl+Shift+Enter dispara este.
+    onRunSelectionRequested?: (text: string) => void;
     readOnly?: boolean;
 }
 
-export default function SqlEditor({value, onChange, onRunRequested, readOnly}: Props) {
+export default function SqlEditor({value, onChange, onRunRequested, onRunSelectionRequested, readOnly}: Props) {
     const containerRef = useRef<HTMLDivElement>(null);
     const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
     const onChangeRef = useRef(onChange);
     const onRunRef = useRef(onRunRequested);
+    const onRunSelectionRef = useRef(onRunSelectionRequested);
     onChangeRef.current = onChange;
     onRunRef.current = onRunRequested;
+    onRunSelectionRef.current = onRunSelectionRequested;
 
     useEffect(() => {
         if (!containerRef.current) return;
@@ -77,6 +83,31 @@ export default function SqlEditor({value, onChange, onRunRequested, readOnly}: P
         editor.onDidChangeModelContent(() => onChangeRef.current(editor.getValue()));
         editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => onRunRef.current());
 
+        // Ctrl+Shift+Enter: roda só o texto selecionado, ou (sem seleção) o
+        // "statement" sob o cursor — texto entre o ';' anterior e o próximo.
+        editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter, () => {
+            if (!onRunSelectionRef.current) return;
+            const model = editor.getModel();
+            const selection = editor.getSelection();
+            if (!model) return;
+
+            let text: string;
+            if (selection && !selection.isEmpty()) {
+                text = model.getValueInRange(selection);
+            } else {
+                const position = editor.getPosition();
+                const full = model.getValue();
+                const offset = position ? model.getOffsetAt(position) : 0;
+                const start = full.lastIndexOf(';', offset - 1) + 1;
+                const semicolonAfter = full.indexOf(';', offset);
+                const end = semicolonAfter === -1 ? full.length : semicolonAfter;
+                text = full.slice(start, end);
+            }
+
+            text = text.trim();
+            if (text) onRunSelectionRef.current(text);
+        });
+
         return () => editor.dispose();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
@@ -87,6 +118,13 @@ export default function SqlEditor({value, onChange, onRunRequested, readOnly}: P
             editor.setValue(value);
         }
     }, [value]);
+
+    // Bug real: readOnly era fixado só na criação do editor e nunca mais
+    // atualizava — travava o editor em somente-leitura para sempre se a
+    // primeira renderização acontecesse desconectado (sempre acontecia).
+    useEffect(() => {
+        editorRef.current?.updateOptions({readOnly: readOnly ?? false});
+    }, [readOnly]);
 
     return <div ref={containerRef} style={{height: '100%', width: '100%'}} />;
 }
