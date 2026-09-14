@@ -63,12 +63,14 @@ Projeto criado em 2026-09-14. Fase: **Fase 1 em andamento** — skeleton Wails g
 2. ✅ Redesign visual completo — **delegado ao agy**, rodado interativamente pelo usuário (headless bloqueado duas vezes por permissões distintas — `read_file` e depois `command` — não resolvidas mesmo após o usuário já ter usado agy antes; tentativas documentadas na memória `wisp-agy-ui-redesign-task`, sem insistir em mais variações de flag conforme a skill orienta). Relatório do agy em `docs/reports/agy-ui-redesign.md`. **Verificado por mim de forma independente** (não só confiando no relatório): reli o diff de todos os arquivos tocados (só CSS/markup, nenhuma lógica/binding alterado), rodei `tsc --noEmit` e `npm run build` eu mesmo — bateram com o que o agy reportou.
 3. ⚠️ **Bug real encontrado na verificação, não introduzido pelo agy** (débito meu, de quando montei o `SqlEditor.tsx` original): `import * as monaco from 'monaco-editor'` importava o pacote inteiro — todos os language services completos (TypeScript, CSS, HTML, JSON) e dezenas de linguagens nunca usadas (PHP, Perl, Ruby, Solidity...). Build gerava **93 chunks JS, ~14MB** (destaque: `ts.worker` sozinho com 6.8MB) — contradizia direto a meta de app leve do ADR 0001. **Corrigido**: troquei para `monaco-editor/editor/editor.api` (core) + registro manual do SQL via `monaco-editor/languages/definitions/sql/sql` (Monarch tokenizer + config, sem language service) — descoberta de que o `exports` map do pacote nesta versão (0.56.0) exige o specifier sem o prefixo `esm/vs/` (ex. `monaco-editor/editor/editor.worker`, não `monaco-editor/esm/vs/editor/editor.worker`). Resultado: **2 assets JS, ~3.2MB** (`editor.worker` 272KB + `index.js` 2.9MB, o núcleo inevitável do Monaco). Adicionado `declare module` em `vite-env.d.ts` para o submódulo sem `.d.ts` publicado. Build completo (`wails build -tags webkit2_41`) revalidado após a correção.
 
+## Confirmado visualmente pelo usuário (2026-09-14)
+Redesign do agy + correção do bundle do Monaco renderizando corretamente: topbar organizada, chips de conexão salva, sidebar com empty state ilustrado, editor Monaco com highlight de SQL funcionando (confirma que o registro manual via `languages/definitions/sql/sql` substituiu o `basic-languages` agregado sem regressão), grid com empty state. Um glitch visual de hot-reload do `wails dev` apareceu momentaneamente e sumiu sozinho — não é bug do app.
+
 ## Próximos passos (não iniciados)
-1. **Confirmação visual do usuário pendente** — nem o redesign do agy nem a correção do bundle do Monaco foram vistos rodando na janela ainda (só build/tsc verificados). Syntax highlight de SQL precisa ser reconfirmado especificamente, já que o registro do SQL mudou de mecanismo (de `basic-languages` agregado para registro manual via Monarch).
-2. Data grid virtualizado real (Glide Data Grid) quando volume de linhas justificar.
-3. Autocomplete no Monaco alimentado pelo schema cache (Fase 2) — hoje o editor só tem highlighting léxico de SQL, sem language service próprio.
-4. Histórico de queries (`query_history`) — schema já existe no Store, sem binding/UI ainda.
-5. Schema cache com TTL (`schema_cache`) — hoje `ListSchemas`/`ListTables` sempre fazem fetch direto, sem cache em nenhuma camada.
+1. Data grid virtualizado real (Glide Data Grid) quando volume de linhas justificar.
+2. Autocomplete no Monaco alimentado pelo schema cache (Fase 2) — hoje o editor só tem highlighting léxico de SQL, sem language service próprio.
+3. Histórico de queries (`query_history`) — schema já existe no Store, sem binding/UI ainda.
+4. Schema cache com TTL (`schema_cache`) — hoje `ListSchemas`/`ListTables` sempre fazem fetch direto, sem cache em nenhuma camada.
 
 ## Pendências/perguntas em aberto
 - Nenhuma bloqueante.
