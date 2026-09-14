@@ -1,6 +1,6 @@
 import {useState} from 'react';
 import './App.css';
-import {Connect, Execute, Disconnect, CancelQuery} from '../wailsjs/go/main/App';
+import {Execute, Disconnect, CancelQuery} from '../wailsjs/go/main/App';
 import SqlEditor from './components/SqlEditor';
 import ResultGrid from './components/ResultGrid';
 import Sidebar from './components/Sidebar';
@@ -10,14 +10,6 @@ import ConnectionBar from './components/ConnectionBar';
 const TAB_ID = 'tab-dev-1';
 
 function App() {
-    const [driver, setDriver] = useState('sqlite');
-    const [dsn, setDsn] = useState('/home/matheusdutra/Projects/wisp/testdata/sample.db');
-    // Lembra o último DSN digitado por driver — trocar sqlite<->postgres no
-    // dropdown não deve perder o que já foi digitado em cada um (mas também
-    // nunca mistura os dois: cada driver tem seu próprio DSN lembrado).
-    const [dsnByDriver, setDsnByDriver] = useState<Record<string, string>>({
-        sqlite: '/home/matheusdutra/Projects/wisp/testdata/sample.db',
-    });
     const [query, setQuery] = useState('SELECT * FROM customers ORDER BY id');
     const [connected, setConnected] = useState(false);
     const [status, setStatus] = useState('desconectado');
@@ -27,19 +19,13 @@ function App() {
     const [showHistory, setShowHistory] = useState(false);
     const [historyToken, setHistoryToken] = useState(0);
 
-    async function handleConnect() {
-        try {
-            await Connect(TAB_ID, driver, dsn);
-            setConnected(true);
-            setStatus('conectado');
-        } catch (err) {
-            setStatus(`erro ao conectar: ${err}`);
-        }
+    function handleConnected(connName?: string) {
+        setConnected(true);
+        setStatus(connName ? `conectado: ${connName}` : 'conectado');
     }
 
-    function handleConnected() {
-        setConnected(true);
-        setStatus('conectado (via conexão salva)');
+    function handleError(err: string) {
+        setStatus(`erro: ${err}`);
     }
 
     async function handleDisconnect() {
@@ -69,17 +55,6 @@ function App() {
         await CancelQuery(TAB_ID);
     }
 
-    function handleDriverChange(newDriver: string) {
-        setDsnByDriver(prev => ({...prev, [driver]: dsn}));
-        setDriver(newDriver);
-        setDsn(dsnByDriver[newDriver] ?? '');
-    }
-
-    function handleDsnChange(newDsn: string) {
-        setDsn(newDsn);
-        setDsnByDriver(prev => ({...prev, [driver]: newDsn}));
-    }
-
     function handleSelectTable(schema: string, table: string) {
         setQuery(`SELECT * FROM ${schema === 'main' ? table : `${schema}.${table}`} LIMIT 200`);
     }
@@ -88,15 +63,11 @@ function App() {
         <div id="App">
             <ConnectionBar
                 tabId={TAB_ID}
-                driver={driver}
-                dsn={dsn}
                 connected={connected}
                 status={status}
-                onDriverChange={handleDriverChange}
-                onDsnChange={handleDsnChange}
-                onConnect={handleConnect}
                 onDisconnect={handleDisconnect}
                 onConnected={handleConnected}
+                onError={handleError}
             />
 
             <div className="workspace">

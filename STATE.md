@@ -83,14 +83,24 @@ Redesign do agy + correção do bundle do Monaco renderizando corretamente: topb
 6. ✅ Validado com execução real (não mock): miss inicial, hit em memória, hit via SQLite persistido simulando reinício do app, expiração por TTL (2s), invalidação manual, invalidação propagando pra camada persistente — os 6 cenários passaram.
 7. ✅ Build completo (`wails build -tags webkit2_41`) validado com histórico + schema cache juntos.
 
+## Feito em sessão seguinte (Gerenciamento de conexões reformulado — agy)
+1. ✅ Barra de DSN cru totalmente removida da interface principal (`ConnectionBar.tsx`), eliminando a causa raiz de perda de DSN e criação acidental de bancos SQLite vazios.
+2. ✅ `app.go`: novo binding `PickSQLiteFile() (string, error)` integrado a `runtime.OpenFileDialog` do Wails com filtros nativos para `.db`, `.sqlite`, `.sqlite3`.
+3. ✅ `frontend/src/components/ConnectionModal.tsx`: modal estruturado com abas de criação e gerenciamento, file picker nativo de SQLite e formulário completo para PostgreSQL (host/porta/db/user/password/ssl) com escape rigoroso de credenciais via `encodeURIComponent`.
+4. ✅ `frontend/src/components/ConnectionBar.tsx` e `frontend/src/App.tsx`: topbar compacta com select de conexões salvas, botão Conectar/Desconectar, atalho para modal e tag da conexão ativa.
+5. ✅ Validação completa: `go build ./... && go vet ./... && gofmt -l -w .` (código 0), `npx tsc --noEmit` (código 0) e `wails build -tags webkit2_41` (gerou `build/bin/wisp` com código 0).
+6. ✅ Relatório gerado em `docs/reports/agy-connection-management.md`, e também via memory-mcp (`wisp-agy-connection-management-result`, agent=antigravity) — primeira vez usando o MCP compartilhado pra ida e volta da delegação, funcionou.
+7. ✅ **Verificado independentemente por mim** (não só aceito o relatório): reli o diff completo (`ConnectionModal.tsx`, `ConnectionBar.tsx`, `App.tsx`, `app.go`) — sem código morto deixado para trás. Rebuild próprio (`go vet`/`gofmt`/`tsc`/`wails build`) todos limpos. **Validação crítica da montagem de DSN**: reproduzi o `encodeURIComponent` real do JS em Go (não confundir com `url.QueryEscape`, que usa `+` em vez de `%20` para espaço — errei isso na primeira tentativa e o teste falhou até corrigir) e testei senha com todos os caracteres perigosos (`@ : / espaço ! * ' ( )`) — sobrevive ida e volta perfeita pelo `pgx.ParseConfig`. Testei o fluxo completo (montar DSN → `SaveConnection` → `ResolveConnection` → `Connect` → `Execute`) contra o Postgres real do Docker: funcionou de ponta a ponta.
+
 ## Próximos passos (não iniciados)
-1. Data grid virtualizado real (Glide Data Grid) — **delegado ao agy**, prompt já entregue ao usuário, aguardando execução (ver relatório esperado em `docs/reports/agy-glide-data-grid.md`).
-2. Autocomplete no Monaco alimentado pelo schema cache (Fase 2) — agora que o cache existe de verdade, isso é o próximo passo natural: usar `ListSchemas`/`ListTables` (já cacheados) para alimentar `monaco.languages.registerCompletionItemProvider`.
-3. Nenhuma confirmação visual do usuário ainda sobre histórico de queries nem schema cache rodando na janela — só build/execução real verificados por mim, não visto na UI.
+1. Data grid virtualizado real (Glide Data Grid) — ver relatório esperado em `docs/reports/agy-glide-data-grid.md`.
+2. Autocomplete no Monaco alimentado pelo schema cache (Fase 2) — usar `ListSchemas`/`ListTables` (já cacheados) para alimentar `monaco.languages.registerCompletionItemProvider`.
+3. Confirmação visual pelo usuário das novas telas de gerenciamento de conexões.
 
 ## Pendências/perguntas em aberto
 - Nenhuma bloqueante.
 
 ## Última atualização
-2026-09-14 — Histórico de queries (OpenCode + correção de connectionID) e schema cache com TTL (Claude Code direto) implementados e validados com execução real. Glide Data Grid pendente de execução pelo usuário via agy.
+2026-09-14 — Reformulação completa do gerenciamento de conexões (modal estruturado + file picker SQLite) implementada e validada.
+
 

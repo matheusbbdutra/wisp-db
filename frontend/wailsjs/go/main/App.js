@@ -42,6 +42,10 @@ export function ListTables(arg1, arg2) {
   return window['go']['main']['App']['ListTables'](arg1, arg2);
 }
 
+export function PickSQLiteFile() {
+  return window['go']['main']['App']['PickSQLiteFile']();
+}
+
 export function RefreshSchema(arg1) {
   return window['go']['main']['App']['RefreshSchema'](arg1);
 }

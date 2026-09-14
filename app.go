@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wailsapp/wails/v2/pkg/runtime"
+
 	"wisp/internal/db"
 	"wisp/internal/schemacache"
 	"wisp/internal/session"
@@ -292,4 +294,23 @@ func (a *App) GetQueryHistory(limit int) ([]store.QueryHistoryEntry, error) {
 		return nil, fmt.Errorf("store local indisponível")
 	}
 	return a.store.ListQueryHistory(limit)
+}
+
+// PickSQLiteFile abre o diálogo nativo do sistema para selecionar um arquivo
+// de banco SQLite existente (.db, .sqlite, .sqlite3). Retorna o caminho absoluto
+// ou string vazia se o usuário cancelou o diálogo.
+func (a *App) PickSQLiteFile() (string, error) {
+	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Selecionar banco de dados SQLite",
+		Filters: []runtime.FileFilter{
+			{
+				DisplayName: "Bancos SQLite (*.db;*.sqlite;*.sqlite3)",
+				Pattern:     "*.db;*.sqlite;*.sqlite3",
+			},
+			{
+				DisplayName: "Todos os arquivos (*.*)",
+				Pattern:     "*.*",
+			},
+		},
+	})
 }
