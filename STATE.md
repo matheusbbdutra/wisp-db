@@ -51,15 +51,28 @@ Projeto criado em 2026-09-14. Fase: **Fase 1 em andamento** — skeleton Wails g
 3. ✅ **Cancelamento real confirmado**: `SELECT pg_sleep(30)` cancelado via `CancelRunningQuery` após 500ms, retornou com `SQLSTATE 57014 — canceling statement due to user request` (erro nativo do Postgres, não timeout local) — valida o requisito mais crítico do `CLAUDE.md` ("Cancelamento Real").
 4. ✅ README atualizado com instruções de subir/derrubar o Postgres de teste e a DSN pronta para colar na UI.
 
+## Feito em sessão seguinte (Redesign visual completo da UI)
+1. ✅ Redesign visual completo dos componentes frontend mantendo lógica e bindings intactos.
+2. ✅ `frontend/src/style.css` e `frontend/src/App.css` reestruturados com design system escuro profissional (tons zinc, variáveis de tema, scrollbars desktop, botões estilizados, inputs e chips).
+3. ✅ `ConnectionBar.tsx`, `Sidebar.tsx`, `SqlEditor.tsx` e `ResultGrid.tsx` aprimorados com ícones SVG inline (100% offline), hierarquia visual de schemas/tabelas, sticky header no grid com numeração de linha e destaque para valores `NULL`.
+4. ✅ Validação de tipagem (`npx tsc --noEmit`) e build do frontend (`npm run build`) concluídos com sucesso.
+5. ✅ Relatório detalhado gerado em `docs/reports/agy-ui-redesign.md`.
+
+## Feito em sessão seguinte (delegação: OpenCode + agy, e correção de bundle)
+1. ✅ Botão "Cancelar" ligado à UI — **delegado ao OpenCode** (`opencode run`, direção validada da skill `agent-delegate`; contexto do projeto gravado antes em memory-mcp na memória `wisp-sql-client`). Verificado por mim: `tsc --noEmit` e `wails build` passaram. `App.tsx`: estado `running` alterna botão Executar/Cancelar, `handleCancel` chama `CancelQuery(TAB_ID)`.
+2. ✅ Redesign visual completo — **delegado ao agy**, rodado interativamente pelo usuário (headless bloqueado duas vezes por permissões distintas — `read_file` e depois `command` — não resolvidas mesmo após o usuário já ter usado agy antes; tentativas documentadas na memória `wisp-agy-ui-redesign-task`, sem insistir em mais variações de flag conforme a skill orienta). Relatório do agy em `docs/reports/agy-ui-redesign.md`. **Verificado por mim de forma independente** (não só confiando no relatório): reli o diff de todos os arquivos tocados (só CSS/markup, nenhuma lógica/binding alterado), rodei `tsc --noEmit` e `npm run build` eu mesmo — bateram com o que o agy reportou.
+3. ⚠️ **Bug real encontrado na verificação, não introduzido pelo agy** (débito meu, de quando montei o `SqlEditor.tsx` original): `import * as monaco from 'monaco-editor'` importava o pacote inteiro — todos os language services completos (TypeScript, CSS, HTML, JSON) e dezenas de linguagens nunca usadas (PHP, Perl, Ruby, Solidity...). Build gerava **93 chunks JS, ~14MB** (destaque: `ts.worker` sozinho com 6.8MB) — contradizia direto a meta de app leve do ADR 0001. **Corrigido**: troquei para `monaco-editor/editor/editor.api` (core) + registro manual do SQL via `monaco-editor/languages/definitions/sql/sql` (Monarch tokenizer + config, sem language service) — descoberta de que o `exports` map do pacote nesta versão (0.56.0) exige o specifier sem o prefixo `esm/vs/` (ex. `monaco-editor/editor/editor.worker`, não `monaco-editor/esm/vs/editor/editor.worker`). Resultado: **2 assets JS, ~3.2MB** (`editor.worker` 272KB + `index.js` 2.9MB, o núcleo inevitável do Monaco). Adicionado `declare module` em `vite-env.d.ts` para o submódulo sem `.d.ts` publicado. Build completo (`wails build -tags webkit2_41`) revalidado após a correção.
+
 ## Próximos passos (não iniciados)
-1. Data grid virtualizado real (Glide Data Grid) quando volume de linhas justificar.
-2. Autocomplete no Monaco alimentado pelo schema cache (Fase 2) — hoje o editor só tem highlighting léxico de SQL, sem language service próprio.
-3. Histórico de queries (`query_history`) — schema já existe no Store, sem binding/UI ainda.
-4. Schema cache com TTL (`schema_cache`) — hoje `ListSchemas`/`ListTables` sempre fazem fetch direto, sem cache em nenhuma camada.
-5. Botão "Cancelar" na UI (hoje `CancelQuery` existe como binding mas não está ligado a nenhum botão — `Execute` na UI atual não é cancelável enquanto roda).
+1. **Confirmação visual do usuário pendente** — nem o redesign do agy nem a correção do bundle do Monaco foram vistos rodando na janela ainda (só build/tsc verificados). Syntax highlight de SQL precisa ser reconfirmado especificamente, já que o registro do SQL mudou de mecanismo (de `basic-languages` agregado para registro manual via Monarch).
+2. Data grid virtualizado real (Glide Data Grid) quando volume de linhas justificar.
+3. Autocomplete no Monaco alimentado pelo schema cache (Fase 2) — hoje o editor só tem highlighting léxico de SQL, sem language service próprio.
+4. Histórico de queries (`query_history`) — schema já existe no Store, sem binding/UI ainda.
+5. Schema cache com TTL (`schema_cache`) — hoje `ListSchemas`/`ListTables` sempre fazem fetch direto, sem cache em nenhuma camada.
 
 ## Pendências/perguntas em aberto
-- Nenhuma bloqueante. Próxima decisão real é a lib de keychain cross-platform ao implementar o Credential Vault.
+- Nenhuma bloqueante.
 
 ## Última atualização
-2026-09-14 — skeleton Wails funcional criado e validado (build ponta a ponta).
+2026-09-14 — Botão de cancelamento (OpenCode) e redesign visual (agy) integrados; bug de bundle do Monaco (93 chunks/~14MB → 2 chunks/~3.2MB) encontrado na verificação e corrigido. Pendente: confirmação visual do usuário, incluindo highlight de SQL.
+

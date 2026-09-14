@@ -86,9 +86,27 @@ function App() {
                         <SqlEditor value={query} onChange={setQuery} onRunRequested={handleRun} readOnly={!connected} />
                     </div>
                     <div className="editor-actions">
-                        {running
-                            ? <button onClick={handleCancel}>Cancelar</button>
-                            : <button onClick={handleRun} disabled={!connected}>Executar (Ctrl+Enter)</button>}
+                        <div className="editor-actions-left">
+                            {running ? (
+                                <button className="btn btn-danger" onClick={handleCancel} title="Cancelar consulta em andamento">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                                        <rect x="4" y="4" width="16" height="16" rx="2" />
+                                    </svg>
+                                    Cancelar
+                                </button>
+                            ) : (
+                                <button className="btn btn-success" onClick={handleRun} disabled={!connected} title="Executar consulta (Ctrl+Enter)">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                                        <polygon points="5 3 19 12 5 21 5 3" />
+                                    </svg>
+                                    Executar
+                                    <kbd className="kbd-shortcut">Ctrl+Enter</kbd>
+                                </button>
+                            )}
+                        </div>
+                        <div className="editor-actions-right">
+                            <span title="ID da sessão ativa">{TAB_ID}</span>
+                        </div>
                     </div>
                     <ResultGrid columns={columns} rows={rows} />
                 </main>

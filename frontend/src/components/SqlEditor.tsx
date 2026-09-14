@@ -1,7 +1,21 @@
 import {useEffect, useRef} from 'react';
-import * as monaco from 'monaco-editor';
+// Import da API core (não do pacote 'monaco-editor' inteiro, que arrasta os
+// language services completos de TypeScript/CSS/HTML/JSON — dezenas de MB —
+// e o highlighting de dezenas de linguagens que o Wisp nunca usa). SQL é só
+// registrado como "basic language" (tokenizer leve), sem language service
+// próprio — ver docs/ARCHITECTURE.md: "sem parser SQL customizado".
+import * as monaco from 'monaco-editor/editor/editor.api';
+import {conf as sqlConf, language as sqlLanguage} from 'monaco-editor/languages/definitions/sql/sql';
 import editorWorker from 'monaco-editor/editor/editor.worker?worker';
-import jsonWorker from 'monaco-editor/language/json/json.worker?worker';
+
+// Registro manual do SQL em vez de importar o "basic-languages" agregado
+// (que nesta versão do monaco-editor puxa TODAS as linguagens suportadas
+// de uma vez, ~90 chunks). Só o tokenizer léxico (Monarch) + configuração
+// de comentários/parênteses — sem language service, conforme
+// docs/ARCHITECTURE.md ("sem parser SQL customizado").
+monaco.languages.register({id: 'sql'});
+monaco.languages.setLanguageConfiguration('sql', sqlConf);
+monaco.languages.setMonarchTokensProvider('sql', sqlLanguage);
 
 declare global {
     interface Window {
@@ -9,14 +23,11 @@ declare global {
     }
 }
 
-// Bundle 100% local dos workers do Monaco (sem CDN) — necessário para o
-// Wisp funcionar offline. Só carregamos o worker base + json (usado
-// internamente pelo editor); SQL usa apenas highlighting léxico simples,
-// sem language service próprio (ver docs/ARCHITECTURE.md: "sem parser
-// SQL customizado" — autocomplete real entra na Fase 2 via schema cache).
+// Bundle 100% local do worker do Monaco (sem CDN) — necessário para o Wisp
+// funcionar offline. Só o worker base do editor é necessário aqui (sem
+// language service próprio para SQL, não há worker de linguagem a registrar).
 self.MonacoEnvironment = {
-    getWorker(_: string, label: string) {
-        if (label === 'json') return new jsonWorker();
+    getWorker() {
         return new editorWorker();
     },
 };
@@ -45,7 +56,20 @@ export default function SqlEditor({value, onChange, onRunRequested, readOnly}: P
             theme: 'vs-dark',
             automaticLayout: true,
             minimap: {enabled: false},
-            fontSize: 14,
+            fontSize: 13,
+            lineHeight: 20,
+            fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", "JetBrains Mono", Menlo, Consolas, monospace',
+            padding: {top: 8, bottom: 8},
+            lineNumbersMinChars: 3,
+            renderLineHighlight: 'line',
+            scrollBeyondLastLine: false,
+            roundedSelection: true,
+            overviewRulerLanes: 0,
+            hideCursorInOverviewRuler: true,
+            scrollbar: {
+                verticalScrollbarSize: 8,
+                horizontalScrollbarSize: 8,
+            },
             readOnly: readOnly ?? false,
         });
         editorRef.current = editor;
