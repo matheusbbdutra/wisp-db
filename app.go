@@ -9,6 +9,7 @@ import (
 	"wisp/internal/db"
 	"wisp/internal/session"
 	"wisp/internal/store"
+	"wisp/internal/vault"
 )
 
 // App é o binding raiz exposto ao frontend via Wails. Mantém o Session
@@ -41,7 +42,13 @@ func (a *App) startup(ctx context.Context) {
 		return
 	}
 
-	s, err := store.Open(filepath.Join(dbDir, "wisp.db"))
+	v, err := vault.Open()
+	if err != nil {
+		fmt.Printf("wisp: não foi possível abrir credential vault: %v\n", err)
+		return
+	}
+
+	s, err := store.Open(filepath.Join(dbDir, "wisp.db"), v)
 	if err != nil {
 		fmt.Printf("wisp: não foi possível abrir store local: %v\n", err)
 		return
@@ -115,4 +122,44 @@ func (a *App) ListTables(tabID string, schema string) ([]db.Table, error) {
 		return nil, err
 	}
 	return s.Driver.ListTables(a.ctx, schema)
+}
+
+// --- Conexões salvas (persistidas cifradas, ver internal/vault) ---
+
+// SaveConnection cifra e persiste uma conexão para reuso futuro (nome amigável
+// + driver + DSN completa). Nunca grava a DSN em texto puro (ver internal/vault).
+func (a *App) SaveConnection(name string, driverName string, dsn string) (string, error) {
+	if a.store == nil {
+		return "", fmt.Errorf("store local indisponível")
+	}
+	return a.store.SaveConnection(name, driverName, dsn)
+}
+
+// ListSavedConnections retorna as conexões salvas sem expor a DSN/segredo.
+func (a *App) ListSavedConnections() ([]store.SavedConnection, error) {
+	if a.store == nil {
+		return nil, fmt.Errorf("store local indisponível")
+	}
+	return a.store.ListConnections()
+}
+
+// ConnectSaved decifra a DSN de uma conexão salva e abre a sessão da aba
+// tabId com ela — a DSN decifrada nunca é retornada ao frontend.
+func (a *App) ConnectSaved(tabID string, connectionID string) error {
+	if a.store == nil {
+		return fmt.Errorf("store local indisponível")
+	}
+	driverName, dsn, err := a.store.ResolveConnection(connectionID)
+	if err != nil {
+		return err
+	}
+	return a.Connect(tabID, driverName, dsn)
+}
+
+// DeleteSavedConnection remove uma conexão salva permanentemente.
+func (a *App) DeleteSavedConnection(connectionID string) error {
+	if a.store == nil {
+		return fmt.Errorf("store local indisponível")
+	}
+	return a.store.DeleteConnection(connectionID)
 }

@@ -38,12 +38,19 @@ Projeto criado em 2026-09-14. Fase: **Fase 1 em andamento** — skeleton Wails g
 6. ✅ Vulnerabilidade moderada em `dompurify` (transitiva via monaco-editor) corrigida via `overrides` no `package.json`, sem downgrade do monaco — `npm audit` limpo.
 7. ✅ Build completo (`wails build -tags webkit2_41`) validado. **UI confirmada visualmente pelo usuário** (2026-09-14): topbar, sidebar, Monaco com highlight SQL e grid de resultado renderizando corretamente, Connect/Execute funcionando ponta a ponta contra `testdata/sample.db`.
 
+## Feito em sessão seguinte (Credential Vault + conexões salvas)
+1. ✅ `internal/vault/vault.go` — Credential Vault real: ChaCha20-Poly1305, chave mestra persistida no keychain do SO via `go-keyring`. Validado neste sistema (gnome-keyring-daemon rodando via Secret Service/dbus): cifra/decifra funciona, chave persiste entre "reaberturas" do vault, confirmado também via `secret-tool search`.
+2. ✅ `internal/store/store.go` — schema `connections` simplificado (decisão pragmática: DSN completa cifrada em vez de decompor host/port/user/senha por dialeto — documentado no topo do arquivo). `SaveConnection`/`ListConnections` (nunca expõe DSN)/`ResolveConnection` (decifra só no momento de conectar)/`DeleteConnection`. Validado com execução real (save → list → resolve → delete).
+3. ✅ `app.go` — bindings `SaveConnection`/`ListSavedConnections`/`ConnectSaved`/`DeleteSavedConnection`.
+4. ✅ `frontend/src/components/ConnectionBar.tsx` — UI para salvar a conexão atual e reconectar a partir de conexões salvas (chips com botão de deletar), extraído da topbar por SRP.
+5. ✅ Build completo (`wails build -tags webkit2_41`) validado. Warning inofensivo do bindgen do Wails sobre `time.Time` (campo `CreatedAt` vira `any` no TS — não usado na UI ainda, sem impacto).
+
 ## Próximos passos (não iniciados)
-1. Validar `PostgresDriver` contra instância Postgres real (Docker local) — só foi compilado, não exercitado.
-2. Credential Vault (cifragem de `encrypted_secret` + chave mestra no keychain do SO — `go-keyring` é candidato, não validado em profundidade ainda).
-3. Data grid virtualizado real (Glide Data Grid) quando volume de linhas justificar.
-4. Persistir conexões testadas no Store (`connections` table) — hoje `Connect` não grava nada, é só sessão em memória.
-5. Autocomplete no Monaco alimentado pelo schema cache (Fase 2) — hoje o editor só tem highlighting léxico de SQL, sem language service próprio.
+1. Validar `PostgresDriver` contra instância Postgres real — usuário vai subir via Docker em breve.
+2. Data grid virtualizado real (Glide Data Grid) quando volume de linhas justificar.
+3. Autocomplete no Monaco alimentado pelo schema cache (Fase 2) — hoje o editor só tem highlighting léxico de SQL, sem language service próprio.
+4. Histórico de queries (`query_history`) — schema já existe no Store, sem binding/UI ainda.
+5. Schema cache com TTL (`schema_cache`) — hoje `ListSchemas`/`ListTables` sempre fazem fetch direto, sem cache em nenhuma camada.
 
 ## Pendências/perguntas em aberto
 - Nenhuma bloqueante. Próxima decisão real é a lib de keychain cross-platform ao implementar o Credential Vault.

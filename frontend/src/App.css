@@ -7,20 +7,45 @@
 
 .topbar {
     display: flex;
-    align-items: center;
-    gap: 0.5rem;
+    flex-direction: column;
+    gap: 0.4rem;
     padding: 0.5rem;
     border-bottom: 1px solid rgba(128, 128, 128, 0.3);
 }
 
-.topbar input {
+.topbar-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.topbar-row input {
     flex: 1;
+    min-width: 160px;
 }
 
 .topbar .status {
     margin-left: auto;
     font-size: 0.85rem;
     opacity: 0.75;
+}
+
+.saved-connections {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+
+.saved-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.saved-chip .delete-chip {
+    padding: 0 6px;
+    opacity: 0.6;
 }
 
 .workspace {

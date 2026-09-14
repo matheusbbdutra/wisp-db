@@ -4,6 +4,7 @@ import {Connect, Execute, Disconnect} from '../wailsjs/go/main/App';
 import SqlEditor from './components/SqlEditor';
 import ResultGrid from './components/ResultGrid';
 import Sidebar from './components/Sidebar';
+import ConnectionBar from './components/ConnectionBar';
 
 const TAB_ID = 'tab-dev-1';
 
@@ -24,6 +25,11 @@ function App() {
         } catch (err) {
             setStatus(`erro ao conectar: ${err}`);
         }
+    }
+
+    function handleConnected() {
+        setConnected(true);
+        setStatus('conectado (via conexão salva)');
     }
 
     async function handleDisconnect() {
@@ -51,22 +57,18 @@ function App() {
 
     return (
         <div id="App">
-            <header className="topbar">
-                <select value={driver} onChange={e => setDriver(e.target.value)} disabled={connected}>
-                    <option value="sqlite">sqlite</option>
-                    <option value="postgres">postgres</option>
-                </select>
-                <input
-                    value={dsn}
-                    onChange={e => setDsn(e.target.value)}
-                    disabled={connected}
-                    placeholder="DSN (arquivo .db ou postgres://...)"
-                />
-                {!connected
-                    ? <button onClick={handleConnect}>Conectar</button>
-                    : <button onClick={handleDisconnect}>Desconectar</button>}
-                <span className="status">{status}</span>
-            </header>
+            <ConnectionBar
+                tabId={TAB_ID}
+                driver={driver}
+                dsn={dsn}
+                connected={connected}
+                status={status}
+                onDriverChange={setDriver}
+                onDsnChange={setDsn}
+                onConnect={handleConnect}
+                onDisconnect={handleDisconnect}
+                onConnected={handleConnected}
+            />
 
             <div className="workspace">
                 <Sidebar tabId={TAB_ID} connected={connected} onSelectTable={handleSelectTable} />
