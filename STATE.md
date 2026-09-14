@@ -108,15 +108,35 @@ Gerenciamento de conexões testado na janela: "aparentemente OK" — sem detalha
 10. ⚠️ **Achado e corrigido por mim**: `.result-grid-scroll`/`.result-table`/`.cell-null` etc. ficaram como CSS morto em `App.css` (a tabela HTML antiga foi substituída no `.tsx` mas o CSS correspondente não foi removido) — confirmei via grep que nenhum `.tsx` referencia mais essas classes, removi o bloco inteiro, rebuild revalidado.
 11. ✅ Testado volume real (não só visual): 50.000 linhas via Postgres real (`generate_series`) executadas e escaneadas pelo `PostgresDriver` em ~21ms no backend — confirma que o gargalo de volume grande não está na camada de dados, só falta confirmação visual de que o canvas do Glide Data Grid renderiza isso suave na janela.
 
+## Feito em sessão seguinte (bug crítico do editor + fetch em streaming real)
+1. ✅ **Bug crítico corrigido**: `SqlEditor.tsx` fixava `readOnly` só na criação do Monaco (useEffect com `[]`), nunca atualizava depois — editor ficava travado em somente-leitura pra sempre, pois a primeira renderização sempre acontece desconectado. Corrigido com `editor.updateOptions({readOnly})` reativo. Bug meu, da implementação original, só ficou visível quando o fluxo de conexão mudou.
+2. ✅ **Feature nova**: `Ctrl+Shift+Enter` no `SqlEditor.tsx` executa só o texto selecionado, ou (sem seleção) o statement SQL sob o cursor (delimitado por `;`), sem precisar selecionar manualmente.
+3. ✅ **Fetch em streaming real** (pedido do usuário, comparando com o "fetch size" configurável do DBeaver — 200 linhas por padrão, editável, "carregar mais" sob demanda em vez de trazer tudo de uma vez):
+   - `internal/db/driver.go`: `DatabaseDriver` ganhou `ExecuteStreaming`/`FetchNext`/`CloseCursor`. `Execute` (full-scan) continua existindo para uso geral, não removido.
+   - `internal/db/sqlite.go` e `postgres.go`: cursor guardado como campo do driver (`*sql.Rows`/`pgx.Rows`), fechado automaticamente por uma nova `ExecuteStreaming` ou por `Close()`.
+   - **Bug latente real encontrado e corrigido**: `session.Manager.Open` retornava um `ctx` cancelável mas só era usado uma vez (em `Connect`) — todo o resto (`Execute`/`ListSchemas`/`ListTables`) usava `a.ctx` (contexto do app inteiro, nunca cancelado). `CancelQuery` cancelava um context que nunca era passado pra nenhuma query — o cancelamento só funcionava por causa do `CancelRunningQuery` nativo do Postgres, nunca via `ctx`. Corrigido: `Session` agora tem `Ctx` (vive enquanto a sessão está conectada) e `QueryCtx` (por execução, criado em `StartQuery`, cancelado individualmente por `Cancel` sem invalidar a sessão inteira — dá pra rodar outra query depois de cancelar, sem reconectar).
+   - `internal/store/store.go`: `RecordQuery` agora retorna o `id` inserido; novo `FinishQuery(id, status, rowCount)` atualiza a entrada do histórico quando o cursor se esgota (o `row_count` real só é conhecido depois do fetch, não na hora de iniciar a query).
+   - `app.go`: `Execute` (binding) removido, substituído por `RunQuery` (inicia streaming, grava histórico com duração da execução) + `FetchRows` (busca lote, atualiza histórico quando termina). Retornos empacotados em structs (`QueryMetadata`, `FetchBatch`) porque bindings Wails não lidam bem com mais de um valor além do `error`.
+   - `frontend/src/App.tsx`: novo fluxo `RunQuery` → primeira leva automática via `FetchRows` → botão "Carregar mais N" (N configurável, campo numérico no toolbar) enquanto `hasMore=true`. Badge de tempo de execução (`durationMs`) visível ao lado do botão Executar.
+4. ✅ **Validado com execução real** (múltiplos scripts descartáveis, todos removidos depois):
+   - Fetch em lotes até esgotar: `SELECT * FROM customers` em lotes de 2, total bate (3 linhas).
+   - Nova `ExecuteStreaming` fecha cursor anterior automaticamente sem vazar.
+   - **Achado real**: `pg_sleep()` por linha não é lazy no protocolo do Postgres via `pgx.Query()` simples — a computação acontece antes do primeiro `Next()` retornar, não incrementalmente. Isso não afeta o objetivo real (tabelas grandes sem computação cara por linha), confirmado à parte.
+   - Query de 5 milhões de linhas: `ExecuteStreaming` retorna em ~308ms (não espera a transferência toda), primeiro lote de 200 em ~66µs, heap não cresce proporcional ao total (731KB→761KB).
+   - **Achado real**: só `CloseCursor()` pra abandonar uma query de 5M linhas leva ~1.47s (driver drena parte do buffer de rede antes de fechar); cancelamento nativo (`CancelRunningQuery`) + `CloseCursor` juntos (o fluxo real do botão Cancelar) leva ~11ms — a ordem importa, documentado no ARCHITECTURE.md.
+   - `RecordQuery`/`FinishQuery`: grava com `row_count=0`, atualiza depois pro total real; `FinishQuery(0, ...)` (caso ad-hoc sem conexão salva) é no-op sem erro.
+5. ✅ Build completo (`go build`/`go vet`/`gofmt`/`tsc`/`wails build -tags webkit2_41`) validado em cada etapa.
+6. ✅ `docs/ARCHITECTURE.md` atualizado com o fluxo de execução em streaming real (substituiu a descrição antiga, que já estava desatualizada — falava em "streamado em chunks via eventos Wails", que nunca foi implementado assim).
+
 ## Próximos passos (não iniciados)
 1. Autocomplete no Monaco alimentado pelo schema cache (Fase 2) — usar `ListSchemas`/`ListTables` (já cacheados) para alimentar `monaco.languages.registerCompletionItemProvider`.
-2. **Confirmação visual pelo usuário pendente** — grid com volume grande (ex. `SELECT * FROM generate_series(1, 50000)`) rodando suave na janela do Wisp ainda não foi visto por ninguém.
+2. **Confirmação visual pelo usuário pendente** — todo o fluxo desta sessão (editor editável de novo, Ctrl+Shift+Enter, fetch em streaming com "Carregar mais", badge de duração) ainda não foi visto rodando na janela por ninguém. Prioridade alta pro próximo teste, já que envolveu um bug crítico (editor travado).
 
 ## Pendências/perguntas em aberto
 - Nenhuma bloqueante.
 
 ## Última atualização
-2026-09-14 — Glide Data Grid virtualizado (@glideapps/glide-data-grid) implementado e validado com sucesso.
+2026-09-14 — Bug crítico do editor corrigido (travava em somente-leitura), Ctrl+Shift+Enter implementado, fetch em streaming real (cursor + lotes configuráveis) substituindo o Execute que trazia tudo de uma vez, bug latente de contexto de cancelamento corrigido junto. Tudo validado com execução real; falta confirmação visual.
 
 
 

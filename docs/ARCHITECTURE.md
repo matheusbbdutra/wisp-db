@@ -38,13 +38,39 @@ Cliente SQL desktop leve e nativo. Ver decisões formais em `docs/adr/`.
 | SSH Tunnel | Túnel TCP local via `crypto/ssh` | Sem binário externo do SO |
 | Credential Vault | Cifra credenciais, chave mestra no keychain do SO | Nunca texto puro em disco |
 
-## Fluxo de execução de query
+## Fluxo de execução de query (streaming real, não tudo de uma vez)
 
-1. Usuário dispara execução na aba (`tabId`).
-2. Frontend chama binding Wails passando `tabId` + SQL.
-3. Backend resolve `*sql.Conn` da sessão, cria/reusa `context.WithCancel`.
-4. Driver específico executa; resultado é streamado em chunks para o frontend via eventos Wails.
-5. Botão "stop" chama `cancel()` → driver dispara cancelamento nativo (ex. `pgx.CancelQuery`) → conexão fecha o statement no servidor, não só localmente.
+Implementado assim porque rodar `SELECT *` numa tabela de milhões de linhas
+não pode carregar tudo em memória Go nem transferir tudo pro frontend de
+uma vez — precisa de fetch sob demanda em lotes, como o "fetch size"
+configurável de clientes como o DBeaver (padrão 200 linhas por lote, editável).
+
+1. Usuário dispara execução na aba (`tabId`) → binding `RunQuery(tabId, sql)`.
+2. Backend cria um `QueryCtx` novo pra essa execução (derivado do `Ctx` da
+   sessão, ver `session.Manager.StartQuery`) e chama
+   `driver.ExecuteStreaming(ctx, sql)`, que abre o cursor no banco (`*sql.Rows`
+   no SQLite, `pgx.Rows` no Postgres) e retorna só as colunas/tipos — nenhuma
+   linha é buscada ainda. A duração dessa etapa (execução no servidor) já é
+   gravada no histórico de queries (`query_history`, `row_count` inicial 0).
+3. Frontend chama `FetchRows(tabId, batchSize)` repetidamente — cada chamada
+   busca até `batchSize` linhas do cursor aberto (`driver.FetchNext`) e
+   retorna `{rows, hasMore}`. A primeira leva é automática (mesmo tamanho
+   configurado); as próximas exigem clique explícito em "Carregar mais" —
+   nunca busca tudo sozinho.
+4. Quando o cursor se esgota (`hasMore=false`) ou dá erro no meio do fetch, o
+   histórico gravado no passo 2 é atualizado (`store.FinishQuery`) com o
+   total real de linhas buscadas e o status final.
+5. Botão "Cancelar" (`CancelQuery`) cancela o `QueryCtx` daquela query
+   específica (não a sessão inteira — dá pra rodar outra query em seguida
+   sem reconectar) **e** dispara o cancelamento nativo do driver (`pgx`
+   `CancelRequest`). A ordem importa: cancelar no servidor primeiro e só
+   depois fechar o cursor localmente evita que o driver fique drenando o
+   resultado restante pela rede antes de fechar — medido na prática: só
+   fechar o cursor de uma query de 5 milhões de linhas levou ~1.5s, cancelar
+   no servidor primeiro e então fechar levou ~11ms.
+6. `ExecuteStreaming` fecha automaticamente qualquer cursor anterior ainda
+   aberto na mesma conexão antes de abrir um novo (nunca dois cursores vivos
+   ao mesmo tempo numa aba).
 
 ## Fluxo de metadados/schema
 

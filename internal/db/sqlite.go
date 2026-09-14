@@ -13,8 +13,9 @@ import (
 // SQLiteDriver implementa DatabaseDriver para arquivos SQLite locais
 // (modernc.org/sqlite, puro Go — ver docs/adr/0002-cgo-policy.md).
 type SQLiteDriver struct {
-	conn *sql.Conn
-	pool *sql.DB
+	conn   *sql.Conn
+	pool   *sql.DB
+	cursor *sql.Rows // cursor aberto por ExecuteStreaming, ver FetchNext/CloseCursor
 }
 
 func NewSQLiteDriver() *SQLiteDriver {
@@ -55,6 +56,7 @@ func (d *SQLiteDriver) Connect(ctx context.Context, dsn string) error {
 }
 
 func (d *SQLiteDriver) Close() error {
+	d.CloseCursor()
 	if d.conn != nil {
 		d.conn.Close()
 	}
@@ -71,6 +73,77 @@ func (d *SQLiteDriver) Execute(ctx context.Context, query string) (*QueryResult,
 	}
 	defer rows.Close()
 	return scanRows(rows)
+}
+
+// ExecuteStreaming inicia a query e devolve só os metadados de coluna — as
+// linhas são buscadas sob demanda via FetchNext (ver docs/ARCHITECTURE.md,
+// "Data Grid Virtualizado" e o pedido do usuário de paginação real em vez
+// de carregar tudo de uma vez).
+func (d *SQLiteDriver) ExecuteStreaming(ctx context.Context, query string) ([]string, []string, error) {
+	d.CloseCursor()
+
+	rows, err := d.conn.QueryContext(ctx, query)
+	if err != nil {
+		return nil, nil, fmt.Errorf("executando query: %w", err)
+	}
+
+	columns, err := rows.Columns()
+	if err != nil {
+		rows.Close()
+		return nil, nil, err
+	}
+	colTypes, err := rows.ColumnTypes()
+	if err != nil {
+		rows.Close()
+		return nil, nil, err
+	}
+	types := make([]string, len(colTypes))
+	for i, ct := range colTypes {
+		types[i] = ct.DatabaseTypeName()
+	}
+
+	d.cursor = rows
+	return columns, types, nil
+}
+
+func (d *SQLiteDriver) FetchNext(ctx context.Context, n int) ([][]any, bool, error) {
+	if d.cursor == nil {
+		return nil, false, nil
+	}
+
+	columns, err := d.cursor.Columns()
+	if err != nil {
+		return nil, false, err
+	}
+
+	var result [][]any
+	for len(result) < n {
+		if !d.cursor.Next() {
+			err := d.cursor.Err()
+			d.cursor.Close()
+			d.cursor = nil
+			return result, false, err
+		}
+		values := make([]any, len(columns))
+		pointers := make([]any, len(columns))
+		for i := range values {
+			pointers[i] = &values[i]
+		}
+		if err := d.cursor.Scan(pointers...); err != nil {
+			return result, false, err
+		}
+		result = append(result, values)
+	}
+	return result, true, nil
+}
+
+func (d *SQLiteDriver) CloseCursor() error {
+	if d.cursor == nil {
+		return nil
+	}
+	err := d.cursor.Close()
+	d.cursor = nil
+	return err
 }
 
 // CancelRunningQuery: SQLite é embutido e single-file — não há cancelamento

@@ -159,16 +159,42 @@ func (s *Store) DeleteConnection(id string) error {
 // significa que a sessão ativa não está associada a nenhuma conexão salva
 // (Connect direto por DSN) — como connection_id é NOT NULL com FK para
 // connections(id), nesse caso nada é inserido e nil é retornado sem erro.
-func (s *Store) RecordQuery(connectionID, tabID, queryText, status string, durationMs int64, rowCount int) error {
+// RecordQuery retorna o id da linha inserida (0 se não inseriu, caso
+// connectionID vazio) — usado por FinishQuery para atualizar o total real
+// de linhas depois que o cursor em streaming se esgota (ver App.FetchRows).
+func (s *Store) RecordQuery(connectionID, tabID, queryText, status string, durationMs int64, rowCount int) (int64, error) {
 	if connectionID == "" {
-		return nil
+		return 0, nil
 	}
-	_, err := s.db.Exec(
+	res, err := s.db.Exec(
 		`INSERT INTO query_history (connection_id, tab_id, query_text, duration_ms, status, row_count) VALUES (?, ?, ?, ?, ?, ?)`,
 		connectionID, tabID, queryText, durationMs, status, rowCount,
 	)
 	if err != nil {
-		return fmt.Errorf("gravando histórico de query: %w", err)
+		return 0, fmt.Errorf("gravando histórico de query: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("obtendo id do histórico: %w", err)
+	}
+	return id, nil
+}
+
+// FinishQuery atualiza status e row_count de uma entrada já gravada por
+// RecordQuery — usado quando o resultado é buscado em streaming (ver
+// App.FetchRows) e o total de linhas só é conhecido depois do fetch inicial
+// (ou quando o cursor se esgota / dá erro no meio do caminho). id == 0 é
+// tratado como no-op (RecordQuery retorna 0 quando não grava nada).
+func (s *Store) FinishQuery(id int64, status string, rowCount int) error {
+	if id == 0 {
+		return nil
+	}
+	_, err := s.db.Exec(
+		`UPDATE query_history SET status = ?, row_count = ? WHERE id = ?`,
+		status, rowCount, id,
+	)
+	if err != nil {
+		return fmt.Errorf("atualizando histórico de query %d: %w", id, err)
 	}
 	return nil
 }

@@ -22,8 +22,8 @@ export function Disconnect(arg1) {
   return window['go']['main']['App']['Disconnect'](arg1);
 }
 
-export function Execute(arg1, arg2) {
-  return window['go']['main']['App']['Execute'](arg1, arg2);
+export function FetchRows(arg1, arg2) {
+  return window['go']['main']['App']['FetchRows'](arg1, arg2);
 }
 
 export function GetQueryHistory(arg1) {
@@ -48,6 +48,10 @@ export function PickSQLiteFile() {
 
 export function RefreshSchema(arg1) {
   return window['go']['main']['App']['RefreshSchema'](arg1);
+}
+
+export function RunQuery(arg1, arg2) {
+  return window['go']['main']['App']['RunQuery'](arg1, arg2);
 }
 
 export function SaveConnection(arg1, arg2, arg3) {

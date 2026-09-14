@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"wisp/internal/db"
 )
@@ -23,7 +24,27 @@ type Session struct {
 	// usado para registrar o histórico de queries (query_history) ligado à
 	// conexão certa.
 	ConnectionID string
-	cancel       context.CancelFunc
+
+	// Ctx vive enquanto a sessão estiver conectada (cancelado só em Close ou
+	// numa reconexão que substitui a sessão) — usado para chamadas que não
+	// fazem parte do fluxo de uma query específica (ListSchemas, ListTables).
+	Ctx context.Context
+	// QueryCtx é o ctx da execução de query em voo no momento (RunQuery/
+	// FetchRows) — cancelado individualmente por Cancel(), sem invalidar a
+	// sessão inteira (permite rodar uma query nova depois de cancelar uma
+	// anterior, sem precisar reconectar).
+	QueryCtx context.Context
+
+	// Campos usados por App para registrar o histórico de uma query em
+	// streaming (RunQuery grava a entrada, FetchRows atualiza o total de
+	// linhas conforme busca e quando o cursor se esgota).
+	QueryStartedAt   time.Time
+	PendingQueryText string
+	PendingHistoryID int64
+	FetchedRowCount  int
+
+	baseCancel  context.CancelFunc
+	queryCancel context.CancelFunc
 }
 
 // Manager mantém o mapeamento tabId -> Session. Seguro para uso concorrente:
@@ -46,12 +67,18 @@ func (m *Manager) Open(tabID string, driver db.DatabaseDriver, cacheKey string, 
 	defer m.mu.Unlock()
 
 	if existing, ok := m.sessions[tabID]; ok {
-		existing.cancel()
+		if existing.queryCancel != nil {
+			existing.queryCancel()
+		}
+		existing.baseCancel()
 		_ = existing.Driver.Close()
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	m.sessions[tabID] = &Session{TabID: tabID, Driver: driver, CacheKey: cacheKey, ConnectionID: connectionID, cancel: cancel}
+	m.sessions[tabID] = &Session{
+		TabID: tabID, Driver: driver, CacheKey: cacheKey, ConnectionID: connectionID,
+		Ctx: ctx, baseCancel: cancel,
+	}
 	return ctx, nil
 }
 
@@ -67,14 +94,39 @@ func (m *Manager) Get(tabID string) (*Session, error) {
 	return s, nil
 }
 
-// Cancel interrompe a query em andamento da aba: cancela o context (derruba
-// a chamada local) e dispara o cancelamento nativo do driver quando suportado.
+// StartQuery prepara um QueryCtx novo (derivado do Ctx da sessão) para uma
+// nova execução, cancelando qualquer query anterior ainda em voo na mesma
+// aba — evita cursor vazando se o usuário disparar uma query nova sem
+// esperar a anterior terminar ou cancelar explicitamente.
+func (m *Manager) StartQuery(tabID string) (context.Context, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.sessions[tabID]
+	if !ok {
+		return nil, fmt.Errorf("nenhuma sessão ativa para tabId %q", tabID)
+	}
+	if s.queryCancel != nil {
+		s.queryCancel()
+	}
+	qctx, qcancel := context.WithCancel(s.Ctx)
+	s.QueryCtx = qctx
+	s.queryCancel = qcancel
+	return qctx, nil
+}
+
+// Cancel interrompe a query em andamento da aba: cancela o QueryCtx (derruba
+// a chamada local, incluindo um FetchNext em andamento) e dispara o
+// cancelamento nativo do driver quando suportado. Não afeta a sessão em si
+// — dá pra rodar outra query na mesma conexão logo em seguida.
 func (m *Manager) Cancel(ctx context.Context, tabID string) error {
 	s, err := m.Get(tabID)
 	if err != nil {
 		return err
 	}
-	s.cancel()
+	if s.queryCancel != nil {
+		s.queryCancel()
+	}
 	return s.Driver.CancelRunningQuery(ctx)
 }
 
@@ -87,7 +139,10 @@ func (m *Manager) Close(tabID string) error {
 	if !ok {
 		return nil
 	}
-	s.cancel()
+	if s.queryCancel != nil {
+		s.queryCancel()
+	}
+	s.baseCancel()
 	delete(m.sessions, tabID)
 	return s.Driver.Close()
 }

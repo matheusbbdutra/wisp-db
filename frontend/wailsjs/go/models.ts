@@ -20,22 +20,6 @@ export namespace db {
 	        this.Nullable = source["Nullable"];
 	    }
 	}
-	export class QueryResult {
-	    Columns: string[];
-	    Types: string[];
-	    Rows: any[][];
-	
-	    static createFrom(source: any = {}) {
-	        return new QueryResult(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.Columns = source["Columns"];
-	        this.Types = source["Types"];
-	        this.Rows = source["Rows"];
-	    }
-	}
 	export class Table {
 	    Schema: string;
 	    Name: string;
@@ -69,6 +53,41 @@ export namespace db {
 		    }
 		    return a;
 		}
+	}
+
+}
+
+export namespace main {
+	
+	export class FetchBatch {
+	    Rows: any[][];
+	    HasMore: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new FetchBatch(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Rows = source["Rows"];
+	        this.HasMore = source["HasMore"];
+	    }
+	}
+	export class QueryMetadata {
+	    Columns: string[];
+	    Types: string[];
+	    DurationMs: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new QueryMetadata(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Columns = source["Columns"];
+	        this.Types = source["Types"];
+	        this.DurationMs = source["DurationMs"];
+	    }
 	}
 
 }

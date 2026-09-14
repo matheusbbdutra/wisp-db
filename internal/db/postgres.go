@@ -11,7 +11,8 @@ import (
 // nativo — sem CGO). Uma instância = uma conexão dedicada de uma aba
 // (nunca compartilhada, ver internal/session).
 type PostgresDriver struct {
-	conn *pgx.Conn
+	conn   *pgx.Conn
+	cursor pgx.Rows // cursor aberto por ExecuteStreaming, ver FetchNext/CloseCursor
 }
 
 func NewPostgresDriver() *PostgresDriver {
@@ -28,6 +29,7 @@ func (d *PostgresDriver) Connect(ctx context.Context, dsn string) error {
 }
 
 func (d *PostgresDriver) Close() error {
+	d.CloseCursor()
 	if d.conn == nil {
 		return nil
 	}
@@ -59,6 +61,61 @@ func (d *PostgresDriver) Execute(ctx context.Context, query string) (*QueryResul
 		result.Rows = append(result.Rows, values)
 	}
 	return result, rows.Err()
+}
+
+// ExecuteStreaming inicia a query e devolve só os metadados de coluna — as
+// linhas são buscadas sob demanda via FetchNext (ver docs/ARCHITECTURE.md,
+// "Data Grid Virtualizado" e o pedido do usuário de paginação real em vez
+// de carregar tudo de uma vez).
+func (d *PostgresDriver) ExecuteStreaming(ctx context.Context, query string) ([]string, []string, error) {
+	d.CloseCursor()
+
+	rows, err := d.conn.Query(ctx, query)
+	if err != nil {
+		return nil, nil, fmt.Errorf("executando query: %w", err)
+	}
+
+	fields := rows.FieldDescriptions()
+	columns := make([]string, len(fields))
+	types := make([]string, len(fields))
+	for i, f := range fields {
+		columns[i] = f.Name
+		types[i] = fmt.Sprintf("oid:%d", f.DataTypeOID)
+	}
+
+	d.cursor = rows
+	return columns, types, nil
+}
+
+func (d *PostgresDriver) FetchNext(ctx context.Context, n int) ([][]any, bool, error) {
+	if d.cursor == nil {
+		return nil, false, nil
+	}
+
+	var result [][]any
+	for len(result) < n {
+		if !d.cursor.Next() {
+			err := d.cursor.Err()
+			d.cursor.Close()
+			d.cursor = nil
+			return result, false, err
+		}
+		values, err := d.cursor.Values()
+		if err != nil {
+			return result, false, err
+		}
+		result = append(result, values)
+	}
+	return result, true, nil
+}
+
+func (d *PostgresDriver) CloseCursor() error {
+	if d.cursor == nil {
+		return nil
+	}
+	d.cursor.Close()
+	d.cursor = nil
+	return nil
 }
 
 // CancelRunningQuery dispara o cancelamento nativo do protocolo Postgres

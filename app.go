@@ -108,17 +108,51 @@ func (a *App) connect(tabID string, driverName string, dsn string, connectionID 
 	return nil
 }
 
-// Execute roda uma query na conexão da aba tabId e retorna o resultado no
-// formato de transporte {columns, types, rows} (ver internal/db.QueryResult).
-// A execução é registrada no histórico via Store.RecordQuery sem alterar o
-// retorno: falha ao gravar o histórico é só logada, nunca propagada.
-func (a *App) Execute(tabID string, query string) (*db.QueryResult, error) {
+// QueryMetadata é o retorno de RunQuery: colunas/tipos da query iniciada e
+// a duração da execução inicial (não inclui o tempo de buscar as linhas em
+// si, que é medido por fora no FetchRows). Uma struct em vez de múltiplos
+// retornos porque bindings Wails não lidam bem com mais de um valor além
+// do error (ver ADR pattern já usado em db.QueryResult/store.SavedConnection).
+type QueryMetadata struct {
+	Columns    []string
+	Types      []string
+	DurationMs int64
+}
+
+// FetchBatch é o retorno de FetchRows: um lote de linhas e se ainda há mais
+// disponível no cursor.
+type FetchBatch struct {
+	Rows    [][]any
+	HasMore bool
+}
+
+// RunQuery inicia a execução de uma query na conexão da aba tabId em modo
+// streaming — só os metadados de coluna voltam aqui; as linhas são buscadas
+// sob demanda via FetchRows, em lotes, para não carregar resultados grandes
+// inteiros em memória (equivalente ao "fetch size" configurável de clientes
+// como o DBeaver, em vez de trazer tudo de uma vez).
+//
+// Cria um QueryCtx novo pra essa execução (ver session.Manager.StartQuery)
+// — assim o botão Cancelar consegue abortar só esta query (via ctx e via
+// cancelamento nativo do driver), sem invalidar a sessão/conexão inteira.
+func (a *App) RunQuery(tabID string, query string) (*QueryMetadata, error) {
 	s, err := a.sessions.Get(tabID)
 	if err != nil {
 		return nil, err
 	}
-	start := time.Now()
-	result, err := s.Driver.Execute(a.ctx, query)
+
+	qctx, err := a.sessions.StartQuery(tabID)
+	if err != nil {
+		return nil, err
+	}
+
+	s.QueryStartedAt = time.Now()
+	s.PendingQueryText = query
+	s.FetchedRowCount = 0
+	s.PendingHistoryID = 0
+
+	columns, types, err := s.Driver.ExecuteStreaming(qctx, query)
+	duration := time.Since(s.QueryStartedAt).Milliseconds()
 
 	// DDL detectado na própria aba invalida o schema cache dessa conexão
 	// imediatamente (ver docs/ARCHITECTURE.md, "Fluxo de metadados") — não
@@ -129,19 +163,50 @@ func (a *App) Execute(tabID string, query string) (*db.QueryResult, error) {
 
 	if a.store != nil {
 		status := "ok"
-		rowCount := 0
 		if err != nil {
 			status = "error"
-		} else if result != nil {
-			rowCount = len(result.Rows)
 		}
-		// connectionID vem da sessão (associado em ConnectSaved); vazio para
-		// conexão por DSN direta — RecordQuery ignora connectionID vazio.
-		if recErr := a.store.RecordQuery(s.ConnectionID, tabID, query, status, time.Since(start).Milliseconds(), rowCount); recErr != nil {
+		id, recErr := a.store.RecordQuery(s.ConnectionID, tabID, query, status, duration, 0)
+		if recErr != nil {
 			fmt.Printf("wisp: não foi possível gravar histórico de query: %v\n", recErr)
+		} else {
+			s.PendingHistoryID = id
 		}
 	}
-	return result, err
+
+	if err != nil {
+		return nil, err
+	}
+	return &QueryMetadata{Columns: columns, Types: types, DurationMs: duration}, nil
+}
+
+// FetchRows busca o próximo lote de até batchSize linhas do cursor aberto
+// por RunQuery. hasMore=false indica que o resultado terminou — nesse
+// momento (ou em caso de erro no meio do fetch) o histórico gravado por
+// RunQuery é atualizado com o total real de linhas buscadas.
+func (a *App) FetchRows(tabID string, batchSize int) (*FetchBatch, error) {
+	s, err := a.sessions.Get(tabID)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, hasMore, err := s.Driver.FetchNext(s.QueryCtx, batchSize)
+	s.FetchedRowCount += len(rows)
+
+	if a.store != nil && s.PendingHistoryID != 0 {
+		if err != nil {
+			_ = a.store.FinishQuery(s.PendingHistoryID, "error", s.FetchedRowCount)
+			s.PendingHistoryID = 0
+		} else if !hasMore {
+			_ = a.store.FinishQuery(s.PendingHistoryID, "ok", s.FetchedRowCount)
+			s.PendingHistoryID = 0
+		}
+	}
+
+	if err != nil {
+		return nil, err
+	}
+	return &FetchBatch{Rows: rows, HasMore: hasMore}, nil
 }
 
 // isDDL detecta, pelo primeiro token da query, se ela é uma alteração de
@@ -186,7 +251,7 @@ func (a *App) ListSchemas(tabID string) ([]string, error) {
 		}
 	}
 
-	schemas, err := s.Driver.ListSchemas(a.ctx)
+	schemas, err := s.Driver.ListSchemas(s.Ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +283,7 @@ func (a *App) ListTables(tabID string, schema string) ([]db.Table, error) {
 		}
 	}
 
-	tables, err := s.Driver.ListTables(a.ctx, schema)
+	tables, err := s.Driver.ListTables(s.Ctx, schema)
 	if err != nil {
 		return nil, err
 	}
