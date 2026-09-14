@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"wisp/internal/db"
 	"wisp/internal/session"
 	"wisp/internal/store"
 )
@@ -53,4 +54,46 @@ func (a *App) shutdown(ctx context.Context) {
 	if a.store != nil {
 		a.store.Close()
 	}
+}
+
+// --- Bindings expostos ao frontend (Wails IPC) ---
+
+// Connect abre uma conexão dedicada para a aba tabId, usando o dialeto
+// driverName ("sqlite" ou "postgres") e a dsn fornecida. Qualquer conexão
+// anterior da mesma aba é encerrada (ver session.Manager.Open).
+func (a *App) Connect(tabID string, driverName string, dsn string) error {
+	driver, err := db.New(db.DriverName(driverName))
+	if err != nil {
+		return err
+	}
+
+	ctx, err := a.sessions.Open(tabID, driver)
+	if err != nil {
+		return err
+	}
+	if err := driver.Connect(ctx, dsn); err != nil {
+		return fmt.Errorf("conectando (tabId=%s): %w", tabID, err)
+	}
+	return nil
+}
+
+// Execute roda uma query na conexão da aba tabId e retorna o resultado no
+// formato de transporte {columns, types, rows} (ver internal/db.QueryResult).
+func (a *App) Execute(tabID string, query string) (*db.QueryResult, error) {
+	s, err := a.sessions.Get(tabID)
+	if err != nil {
+		return nil, err
+	}
+	return s.Driver.Execute(a.ctx, query)
+}
+
+// CancelQuery interrompe a execução em andamento na aba tabId, cancelando o
+// context local e disparando o cancelamento nativo do driver quando suportado.
+func (a *App) CancelQuery(tabID string) error {
+	return a.sessions.Cancel(a.ctx, tabID)
+}
+
+// Disconnect encerra e remove a sessão da aba tabId.
+func (a *App) Disconnect(tabID string) error {
+	return a.sessions.Close(tabID)
 }

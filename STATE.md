@@ -21,11 +21,19 @@ Projeto criado em 2026-09-14. Fase: **Fase 1 em andamento** — skeleton Wails g
 7. ✅ Descoberto e documentado no README: este sistema (Arch/Omarchy) só tem `webkit2gtk-4.1`, exige `-tags webkit2_41` em todo build/dev (`wails build`/`wails dev`), senão falha procurando `webkit2gtk-4.0`.
 8. ✅ Removido placeholder `Greet` do template padrão do Wails (era binding de demonstração sem relação com o produto).
 
+## Feito em sessão seguinte (drivers + wiring)
+1. ✅ `internal/db/sqlite.go` — `SQLiteDriver` completo (Execute, ListTables, Introspect via `PRAGMA table_xinfo`, detecta PK e colunas geradas). Validado com implementação real contra `testdata/sample.db` (não mock).
+2. ✅ `internal/db/postgres.go` — `PostgresDriver` via `pgx` (Execute, cancelamento nativo via `CancelRequest`, introspecção via `information_schema` cruzando PK real). **Não testado contra Postgres real ainda** — sem instância disponível nesta sessão, só compilado.
+3. ✅ `internal/db/factory.go` — único ponto de seleção por dialeto (Strategy).
+4. ✅ `app.go` — bindings `Connect`/`Execute`/`CancelQuery`/`Disconnect` expostos ao frontend via Session Manager.
+5. ✅ UI de teste manual em `frontend/src/App.tsx` (não é a UI final — Monaco/Glide Data Grid ainda não entraram) para validar o fluxo ponta a ponta pela janela.
+6. ✅ `testdata/seed.sql` — script reproduzível pra gerar banco SQLite de teste (`sqlite3 testdata/sample.db < testdata/seed.sql`).
+
 ## Próximos passos (não iniciados)
-1. Implementação real do primeiro `DatabaseDriver`: Postgres via `pgx`, incluindo `CancelRunningQuery` nativo (`pgx.CancelQuery`).
-2. Ligar `Session.Open`/`Get`/`Cancel` a bindings Wails reais expostos ao frontend (hoje o Manager existe mas não está exposto em `App`).
-3. Credential Vault (cifragem de `encrypted_secret` + chave mestra no keychain do SO — `go-keyring` é candidato, não validado em profundidade ainda).
-4. UI real: Monaco Editor + Glide Data Grid substituindo o placeholder atual em `frontend/src/App.tsx`.
+1. Validar `PostgresDriver` contra instância Postgres real (Docker local) — só foi compilado, não exercitado.
+2. Credential Vault (cifragem de `encrypted_secret` + chave mestra no keychain do SO — `go-keyring` é candidato, não validado em profundidade ainda).
+3. UI real: Monaco Editor + Glide Data Grid substituindo a UI de teste manual atual.
+4. Persistir conexões testadas no Store (`connections` table) — hoje `Connect` não grava nada, é só sessão em memória.
 
 ## Pendências/perguntas em aberto
 - Nenhuma bloqueante. Próxima decisão real é a lib de keychain cross-platform ao implementar o Credential Vault.

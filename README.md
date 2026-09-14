@@ -18,6 +18,18 @@ wails dev -tags webkit2_41
 
 Sem a tag, o build falha com `Package 'webkit2gtk-4.0' not found` mesmo com o pacote 4.1 instalado — é uma diferença de nome de pacote entre distros, não falta de dependência.
 
+## Testar localmente (SQLite)
+
+Gere um banco de teste com dados de exemplo:
+
+```bash
+sqlite3 testdata/sample.db < testdata/seed.sql
+```
+
+Rode `wails dev -tags webkit2_41`. A UI atual (placeholder de teste manual,
+não a UI final) já vem preenchida com driver `sqlite` e o DSN apontando
+para `testdata/sample.db` — clique em "Conectar" e depois "Executar".
+
 ## Estrutura
 - `internal/db` — interface `DatabaseDriver` (Strategy), um dialeto por implementação.
 - `internal/session` — Session Manager, isolamento por `tabId` (conexão + cancelamento).
