@@ -18,6 +18,10 @@ export function DeleteSavedConnection(arg1) {
   return window['go']['main']['App']['DeleteSavedConnection'](arg1);
 }
 
+export function DeleteScript(arg1) {
+  return window['go']['main']['App']['DeleteScript'](arg1);
+}
+
 export function Disconnect(arg1) {
   return window['go']['main']['App']['Disconnect'](arg1);
 }
@@ -36,6 +40,10 @@ export function ListSavedConnections() {
 
 export function ListSchemas(arg1) {
   return window['go']['main']['App']['ListSchemas'](arg1);
+}
+
+export function ListScripts() {
+  return window['go']['main']['App']['ListScripts']();
 }
 
 export function ListTables(arg1, arg2) {
@@ -58,6 +66,14 @@ export function SaveConnection(arg1, arg2, arg3) {
   return window['go']['main']['App']['SaveConnection'](arg1, arg2, arg3);
 }
 
+export function SaveScript(arg1, arg2) {
+  return window['go']['main']['App']['SaveScript'](arg1, arg2);
+}
+
 export function TestConnection(arg1, arg2) {
   return window['go']['main']['App']['TestConnection'](arg1, arg2);
+}
+
+export function UpdateScript(arg1, arg2, arg3) {
+  return window['go']['main']['App']['UpdateScript'](arg1, arg2, arg3);
 }

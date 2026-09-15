@@ -657,6 +657,39 @@
 
 
 /* --------------------------------------------------------------------------
+   Toolbar secundária (scripts, histórico, salvar) — separada da barra de
+   execução (editor-actions) pra não sobrecarregar o rodapé do editor.
+   -------------------------------------------------------------------------- */
+.toolbar-secondary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    background: var(--bg-topbar);
+    border-bottom: 1px solid var(--border-default);
+    flex-wrap: wrap;
+    flex-shrink: 0;
+}
+
+.toolbar-secondary .btn.active {
+    background: var(--bg-input);
+    border-color: var(--accent-green, #059669);
+    color: var(--text-main);
+}
+
+.toolbar-tab-id {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--text-muted, #6b7280);
+}
+
+.script-save-form {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* --------------------------------------------------------------------------
    Workspace Layout
    -------------------------------------------------------------------------- */
 .workspace {

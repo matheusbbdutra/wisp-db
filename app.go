@@ -378,6 +378,41 @@ func (a *App) GetQueryHistory(limit int) ([]store.QueryHistoryEntry, error) {
 	return a.store.ListQueryHistory(limit)
 }
 
+// --- Scripts SQL salvos (nomeados, editáveis — diferente do histórico) ---
+
+// SaveScript grava um novo script SQL nomeado. Retorna o id gerado.
+func (a *App) SaveScript(name string, queryText string) (string, error) {
+	if a.store == nil {
+		return "", fmt.Errorf("store local indisponível")
+	}
+	return a.store.SaveScript(name, queryText)
+}
+
+// ListScripts retorna os scripts salvos, do mais recentemente atualizado
+// para o mais antigo.
+func (a *App) ListScripts() ([]store.SavedScript, error) {
+	if a.store == nil {
+		return nil, fmt.Errorf("store local indisponível")
+	}
+	return a.store.ListScripts()
+}
+
+// UpdateScript sobrescreve nome e/ou texto de um script existente.
+func (a *App) UpdateScript(id string, name string, queryText string) error {
+	if a.store == nil {
+		return fmt.Errorf("store local indisponível")
+	}
+	return a.store.UpdateScript(id, name, queryText)
+}
+
+// DeleteScript remove um script salvo permanentemente.
+func (a *App) DeleteScript(id string) error {
+	if a.store == nil {
+		return fmt.Errorf("store local indisponível")
+	}
+	return a.store.DeleteScript(id)
+}
+
 // PickSQLiteFile abre o diálogo nativo do sistema para selecionar um arquivo
 // de banco SQLite existente (.db, .sqlite, .sqlite3). Retorna o caminho absoluto
 // ou string vazia se o usuário cancelou o diálogo.

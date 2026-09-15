@@ -48,6 +48,14 @@ CREATE TABLE IF NOT EXISTS schema_cache (
 	fetched_at      DATETIME NOT NULL,
 	ttl_expires_at  DATETIME NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS saved_scripts (
+	id         TEXT PRIMARY KEY,
+	name       TEXT NOT NULL,
+	query_text TEXT NOT NULL,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+	updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
 `
 
 // SavedConnection é a representação exposta ao frontend — nunca inclui a
@@ -57,6 +65,16 @@ type SavedConnection struct {
 	Name      string
 	Driver    string
 	CreatedAt time.Time
+}
+
+// SavedScript é um script SQL nomeado, editável e reaberto (diferente do
+// histórico, que é log automático de execuções).
+type SavedScript struct {
+	ID        string
+	Name      string
+	QueryText string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // QueryHistoryEntry é uma execução registrada em query_history.
@@ -220,6 +238,60 @@ func (s *Store) ListQueryHistory(limit int) ([]QueryHistoryEntry, error) {
 		result = append(result, e)
 	}
 	return result, rows.Err()
+}
+
+// SaveScript grava um novo script SQL nomeado. Retorna o id gerado.
+func (s *Store) SaveScript(name, queryText string) (string, error) {
+	id := uuid.NewString()
+	_, err := s.db.Exec(
+		`INSERT INTO saved_scripts (id, name, query_text) VALUES (?, ?, ?)`,
+		id, name, queryText,
+	)
+	if err != nil {
+		return "", fmt.Errorf("gravando script: %w", err)
+	}
+	return id, nil
+}
+
+// ListScripts retorna os scripts salvos, do mais recentemente atualizado
+// para o mais antigo.
+func (s *Store) ListScripts() ([]SavedScript, error) {
+	rows, err := s.db.Query(`SELECT id, name, query_text, created_at, updated_at FROM saved_scripts ORDER BY updated_at DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("listando scripts: %w", err)
+	}
+	defer rows.Close()
+
+	var result []SavedScript
+	for rows.Next() {
+		var sc SavedScript
+		if err := rows.Scan(&sc.ID, &sc.Name, &sc.QueryText, &sc.CreatedAt, &sc.UpdatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, sc)
+	}
+	return result, rows.Err()
+}
+
+// UpdateScript sobrescreve nome e/ou texto de um script existente.
+func (s *Store) UpdateScript(id, name, queryText string) error {
+	res, err := s.db.Exec(
+		`UPDATE saved_scripts SET name = ?, query_text = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		name, queryText, id,
+	)
+	if err != nil {
+		return fmt.Errorf("atualizando script %q: %w", id, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("script %q não encontrado", id)
+	}
+	return nil
+}
+
+// DeleteScript remove um script salvo permanentemente.
+func (s *Store) DeleteScript(id string) error {
+	_, err := s.db.Exec(`DELETE FROM saved_scripts WHERE id = ?`, id)
+	return err
 }
 
 // GetSchemaCacheJSON, SetSchemaCacheJSON e DeleteSchemaCacheJSON implementam

@@ -1,9 +1,10 @@
 import {useState} from 'react';
-import {RunQuery, FetchRows, Disconnect, CancelQuery} from '../../wailsjs/go/main/App';
+import {RunQuery, FetchRows, Disconnect, CancelQuery, SaveScript, UpdateScript} from '../../wailsjs/go/main/App';
 import SqlEditor from './SqlEditor';
 import ResultGrid from './ResultGrid';
 import Sidebar from './Sidebar';
 import QueryHistory from './QueryHistory';
+import ScriptsPanel from './ScriptsPanel';
 import ConnectionBar from './ConnectionBar';
 
 const DEFAULT_BATCH_SIZE = 200;
@@ -31,6 +32,13 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange}: Props) {
     const [batchSizeInput, setBatchSizeInput] = useState(String(DEFAULT_BATCH_SIZE));
     const [showHistory, setShowHistory] = useState(false);
     const [historyToken, setHistoryToken] = useState(0);
+    const [showScripts, setShowScripts] = useState(false);
+    const [scriptsToken, setScriptsToken] = useState(0);
+    const [activeScriptId, setActiveScriptId] = useState<string | null>(null);
+    const [activeScriptName, setActiveScriptName] = useState('');
+    const [showSaveForm, setShowSaveForm] = useState(false);
+    const [saveNameInput, setSaveNameInput] = useState('');
+    const [savingScript, setSavingScript] = useState(false);
 
     const busy = running || fetching;
 
@@ -73,6 +81,14 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange}: Props) {
     }
 
     async function handleRun(textOverride?: string) {
+        // Guarda contra os atalhos de teclado do editor (Ctrl+Enter /
+        // Ctrl+Shift+Enter, ver SqlEditor.tsx) — eles chamam handleRun direto,
+        // sem passar pelo `disabled` do botão "Executar". Bug real: rodava
+        // query sem sessão ativa, estourando "nenhuma sessão ativa para tabId".
+        if (!connected) {
+            setStatus('erro: nenhuma conexão ativa');
+            return;
+        }
         const text = textOverride ?? query;
         setRunning(true);
         setColumns([]);
@@ -102,7 +118,55 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange}: Props) {
     }
 
     function handleSelectTable(schema: string, table: string) {
+        handleNewScript();
         setQuery(`SELECT * FROM ${schema === 'main' ? table : `${schema}.${table}`} LIMIT 200`);
+    }
+
+    function handleSelectScript(id: string, name: string, queryText: string) {
+        setActiveScriptId(id);
+        setActiveScriptName(name);
+        setQuery(queryText);
+    }
+
+    // Sem script ativo, "Salvar" abre um campo de nome inline (novo script).
+    // Com script ativo, sobrescreve o mesmo script direto — mesmo
+    // comportamento de "salvar" de um editor de arquivos comum.
+    async function handleSaveClick() {
+        if (activeScriptId) {
+            setSavingScript(true);
+            try {
+                await UpdateScript(activeScriptId, activeScriptName, query);
+                setScriptsToken(t => t + 1);
+            } finally {
+                setSavingScript(false);
+            }
+            return;
+        }
+        setSaveNameInput('');
+        setShowSaveForm(true);
+    }
+
+    async function handleConfirmSaveNew() {
+        const name = saveNameInput.trim();
+        if (!name) {
+            return;
+        }
+        setSavingScript(true);
+        try {
+            const id = await SaveScript(name, query);
+            setActiveScriptId(id);
+            setActiveScriptName(name);
+            setShowSaveForm(false);
+            setScriptsToken(t => t + 1);
+        } finally {
+            setSavingScript(false);
+        }
+    }
+
+    function handleNewScript() {
+        setActiveScriptId(null);
+        setActiveScriptName('');
+        setShowSaveForm(false);
     }
 
     return (
@@ -115,6 +179,59 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange}: Props) {
                 onConnected={handleConnected}
                 onError={handleError}
             />
+
+            <div className="toolbar-secondary">
+                {showSaveForm ? (
+                    <span className="script-save-form">
+                        <input
+                            className="input-control"
+                            autoFocus
+                            placeholder="Nome do script"
+                            value={saveNameInput}
+                            onChange={e => setSaveNameInput(e.target.value)}
+                            onKeyDown={e => {
+                                if (e.key === 'Enter') handleConfirmSaveNew();
+                                if (e.key === 'Escape') setShowSaveForm(false);
+                            }}
+                        />
+                        <button className="btn btn-success" onClick={handleConfirmSaveNew} disabled={savingScript || !saveNameInput.trim()}>
+                            Confirmar
+                        </button>
+                        <button className="btn btn-secondary" onClick={() => setShowSaveForm(false)}>
+                            Cancelar
+                        </button>
+                    </span>
+                ) : (
+                    <button
+                        className="btn btn-secondary"
+                        onClick={handleSaveClick}
+                        disabled={savingScript || !query.trim()}
+                        title={activeScriptId ? `Sobrescrever script "${activeScriptName}"` : 'Salvar como novo script nomeado'}
+                    >
+                        {activeScriptId ? `Salvar "${activeScriptName}"` : 'Salvar script'}
+                    </button>
+                )}
+                {activeScriptId && (
+                    <button className="btn btn-secondary" onClick={handleNewScript} title="Desvincular do script atual (próximo Salvar cria um novo)">
+                        Novo
+                    </button>
+                )}
+                <button
+                    className={`btn btn-secondary ${showScripts ? 'active' : ''}`}
+                    onClick={() => setShowScripts(v => !v)}
+                    title="Mostrar/ocultar scripts salvos"
+                >
+                    Scripts
+                </button>
+                <button
+                    className={`btn btn-secondary ${showHistory ? 'active' : ''}`}
+                    onClick={() => setShowHistory(v => !v)}
+                    title="Mostrar/ocultar histórico de queries"
+                >
+                    Histórico
+                </button>
+                <span className="toolbar-tab-id" title="ID da sessão ativa">{tabId}</span>
+            </div>
 
             <div className="workspace">
                 <Sidebar tabId={tabId} connected={connected} onSelectTable={handleSelectTable} />
@@ -181,14 +298,6 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange}: Props) {
                                 />
                                 por vez
                             </label>
-                            <button
-                                className="btn btn-secondary"
-                                onClick={() => setShowHistory(v => !v)}
-                                title="Mostrar/ocultar histórico de queries"
-                            >
-                                Histórico
-                            </button>
-                            <span title="ID da sessão ativa">{tabId}</span>
                         </div>
                     </div>
                     <ResultGrid columns={columns} rows={rows} />
@@ -202,8 +311,11 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange}: Props) {
                     )}
                 </main>
 
+                {showScripts && (
+                    <ScriptsPanel activeScriptId={activeScriptId} onSelectScript={handleSelectScript} refreshToken={scriptsToken} />
+                )}
                 {showHistory && (
-                    <QueryHistory onSelectQuery={setQuery} refreshToken={historyToken} />
+                    <QueryHistory onSelectQuery={text => { handleNewScript(); setQuery(text); }} refreshToken={historyToken} />
                 )}
             </div>
         </div>

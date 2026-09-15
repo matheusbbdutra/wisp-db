@@ -12,6 +12,8 @@ export function ConnectSaved(arg1:string,arg2:string):Promise<void>;
 
 export function DeleteSavedConnection(arg1:string):Promise<void>;
 
+export function DeleteScript(arg1:string):Promise<void>;
+
 export function Disconnect(arg1:string):Promise<void>;
 
 export function FetchRows(arg1:string,arg2:number):Promise<main.FetchBatch>;
@@ -21,6 +23,8 @@ export function GetQueryHistory(arg1:number):Promise<Array<store.QueryHistoryEnt
 export function ListSavedConnections():Promise<Array<store.SavedConnection>>;
 
 export function ListSchemas(arg1:string):Promise<Array<string>>;
+
+export function ListScripts():Promise<Array<store.SavedScript>>;
 
 export function ListTables(arg1:string,arg2:string):Promise<Array<db.Table>>;
 
@@ -32,4 +36,8 @@ export function RunQuery(arg1:string,arg2:string):Promise<main.QueryMetadata>;
 
 export function SaveConnection(arg1:string,arg2:string,arg3:string):Promise<string>;
 
+export function SaveScript(arg1:string,arg2:string):Promise<string>;
+
 export function TestConnection(arg1:string,arg2:string):Promise<void>;
+
+export function UpdateScript(arg1:string,arg2:string,arg3:string):Promise<void>;
