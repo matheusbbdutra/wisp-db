@@ -1,7 +1,7 @@
 import {useState} from 'react';
 import {RunQuery, FetchRows, Disconnect, CancelQuery, SaveScript, UpdateScript, ListSchemas, ListTables, IntrospectTable} from '../../wailsjs/go/main/App';
 import type {db} from '../../wailsjs/go/models';
-import SqlEditor from './SqlEditor';
+import SqlEditor, {AUTO_UPPERCASE_STORAGE_KEY, readAutoUppercasePreference} from './SqlEditor';
 import ResultGrid from './ResultGrid';
 import Sidebar from './Sidebar';
 import QueryHistory from './QueryHistory';
@@ -42,6 +42,18 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange}: Props) {
     const [showSaveForm, setShowSaveForm] = useState(false);
     const [saveNameInput, setSaveNameInput] = useState('');
     const [savingScript, setSavingScript] = useState(false);
+    // Preferência global de edição (localStorage, padrão ligado). Cada aba lê
+    // ao montar e grava ao mudar — sem estado global React formal.
+    const [autoUppercase, setAutoUppercase] = useState(() => readAutoUppercasePreference());
+
+    function handleAutoUppercaseChange(next: boolean) {
+        setAutoUppercase(next);
+        try {
+            localStorage.setItem(AUTO_UPPERCASE_STORAGE_KEY, String(next));
+        } catch {
+            // localStorage indisponível (ex.: modo restrito): mantém só em memória.
+        }
+    }
 
     const busy = running || fetching;
 
@@ -53,23 +65,33 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange}: Props) {
         // Catálogo completo pro autocomplete (ListTables é lazy por schema,
         // como a Sidebar usa). Barato: o schema cache do backend (TTL 15min)
         // evita round-trip ao banco a cada schema.
+        //
+        // Sequencial, nunca Promise.all: a sessão de uma aba usa uma única
+        // conexão (*sql.Conn/pgx) dedicada (ver internal/session), que não
+        // suporta uso concorrente. Bug real: com 2+ schemas as chamadas em
+        // paralelo colidiam com erro "conn busy" e derrubavam o catálogo
+        // inteiro (ver memória wisp-autocomplete-conn-busy-concurrency).
         try {
             const schemas = await ListSchemas(tabId);
-            const lists = await Promise.all((schemas ?? []).map(schema => ListTables(tabId, schema)));
-            const shallow = lists.flatMap(tables => tables ?? []);
+            const shallow: db.Table[] = [];
+            for (const schema of schemas ?? []) {
+                const tables = await ListTables(tabId, schema);
+                shallow.push(...(tables ?? []));
+            }
             // ListTables só traz Schema/Name (sem Columns) — enriquece cada
-            // tabela via IntrospectTable em paralelo antes de gravar o
-            // catálogo, para o autocomplete de colunas funcionar. Falha
-            // individual não derruba o catálogo: mantém a entrada rasa.
-            const detailed = await Promise.all(shallow.map(async table => {
+            // tabela via IntrospectTable antes de gravar o catálogo, para o
+            // autocomplete de colunas funcionar. Falha individual não
+            // derruba o catálogo: mantém a entrada rasa daquela tabela.
+            const detailed: db.Table[] = [];
+            for (const table of shallow) {
                 try {
                     const full = await IntrospectTable(tabId, table.Schema, table.Name);
-                    return full ?? table;
+                    detailed.push(full ?? table);
                 } catch (tableErr) {
                     console.error(`erro ao introspectar ${table.Schema}.${table.Name} para autocomplete:`, tableErr);
-                    return table;
+                    detailed.push(table);
                 }
-            }));
+            }
             setCatalog(detailed);
         } catch (err) {
             // Não falha a conexão por causa do catálogo de autocomplete, mas
@@ -264,6 +286,14 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange}: Props) {
                 >
                     Histórico
                 </button>
+                <label className="auto-uppercase-toggle" title="Converter keywords SQL para maiúsculas automaticamente ao digitar">
+                    <input
+                        type="checkbox"
+                        checked={autoUppercase}
+                        onChange={e => handleAutoUppercaseChange(e.target.checked)}
+                    />
+                    Uppercase automático
+                </label>
                 <span className="toolbar-tab-id" title="ID da sessão ativa">{tabId}</span>
             </div>
 
@@ -279,6 +309,7 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange}: Props) {
                             onRunSelectionRequested={text => handleRun(text)}
                             catalog={catalog}
                             driver={driver}
+                            autoUppercase={autoUppercase}
                         />
                     </div>
                     <div className="editor-actions">

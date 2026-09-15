@@ -40,6 +40,21 @@ type MonacoRange = {
     endColumn: number;
 };
 
+// Preferência GLOBAL de uppercase automático (não por conexão/aba): é gosto
+// de edição do usuário, não dado de negócio — fica em localStorage, não no
+// Store SQLite do backend. Ausência = ligado (padrão).
+export const AUTO_UPPERCASE_STORAGE_KEY = 'wisp:autoUppercaseKeywords';
+
+export function readAutoUppercasePreference(): boolean {
+    try {
+        const raw = localStorage.getItem(AUTO_UPPERCASE_STORAGE_KEY);
+        if (raw === null) return true;
+        return raw === 'true';
+    } catch {
+        return true;
+    }
+}
+
 // Keywords SQL ANSI (não específicas de dialeto), sempre disponíveis. O
 // Monaco filtra por prefixo do que foi digitado, então concatenar a lista
 // cheia é barato e correto.
@@ -52,6 +67,45 @@ const SQL_KEYWORDS = [
     'WITH', 'CREATE TABLE', 'ALTER TABLE', 'DROP TABLE', 'PRIMARY KEY',
     'FOREIGN KEY', 'REFERENCES', 'DEFAULT', 'EXISTS',
 ];
+
+// Só palavras únicas participam do uppercase automático: a detecção acontece
+// uma palavra digitada por vez, então compostas ("INNER JOIN", "GROUP BY",
+// "IS NULL", ...) não fazem sentido aqui.
+const AUTO_UPPERCASE_WORDS = new Set(
+    SQL_KEYWORDS.filter(keyword => !keyword.includes(' ')).map(keyword => keyword.toLowerCase()),
+);
+
+// Lexing via tokenizer Monarch já registrado (não é "parser SQL customizado":
+// só classifica o token sob o cursor). Erra pro lado de NÃO transformar em
+// caso de dúvida — menos agressivo é mais seguro que estragar string do usuário.
+function isInStringOrComment(model: monaco.editor.ITextModel, lineNumber: number, wordStartColumn: number): boolean {
+    try {
+        // Tokeniza do início do documento até a linha atual numa chamada só,
+        // pra que o estado (ex.: bloco /* ... */ aberto linhas acima) esteja
+        // correto na linha do cursor. Barato pro tamanho típico de query.
+        const textUpToLine = model.getValueInRange({
+            startLineNumber: 1,
+            startColumn: 1,
+            endLineNumber: lineNumber,
+            endColumn: model.getLineMaxColumn(lineNumber),
+        });
+        const tokensByLine = monaco.editor.tokenize(textUpToLine, 'sql');
+        const lineTokens = tokensByLine[lineNumber - 1];
+        if (!lineTokens) return true;
+        const wordOffset = wordStartColumn - 1;
+        let currentType = '';
+        for (const token of lineTokens) {
+            if (token.offset <= wordOffset) {
+                currentType = token.type;
+            } else {
+                break;
+            }
+        }
+        return currentType.includes('string') || currentType.includes('comment');
+    } catch {
+        return true;
+    }
+}
 
 // Funções built-in curadas por dialeto (só nomes com existência confirmada;
 // em caso de dúvida o nome foi omitido em vez de arriscado).
@@ -254,9 +308,10 @@ interface Props {
     onRunSelectionRequested?: (text: string) => void;
     catalog?: db.Table[];
     driver?: string;
+    autoUppercase?: boolean;
 }
 
-export default function SqlEditor({value, onChange, onRunRequested, onRunSelectionRequested, catalog, driver}: Props) {
+export default function SqlEditor({value, onChange, onRunRequested, onRunSelectionRequested, catalog, driver, autoUppercase = true}: Props) {
     const containerRef = useRef<HTMLDivElement>(null);
     const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
     const catalogRef = useRef(catalog);
@@ -269,6 +324,15 @@ export default function SqlEditor({value, onChange, onRunRequested, onRunSelecti
     onChangeRef.current = onChange;
     onRunRef.current = onRunRequested;
     onRunSelectionRef.current = onRunSelectionRequested;
+    // Refs (não estado) pro listener do Monaco, que é registrado uma vez só
+    // na montagem e não re-registra a cada render.
+    const autoUppercaseRef = useRef(autoUppercase);
+    autoUppercaseRef.current = autoUppercase;
+    // Guarda contra loop/undo duplo: a edição programática abaixo dispara
+    // onDidChangeModelContent de novo — sem a flag, ela se auto-realimentaria
+    // (loop) e empurraria entradas inúteis na pilha de undo (Ctrl+Z desfaria
+    // só a caixa alta em vez do que o usuário digitou).
+    const isApplyingAutoCaseRef = useRef(false);
 
     useEffect(() => {
         if (!containerRef.current) return;
@@ -301,7 +365,45 @@ export default function SqlEditor({value, onChange, onRunRequested, onRunSelecti
             driverByModel.set(initialModel, driverRef.current);
         }
 
-        editor.onDidChangeModelContent(() => onChangeRef.current(editor.getValue()));
+        editor.onDidChangeModelContent(e => {
+            onChangeRef.current(editor.getValue());
+            if (isApplyingAutoCaseRef.current || !autoUppercaseRef.current) return;
+            const model = editor.getModel();
+            if (!model) return;
+            for (const change of e.changes) {
+                // Só digitação de 1 caractere dispara a checagem — paste,
+                // delete e undo passam batido de propósito.
+                if (change.rangeLength !== 0 || change.text.length !== 1) continue;
+                // Enquanto o caractere é identificador, a palavra ainda está
+                // sendo digitada — só converte ao cruzar o word-boundary
+                // (espaço, quebra de linha, parêntese, vírgula, ;, etc.).
+                if (/[A-Za-z0-9_]/.test(change.text)) continue;
+                const lineNumber = change.range.startLineNumber;
+                const boundaryColumn = change.range.startColumn;
+                if (boundaryColumn <= 1) continue;
+                const word = model.getLineContent(lineNumber).slice(0, boundaryColumn - 1).match(/([A-Za-z_][A-Za-z0-9_]*)$/)?.[1];
+                if (!word || word === word.toUpperCase() || !AUTO_UPPERCASE_WORDS.has(word.toLowerCase())) continue;
+                const wordStartColumn = boundaryColumn - word.length;
+                if (isInStringOrComment(model, lineNumber, wordStartColumn)) continue;
+                isApplyingAutoCaseRef.current = true;
+                try {
+                    editor.executeEdits('wisp-auto-uppercase', [{
+                        range: {
+                            startLineNumber: lineNumber,
+                            endLineNumber: lineNumber,
+                            startColumn: wordStartColumn,
+                            endColumn: boundaryColumn,
+                        },
+                        text: word.toUpperCase(),
+                    }]);
+                } finally {
+                    isApplyingAutoCaseRef.current = false;
+                }
+                // Para após a primeira substituição: as ranges dos demais
+                // changes do mesmo evento ficaram obsoletas após a edição.
+                break;
+            }
+        });
         editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => onRunRef.current());
 
         // Ctrl+Shift+Enter: roda só o texto selecionado, ou (sem seleção) o

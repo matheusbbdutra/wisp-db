@@ -677,6 +677,22 @@
     color: var(--text-main);
 }
 
+.auto-uppercase-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+}
+
+.auto-uppercase-toggle input {
+    accent-color: var(--accent-green, #059669);
+    cursor: pointer;
+}
+
 .toolbar-tab-id {
     margin-left: auto;
     font-size: 11px;
