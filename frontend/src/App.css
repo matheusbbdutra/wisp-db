@@ -31,6 +31,20 @@
     --accent-red: #dc2626;
     --accent-red-hover: #b91c1c;
     --accent-amber: #d97706;
+
+    /* Referenciadas em várias regras via var(--font-mono)/var(--accent-color)
+       sem nunca terem sido definidas aqui — o que "funcionava" era herança/
+       fallback acidental do navegador, não a intenção real. --font-mono
+       espelha a stack já usada no tema do Glide Data Grid (ResultGrid.tsx);
+       --accent-color é o mesmo tom de --accent-blue, unificado num nome só. */
+    --font-mono: ui-monospace, "Cascadia Code", "Fira Code", "JetBrains Mono", Menlo, monospace;
+    --accent-color: var(--accent-blue);
+
+    /* Repetidas em vários pontos como hex cru (menu de contexto, popovers,
+       painel de valor, links de tabela/schema na sidebar) — nomeadas aqui
+       pra trocar um tom só num lugar em vez de caçar N ocorrências. */
+    --bg-panel: #1e1e22;
+    --accent-blue-light: #93c5fd;
 }
 
 #App {
@@ -240,7 +254,7 @@
     font-size: 12.5px;
     font-weight: 700;
     font-family: var(--font-mono);
-    color: #93c5fd;
+    color: var(--accent-blue-light);
     border-bottom: 1px solid var(--border-subtle);
 }
 
@@ -256,7 +270,7 @@
     padding: 7px 10px;
     font-size: 12.5px;
     font-family: var(--font-mono);
-    color: #93c5fd;
+    color: var(--accent-blue-light);
     border-radius: 5px;
     cursor: pointer;
 }
@@ -309,6 +323,17 @@
 .tree-leaf-open:hover {
     background: var(--border-strong);
     color: var(--text-main);
+}
+
+.tree-leaf-badge {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-default);
+    border-radius: 3px;
+    padding: 0 4px;
+    line-height: 1.4;
 }
 
 /* --------------------------------------------------------------------------
@@ -461,7 +486,7 @@
     font-size: 11.5px;
     padding: 3px 10px;
     border-radius: 9999px;
-    background: #1e1e22;
+    background: var(--bg-panel);
     border: 1px solid var(--border-subtle);
     color: var(--text-secondary);
 }
@@ -514,7 +539,7 @@
 .active-conn-name {
     font-size: 11.5px;
     font-weight: 600;
-    color: #93c5fd;
+    color: var(--accent-blue-light);
 }
 
 .driver-pill {
@@ -524,7 +549,7 @@
     padding: 1px 4px;
     border-radius: 3px;
     background: #2b2e38;
-    color: #93c5fd;
+    color: var(--accent-blue-light);
 }
 
 /* --------------------------------------------------------------------------
@@ -971,6 +996,72 @@
     color: var(--text-main);
 }
 
+.sidebar-collapse-btn {
+    background: none;
+    border: 1px solid var(--border-default);
+    border-radius: 5px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+    padding: 2px 6px;
+}
+
+.sidebar-collapse-btn:hover {
+    background: var(--border-strong);
+    color: var(--text-main);
+}
+
+/* Faixa fina que substitui a Sidebar quando colapsada — mesmo padrão de
+   descoberta imediata do VS Code/DBeaver (clicar na borda reabre), em vez
+   de exigir caçar um botão escondido em outro lugar. */
+.sidebar-reopen-rail {
+    flex: 0 0 auto;
+    width: 14px;
+    background: var(--bg-sidebar);
+    border: none;
+    border-right: 1px solid var(--border-subtle);
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 13px;
+    padding: 0;
+}
+
+.sidebar-reopen-rail:hover {
+    background: var(--bg-toolbar);
+    color: var(--text-main);
+}
+
+.sidebar-search {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.sidebar-search-input {
+    flex: 1;
+    min-width: 0;
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: 4px;
+    color: var(--text-main);
+    font-size: 11.5px;
+    padding: 3px 8px;
+}
+
+.sidebar-search-input:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+}
+
+.sidebar-search-loading {
+    font-size: 10.5px;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
 .sidebar-tree {
     flex: 1;
     overflow-y: auto;
@@ -1051,7 +1142,7 @@
 
 .tree-leaf:hover {
     background: var(--bg-card);
-    color: #93c5fd;
+    color: var(--accent-blue-light);
 }
 
 /* --------------------------------------------------------------------------
@@ -1344,11 +1435,18 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 8px;
     padding: 5px 12px;
     background: var(--bg-toolbar);
     border-bottom: 1px solid var(--border-subtle);
     font-size: 11.5px;
     color: var(--text-secondary);
+}
+
+.result-toolbar .btn.active {
+    background: var(--bg-input);
+    border-color: var(--accent-green, #059669);
+    color: var(--text-main);
 }
 
 .result-stats {
@@ -1364,6 +1462,15 @@
     border: 1px solid var(--border-subtle);
     font-family: var(--font-mono);
     font-size: 11px;
+}
+
+/* Linha flex: grade + (opcional) painel dockado de valor à direita — ver
+   .value-viewer-dock. Sem isso o painel ficaria empilhado por baixo em vez
+   de ao lado do grid. */
+.result-body {
+    flex: 1;
+    display: flex;
+    min-height: 0;
 }
 
 .result-grid-canvas {
@@ -1384,7 +1491,7 @@
     z-index: 2000;
     min-width: 200px;
     padding: 4px;
-    background: #1e1e22;
+    background: var(--bg-panel);
     border: 1px solid var(--border-strong);
     border-radius: 8px;
     box-shadow: 0 12px 28px rgba(0, 0, 0, 0.55);
@@ -1456,9 +1563,9 @@
     z-index: 20;
     box-sizing: border-box;
     padding: 0 8px;
-    background: #131315;
+    background: var(--bg-grid);
     color: #f4f4f5;
-    border: 2px solid #2563eb;
+    border: 2px solid var(--accent-blue);
     border-radius: 2px;
     font-family: ui-monospace, "Cascadia Code", "Fira Code", "JetBrains Mono", Menlo, monospace;
     font-size: 12px;
@@ -1469,7 +1576,7 @@
     min-width: 320px;
     max-width: min(560px, 90%);
     padding: 10px 12px 12px;
-    background: #1e1e22;
+    background: var(--bg-panel);
     border: 1px solid var(--border-strong);
     border-radius: 8px;
     box-shadow: 0 12px 28px rgba(0, 0, 0, 0.55);
@@ -1498,7 +1605,7 @@
 .grid-edit-preview {
     display: block;
     padding: 8px 10px;
-    background: #131315;
+    background: var(--bg-grid);
     border: 1px solid var(--border-subtle);
     border-radius: 6px;
     color: var(--text-secondary);
@@ -1513,6 +1620,103 @@
     gap: 8px;
     justify-content: flex-end;
     margin-top: 4px;
+}
+
+.result-filter-input {
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: 4px;
+    color: var(--text-main);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    padding: 2px 8px;
+    width: 220px;
+}
+
+.result-filter-input:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+}
+
+/* Painel DOCKADO (não mais modal — ver docs/analysis/ui-ux-2026-09-15*.md):
+   irmão do .result-grid-canvas dentro de .result-body, largura controlada
+   por useDragResize (ResultGrid.tsx), sem overlay/backdrop. */
+.value-viewer-dock {
+    flex: 0 0 auto;
+    min-width: 240px;
+    max-width: 640px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px 12px;
+    background: var(--bg-panel);
+    border-left: 1px solid var(--border-strong);
+}
+
+.value-viewer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.value-viewer-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11.5px;
+    color: var(--text-secondary);
+    flex-wrap: wrap;
+}
+
+.value-viewer-empty {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 24px 12px;
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.value-viewer-controls select {
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: 4px;
+    color: var(--text-main);
+    font-size: 11.5px;
+    padding: 2px 4px;
+}
+
+.value-viewer-wrap-toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+}
+
+.value-viewer-content {
+    flex: 1;
+    overflow: auto;
+    margin: 0;
+    padding: 10px;
+    background: var(--bg-grid);
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    color: var(--text-main);
+    font-family: var(--font-mono);
+    font-size: 12px;
+}
+
+.value-viewer-content.wrap {
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.value-viewer-content.nowrap {
+    white-space: pre;
 }
 
 /* Empty state for results */

@@ -20,6 +20,28 @@ export namespace db {
 	        this.Nullable = source["Nullable"];
 	    }
 	}
+	export class ForeignKey {
+	    Name: string;
+	    Columns: string[];
+	    RefSchema: string;
+	    RefTable: string;
+	    RefColumns: string[];
+	    Definition: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ForeignKey(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Name = source["Name"];
+	        this.Columns = source["Columns"];
+	        this.RefSchema = source["RefSchema"];
+	        this.RefTable = source["RefTable"];
+	        this.RefColumns = source["RefColumns"];
+	        this.Definition = source["Definition"];
+	    }
+	}
 	export class Function {
 	    Name: string;
 	    Definition: string;
@@ -34,10 +56,29 @@ export namespace db {
 	        this.Definition = source["Definition"];
 	    }
 	}
+	export class Index {
+	    Name: string;
+	    Columns: string[];
+	    Unique: boolean;
+	    Definition: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Index(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Name = source["Name"];
+	        this.Columns = source["Columns"];
+	        this.Unique = source["Unique"];
+	        this.Definition = source["Definition"];
+	    }
+	}
 	export class Table {
 	    Schema: string;
 	    Name: string;
 	    Columns: Column[];
+	    Kind: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Table(source);
@@ -48,6 +89,7 @@ export namespace db {
 	        this.Schema = source["Schema"];
 	        this.Name = source["Name"];
 	        this.Columns = this.convertValues(source["Columns"], Column);
+	        this.Kind = source["Kind"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

@@ -28,7 +28,11 @@ export function IntrospectSchemaTables(arg1:string,arg2:string):Promise<Array<db
 
 export function IntrospectTable(arg1:string,arg2:string,arg3:string):Promise<db.Table>;
 
+export function ListForeignKeys(arg1:string,arg2:string,arg3:string):Promise<Array<db.ForeignKey>>;
+
 export function ListFunctions(arg1:string,arg2:string):Promise<Array<db.Function>>;
+
+export function ListIndexes(arg1:string,arg2:string,arg3:string):Promise<Array<db.Index>>;
 
 export function ListSavedConnections():Promise<Array<store.SavedConnection>>;
 

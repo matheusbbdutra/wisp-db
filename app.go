@@ -484,6 +484,26 @@ func (a *App) ListFunctions(tabID string, schema string) ([]db.Function, error) 
 	return s.Driver.ListFunctions(s.Ctx, schema)
 }
 
+// ListIndexes lista índices da tabela na conexão da aba tabId. Resolve a
+// sessão pelo tabID igual a IntrospectTable.
+func (a *App) ListIndexes(tabID string, schema string, table string) ([]db.Index, error) {
+	s, err := a.sessions.Get(tabID)
+	if err != nil {
+		return nil, err
+	}
+	return s.Driver.ListIndexes(s.Ctx, schema, table)
+}
+
+// ListForeignKeys lista as FKs de saída da tabela na conexão da aba tabId.
+// Resolve a sessão pelo tabID igual a IntrospectTable.
+func (a *App) ListForeignKeys(tabID string, schema string, table string) ([]db.ForeignKey, error) {
+	s, err := a.sessions.Get(tabID)
+	if err != nil {
+		return nil, err
+	}
+	return s.Driver.ListForeignKeys(s.Ctx, schema, table)
+}
+
 // --- Conexões salvas (persistidas cifradas, ver internal/vault) ---
 
 // SaveConnection cifra e persiste uma conexão para reuso futuro (nome amigável

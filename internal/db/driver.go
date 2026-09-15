@@ -6,6 +6,50 @@ package db
 
 import "context"
 
+// normalizeCellValue converte []byte pra string antes da linha virar
+// QueryResult.Rows — Go serializa []byte pra base64 em JSON (é assim que
+// json.Marshal trata o tipo), e a ponte IPC do Wails serializa QueryResult
+// como JSON puro. Bug real de produção: pgx v5 não tem um codec nativo pro
+// tipo XML do Postgres (diferente de JSON/JSONB, que ele decodifica pra
+// string), então rows.Values() devolve o valor cru do wire como []byte — sem
+// essa conversão, uma coluna XML aparecia como base64 ilegível no grid em
+// vez do texto real. Aplica-se a QUALQUER []byte não tratado por um driver
+// (não só XML), então normaliza de forma genérica em vez de listar tipos
+// específicos.
+func normalizeCellValue(v any) any {
+	if b, ok := v.([]byte); ok {
+		return string(b)
+	}
+	return v
+}
+
+func normalizeRow(row []any) []any {
+	for i, v := range row {
+		row[i] = normalizeCellValue(v)
+	}
+	return row
+}
+
+// normalizeRowSkipping é normalizeRow, mas preserva []byte como está nas
+// colunas marcadas por `binary` (mesmo índice) — usado pra bytea real do
+// Postgres. Bug real achado em revisão de código: normalizeRow convertia
+// bytea genuíno pra string, e string com bytes que não formam UTF-8 válido
+// vira U+FFFD (replacement character) na serialização JSON — perde os bytes
+// originais de forma irrecuperável (copiar/exportar não recupera o valor
+// real). bytea sem conversão continua virando base64 em JSON (comportamento
+// de antes desta sessão para esse tipo) — não é bonito na grade, mas é
+// reversível; xml/outros tipos de texto sem codec continuam sendo
+// convertidos pra string legível.
+func normalizeRowSkipping(row []any, binary []bool) []any {
+	for i, v := range row {
+		if i < len(binary) && binary[i] {
+			continue
+		}
+		row[i] = normalizeCellValue(v)
+	}
+	return row
+}
+
 // QueryResult é o formato único de transporte de resultado na ponte IPC com o
 // frontend: colunas/tipos planos + matriz de linhas, sem duplicar chaves por
 // linha (evita o overhead de []map[string]any em JSON).
@@ -30,6 +74,30 @@ type Table struct {
 	Schema  string
 	Name    string
 	Columns []Column
+	// Kind distingue tabela de view na exploração de schema — sempre
+	// "table" ou "view", nunca vazio (ver ListTables/IntrospectSchema em
+	// cada driver). Views não aceitam UpdateCell/edição inline.
+	Kind string
+}
+
+// Index descreve um índice de tabela com sua definição DDL completa,
+// verbatim, e as colunas cobertas (na ordem do índice).
+type Index struct {
+	Name       string
+	Columns    []string
+	Unique     bool
+	Definition string
+}
+
+// ForeignKey descreve uma FK de saída de uma tabela (a tabela referenciada
+// é RefSchema/RefTable) com a definição DDL completa, verbatim.
+type ForeignKey struct {
+	Name       string
+	Columns    []string
+	RefSchema  string
+	RefTable   string
+	RefColumns []string
+	Definition string
 }
 
 // Trigger descreve um trigger de tabela com seu DDL completo, verbatim.
@@ -115,4 +183,8 @@ type DatabaseDriver interface {
 	ListTriggers(ctx context.Context, schema, table string) ([]Trigger, error)
 	// ListFunctions lista funções do schema (não é por tabela).
 	ListFunctions(ctx context.Context, schema string) ([]Function, error)
+	// ListIndexes lista índices de uma tabela, com DDL completo.
+	ListIndexes(ctx context.Context, schema, table string) ([]Index, error)
+	// ListForeignKeys lista as FKs de saída de uma tabela, com DDL completo.
+	ListForeignKeys(ctx context.Context, schema, table string) ([]ForeignKey, error)
 }

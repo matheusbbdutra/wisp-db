@@ -96,3 +96,11 @@ export function ListFunctions(tabId: string, schema: string): Promise<db.Functio
 export function RefreshSchema(tabId: string): Promise<void> {
     return withQueue(tabId, () => App.RefreshSchema(tabId));
 }
+
+export function ListIndexes(tabId: string, schema: string, table: string): Promise<db.Index[]> {
+    return withQueue(tabId, () => App.ListIndexes(tabId, schema, table));
+}
+
+export function ListForeignKeys(tabId: string, schema: string, table: string): Promise<db.ForeignKey[]> {
+    return withQueue(tabId, () => App.ListForeignKeys(tabId, schema, table));
+}

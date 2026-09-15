@@ -102,7 +102,10 @@ export default function SchemaTab({tabId, connectionId, schema, hidden, onConnec
                                     }
                                 }}
                             >
-                                <div className="meta-name">{t.Name}</div>
+                                <div className="meta-name">
+                                    {t.Name}
+                                    {t.Kind === 'view' && <span className="tree-leaf-badge" title="View"> view</span>}
+                                </div>
                             </div>
                         ))}
                     </div>

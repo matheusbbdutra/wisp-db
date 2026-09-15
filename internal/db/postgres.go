@@ -6,7 +6,21 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+// binaryColumnMask marca (por índice de coluna) quais campos são bytea —
+// esses NÃO devem virar string em normalizeRow (ver normalizeRowSkipping),
+// senão bytes binários genuínos viram lixo irrecuperável ao passar por
+// string() (bug real achado em revisão de código).
+func binaryColumnMask(fields []pgconn.FieldDescription) []bool {
+	mask := make([]bool, len(fields))
+	for i, f := range fields {
+		mask[i] = f.DataTypeOID == pgtype.ByteaOID
+	}
+	return mask
+}
 
 // PostgresDriver implementa DatabaseDriver via pgx (puro Go, protocolo
 // nativo — sem CGO). Uma instância = uma conexão dedicada de uma aba
@@ -14,6 +28,9 @@ import (
 type PostgresDriver struct {
 	conn   *pgx.Conn
 	cursor pgx.Rows // cursor aberto por ExecuteStreaming, ver FetchNext/CloseCursor
+	// cursorBinaryCols marca (por índice de coluna) quais colunas do cursor
+	// aberto são bytea — ver normalizeRow/binaryColumnMask, ambos em driver.go.
+	cursorBinaryCols []bool
 }
 
 func NewPostgresDriver() *PostgresDriver {
@@ -62,13 +79,14 @@ func (d *PostgresDriver) Execute(ctx context.Context, query string) (*QueryResul
 		result.Columns[i] = f.Name
 		result.Types[i] = fmt.Sprintf("oid:%d", f.DataTypeOID)
 	}
+	binary := binaryColumnMask(fields)
 
 	for rows.Next() {
 		values, err := rows.Values()
 		if err != nil {
 			return nil, err
 		}
-		result.Rows = append(result.Rows, values)
+		result.Rows = append(result.Rows, normalizeRowSkipping(values, binary))
 	}
 	return result, rows.Err()
 }
@@ -94,6 +112,7 @@ func (d *PostgresDriver) ExecuteStreaming(ctx context.Context, query string) ([]
 	}
 
 	d.cursor = rows
+	d.cursorBinaryCols = binaryColumnMask(fields)
 	return columns, types, nil
 }
 
@@ -114,7 +133,7 @@ func (d *PostgresDriver) FetchNext(ctx context.Context, n int) ([][]any, bool, e
 		if err != nil {
 			return result, false, err
 		}
-		result = append(result, values)
+		result = append(result, normalizeRowSkipping(values, d.cursorBinaryCols))
 	}
 	return result, true, nil
 }
@@ -186,7 +205,7 @@ func (d *PostgresDriver) ListTables(ctx context.Context, schema string) ([]Table
 	// Ver comentário em Execute sobre "conn busy" com cursor de streaming aberto.
 	d.closePendingCursor(ctx)
 	rows, err := d.conn.Query(ctx,
-		`SELECT table_name FROM information_schema.tables WHERE table_schema = $1 ORDER BY table_name`, schema)
+		`SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = $1 ORDER BY table_name`, schema)
 	if err != nil {
 		return nil, fmt.Errorf("listando tabelas de %q: %w", schema, err)
 	}
@@ -194,13 +213,24 @@ func (d *PostgresDriver) ListTables(ctx context.Context, schema string) ([]Table
 
 	var tables []Table
 	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
+		var name, tableType string
+		if err := rows.Scan(&name, &tableType); err != nil {
 			return nil, err
 		}
-		tables = append(tables, Table{Schema: schema, Name: name})
+		tables = append(tables, Table{Schema: schema, Name: name, Kind: tableKindFromPG(tableType)})
 	}
 	return tables, rows.Err()
+}
+
+// tableKindFromPG traduz table_type do information_schema pro Kind exposto
+// na UI ("table"/"view") — views não aceitam UpdateCell/edição inline.
+// Materialized views não aparecem em information_schema.tables (ficam em
+// pg_matviews); fora de escopo aqui, gap conhecido e não implementado.
+func tableKindFromPG(tableType string) string {
+	if tableType == "VIEW" {
+		return "view"
+	}
+	return "table"
 }
 
 // Introspect cruza information_schema.columns (tipo/nullable/generated) com
@@ -248,7 +278,7 @@ func (d *PostgresDriver) IntrospectSchema(ctx context.Context, schema string) ([
 	// Ver comentário em Execute sobre "conn busy" com cursor de streaming aberto.
 	d.closePendingCursor(ctx)
 	rows, err := d.conn.Query(ctx, `
-		SELECT c.table_name, c.column_name, c.data_type, c.is_nullable = 'YES', c.is_generated = 'ALWAYS',
+		SELECT c.table_name, t.table_type, c.column_name, c.data_type, c.is_nullable = 'YES', c.is_generated = 'ALWAYS',
 		       EXISTS (
 		           SELECT 1 FROM information_schema.table_constraints tc
 		           JOIN information_schema.key_column_usage kcu
@@ -259,6 +289,8 @@ func (d *PostgresDriver) IntrospectSchema(ctx context.Context, schema string) ([
 		             AND kcu.column_name = c.column_name
 		       ) AS is_primary_key
 		FROM information_schema.columns c
+		JOIN information_schema.tables t
+		  ON t.table_schema = c.table_schema AND t.table_name = c.table_name
 		WHERE c.table_schema = $1
 		ORDER BY c.table_name, c.ordinal_position`, schema)
 	if err != nil {
@@ -269,14 +301,14 @@ func (d *PostgresDriver) IntrospectSchema(ctx context.Context, schema string) ([
 	order := []string{}
 	byTable := map[string]*Table{}
 	for rows.Next() {
-		var tableName string
+		var tableName, tableType string
 		var col Column
-		if err := rows.Scan(&tableName, &col.Name, &col.Type, &col.Nullable, &col.IsGenerated, &col.IsPrimaryKey); err != nil {
+		if err := rows.Scan(&tableName, &tableType, &col.Name, &col.Type, &col.Nullable, &col.IsGenerated, &col.IsPrimaryKey); err != nil {
 			return nil, err
 		}
 		t, ok := byTable[tableName]
 		if !ok {
-			t = &Table{Schema: schema, Name: tableName}
+			t = &Table{Schema: schema, Name: tableName, Kind: tableKindFromPG(tableType)}
 			byTable[tableName] = t
 			order = append(order, tableName)
 		}
@@ -463,6 +495,88 @@ func (d *PostgresDriver) ListFunctions(ctx context.Context, schema string) ([]Fu
 		functions = append(functions, fn)
 	}
 	return functions, rows.Err()
+}
+
+// ListIndexes retorna índices da tabela via pg_index + pg_get_indexdef,
+// excluindo o índice de suporte de uma constraint PK/UNIQUE (já aparece no
+// TableDDL via CONSTRAINT) — critério: indisprimary sempre exclui, e
+// conrelid/conindid via pg_constraint exclui o de UNIQUE também, restando só
+// índices "de verdade" (CREATE INDEX explícito).
+func (d *PostgresDriver) ListIndexes(ctx context.Context, schema, table string) ([]Index, error) {
+	if schema == "" || schema == "main" {
+		schema = "public"
+	}
+	// Ver comentário em Execute sobre "conn busy" com cursor de streaming aberto.
+	d.closePendingCursor(ctx)
+	rows, err := d.conn.Query(ctx, `
+		SELECT ic.relname, i.indisunique, pg_get_indexdef(i.indexrelid),
+		       (SELECT array_agg(a.attname ORDER BY k.ordinality)
+		        FROM unnest(i.indkey) WITH ORDINALITY AS k(attnum, ordinality)
+		        JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum)
+		FROM pg_index i
+		JOIN pg_class ic ON ic.oid = i.indexrelid
+		JOIN pg_class tc ON tc.oid = i.indrelid
+		JOIN pg_namespace n ON n.oid = tc.relnamespace
+		WHERE n.nspname = $1 AND tc.relname = $2 AND NOT i.indisprimary
+		  AND NOT EXISTS (
+		      SELECT 1 FROM pg_constraint c
+		      WHERE c.conindid = i.indexrelid AND c.contype = 'u'
+		  )
+		ORDER BY ic.relname`, schema, table)
+	if err != nil {
+		return nil, fmt.Errorf("listando índices de %s.%s: %w", schema, table, err)
+	}
+	defer rows.Close()
+
+	var indexes []Index
+	for rows.Next() {
+		var idx Index
+		if err := rows.Scan(&idx.Name, &idx.Unique, &idx.Definition, &idx.Columns); err != nil {
+			return nil, err
+		}
+		indexes = append(indexes, idx)
+	}
+	return indexes, rows.Err()
+}
+
+// ListForeignKeys retorna as FKs de saída da tabela (a própria tabela é a
+// origem) via pg_constraint (contype = 'f') + pg_get_constraintdef.
+func (d *PostgresDriver) ListForeignKeys(ctx context.Context, schema, table string) ([]ForeignKey, error) {
+	if schema == "" || schema == "main" {
+		schema = "public"
+	}
+	// Ver comentário em Execute sobre "conn busy" com cursor de streaming aberto.
+	d.closePendingCursor(ctx)
+	rows, err := d.conn.Query(ctx, `
+		SELECT c.conname, pg_get_constraintdef(c.oid),
+		       rn.nspname, rc.relname,
+		       (SELECT array_agg(a.attname ORDER BY k.ordinality)
+		        FROM unnest(c.conkey) WITH ORDINALITY AS k(attnum, ordinality)
+		        JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum),
+		       (SELECT array_agg(a.attname ORDER BY k.ordinality)
+		        FROM unnest(c.confkey) WITH ORDINALITY AS k(attnum, ordinality)
+		        JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.attnum)
+		FROM pg_constraint c
+		JOIN pg_class t ON t.oid = c.conrelid
+		JOIN pg_namespace n ON n.oid = t.relnamespace
+		JOIN pg_class rc ON rc.oid = c.confrelid
+		JOIN pg_namespace rn ON rn.oid = rc.relnamespace
+		WHERE n.nspname = $1 AND t.relname = $2 AND c.contype = 'f'
+		ORDER BY c.conname`, schema, table)
+	if err != nil {
+		return nil, fmt.Errorf("listando foreign keys de %s.%s: %w", schema, table, err)
+	}
+	defer rows.Close()
+
+	var fks []ForeignKey
+	for rows.Next() {
+		var fk ForeignKey
+		if err := rows.Scan(&fk.Name, &fk.Definition, &fk.RefSchema, &fk.RefTable, &fk.Columns, &fk.RefColumns); err != nil {
+			return nil, err
+		}
+		fks = append(fks, fk)
+	}
+	return fks, rows.Err()
 }
 
 // quoteIdentPG quota um identificador Postgres com aspas duplas, escapando

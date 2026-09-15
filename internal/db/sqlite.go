@@ -16,6 +16,20 @@ type SQLiteDriver struct {
 	conn   *sql.Conn
 	pool   *sql.DB
 	cursor *sql.Rows // cursor aberto por ExecuteStreaming, ver FetchNext/CloseCursor
+	// cursorBinaryCols marca colunas BLOB do cursor aberto — mesmo motivo do
+	// campo homônimo em PostgresDriver (ver normalizeRowSkipping).
+	cursorBinaryCols []bool
+}
+
+// binaryColumnMaskSQLite marca (por índice) colunas cujo tipo declarado é
+// BLOB — essas não devem virar string via normalizeRow (bytes binários
+// genuínos ficariam irrecuperáveis, mesmo motivo do bytea no Postgres).
+func binaryColumnMaskSQLite(colTypes []*sql.ColumnType) []bool {
+	mask := make([]bool, len(colTypes))
+	for i, ct := range colTypes {
+		mask[i] = ct.DatabaseTypeName() == "BLOB"
+	}
+	return mask
 }
 
 func NewSQLiteDriver() *SQLiteDriver {
@@ -103,6 +117,7 @@ func (d *SQLiteDriver) ExecuteStreaming(ctx context.Context, query string) ([]st
 	}
 
 	d.cursor = rows
+	d.cursorBinaryCols = binaryColumnMaskSQLite(colTypes)
 	return columns, types, nil
 }
 
@@ -132,7 +147,7 @@ func (d *SQLiteDriver) FetchNext(ctx context.Context, n int) ([][]any, bool, err
 		if err := d.cursor.Scan(pointers...); err != nil {
 			return result, false, err
 		}
-		result = append(result, values)
+		result = append(result, normalizeRowSkipping(values, d.cursorBinaryCols))
 	}
 	return result, true, nil
 }
@@ -160,7 +175,7 @@ func (d *SQLiteDriver) ListSchemas(ctx context.Context) ([]string, error) {
 
 func (d *SQLiteDriver) ListTables(ctx context.Context, schema string) ([]Table, error) {
 	rows, err := d.conn.QueryContext(ctx,
-		`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
+		`SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("listando tabelas: %w", err)
 	}
@@ -168,11 +183,11 @@ func (d *SQLiteDriver) ListTables(ctx context.Context, schema string) ([]Table, 
 
 	var tables []Table
 	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
+		var name, kind string
+		if err := rows.Scan(&name, &kind); err != nil {
 			return nil, err
 		}
-		tables = append(tables, Table{Schema: "main", Name: name})
+		tables = append(tables, Table{Schema: "main", Name: name, Kind: kind})
 	}
 	return tables, rows.Err()
 }
@@ -222,6 +237,7 @@ func (d *SQLiteDriver) IntrospectSchema(ctx context.Context, schema string) ([]T
 		if err != nil {
 			return nil, err
 		}
+		full.Kind = t.Kind
 		result = append(result, *full)
 	}
 	return result, nil
@@ -291,6 +307,149 @@ func (d *SQLiteDriver) ListTriggers(ctx context.Context, schema, table string) (
 // retorna vazio (não é bug; o frontend mostra estado vazio com nota).
 func (d *SQLiteDriver) ListFunctions(ctx context.Context, schema string) ([]Function, error) {
 	return nil, nil
+}
+
+// ListIndexes lista índices explícitos da tabela via sqlite_master (exclui
+// os autoindex de PK/UNIQUE, que já aparecem no TableDDL como parte da
+// própria CREATE TABLE — "sqlite_autoindex_" é o prefixo interno do SQLite
+// pra esses). Colunas via PRAGMA index_info, na ordem do índice.
+func (d *SQLiteDriver) ListIndexes(ctx context.Context, schema, table string) ([]Index, error) {
+	rows, err := d.conn.QueryContext(ctx,
+		`SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND name NOT LIKE 'sqlite_autoindex_%' ORDER BY name`, table)
+	if err != nil {
+		return nil, fmt.Errorf("listando índices de %q: %w", table, err)
+	}
+	defer rows.Close()
+
+	var indexes []Index
+	for rows.Next() {
+		var idx Index
+		var def sql.NullString
+		if err := rows.Scan(&idx.Name, &def); err != nil {
+			return nil, err
+		}
+		if def.Valid {
+			idx.Definition = def.String
+		}
+		indexes = append(indexes, idx)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// PRAGMA index_list traz o flag "unique" por TABELA (não por índice) —
+	// bug real corrigido em revisão de código: a versão anterior sempre
+	// retornava Unique=false, então "CREATE UNIQUE INDEX" aparecia como "não"
+	// na UI (resposta errada, não só ausência de informação). Lê uma vez por
+	// tabela e cruza pelo nome do índice.
+	uniqueByName, err := d.uniqueIndexNames(ctx, table)
+	if err != nil {
+		return nil, err
+	}
+	for i := range indexes {
+		cols, err := d.indexColumns(ctx, indexes[i].Name)
+		if err != nil {
+			return nil, err
+		}
+		indexes[i].Columns = cols
+		indexes[i].Unique = uniqueByName[indexes[i].Name]
+	}
+	return indexes, nil
+}
+
+// uniqueIndexNames lê PRAGMA index_list(tabela) e devolve o conjunto de
+// nomes de índice marcados como únicos.
+func (d *SQLiteDriver) uniqueIndexNames(ctx context.Context, table string) (map[string]bool, error) {
+	rows, err := d.conn.QueryContext(ctx, fmt.Sprintf(`PRAGMA index_list(%q)`, table))
+	if err != nil {
+		return nil, fmt.Errorf("lendo lista de índices de %q: %w", table, err)
+	}
+	defer rows.Close()
+
+	unique := map[string]bool{}
+	for rows.Next() {
+		var seq int
+		var name string
+		var isUnique int
+		var origin, partial string
+		if err := rows.Scan(&seq, &name, &isUnique, &origin, &partial); err != nil {
+			return nil, err
+		}
+		if isUnique != 0 {
+			unique[name] = true
+		}
+	}
+	return unique, rows.Err()
+}
+
+// indexColumns lê PRAGMA index_info pra pegar as colunas do índice, na
+// ordem seqno.
+func (d *SQLiteDriver) indexColumns(ctx context.Context, indexName string) ([]string, error) {
+	infoRows, err := d.conn.QueryContext(ctx, fmt.Sprintf(`PRAGMA index_info(%q)`, indexName))
+	if err != nil {
+		return nil, fmt.Errorf("lendo colunas do índice %q: %w", indexName, err)
+	}
+	defer infoRows.Close()
+
+	var cols []string
+	for infoRows.Next() {
+		var seqno, cid int
+		var name sql.NullString
+		if err := infoRows.Scan(&seqno, &cid, &name); err != nil {
+			return nil, err
+		}
+		if name.Valid {
+			cols = append(cols, name.String)
+		}
+	}
+	return cols, infoRows.Err()
+}
+
+// ListForeignKeys lista as FKs de saída da tabela via PRAGMA foreign_key_list.
+// SQLite não nomeia FKs (sem "CONSTRAINT nome"), então Name/Definition usam
+// um rótulo sintético ("fk_<id>") e uma reconstrução textual simples.
+func (d *SQLiteDriver) ListForeignKeys(ctx context.Context, schema, table string) ([]ForeignKey, error) {
+	rows, err := d.conn.QueryContext(ctx, fmt.Sprintf(`PRAGMA foreign_key_list(%q)`, table))
+	if err != nil {
+		return nil, fmt.Errorf("listando foreign keys de %q: %w", table, err)
+	}
+	defer rows.Close()
+
+	byID := map[int]*ForeignKey{}
+	order := []int{}
+	for rows.Next() {
+		var id, seq int
+		var refTable string
+		var from, to sql.NullString
+		var onUpdate, onDelete, match string
+		if err := rows.Scan(&id, &seq, &refTable, &from, &to, &onUpdate, &onDelete, &match); err != nil {
+			return nil, err
+		}
+		fk, ok := byID[id]
+		if !ok {
+			fk = &ForeignKey{Name: fmt.Sprintf("fk_%d", id), RefSchema: "main", RefTable: refTable}
+			byID[id] = fk
+			order = append(order, id)
+		}
+		if from.Valid {
+			fk.Columns = append(fk.Columns, from.String)
+		}
+		if to.Valid {
+			fk.RefColumns = append(fk.RefColumns, to.String)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	result := make([]ForeignKey, 0, len(order))
+	for _, id := range order {
+		fk := byID[id]
+		fk.Definition = fmt.Sprintf("FOREIGN KEY (%s) REFERENCES %s (%s)",
+			strings.Join(fk.Columns, ", "), fk.RefTable, strings.Join(fk.RefColumns, ", "))
+		result = append(result, *fk)
+	}
+	return result, nil
 }
 
 // quoteIdent quota um identificador SQL com aspas duplas, escapando aspas
@@ -383,6 +542,7 @@ func scanRows(rows *sql.Rows) (*QueryResult, error) {
 	}
 
 	result := &QueryResult{Columns: columns, Types: types}
+	binary := binaryColumnMaskSQLite(colTypes)
 	for rows.Next() {
 		values := make([]any, len(columns))
 		pointers := make([]any, len(columns))
@@ -392,7 +552,7 @@ func scanRows(rows *sql.Rows) (*QueryResult, error) {
 		if err := rows.Scan(pointers...); err != nil {
 			return nil, err
 		}
-		result.Rows = append(result.Rows, values)
+		result.Rows = append(result.Rows, normalizeRowSkipping(values, binary))
 	}
 	return result, rows.Err()
 }

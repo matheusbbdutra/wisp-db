@@ -1,6 +1,7 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import DataEditor, {
     CellClickedEventArgs,
+    CompactSelection,
     DataEditorRef,
     GridCell,
     GridCellKind,
@@ -20,6 +21,8 @@ import {
     toInsertSQL,
     toMarkdownTable,
 } from '../lib/gridCopyFormats';
+import CellValueViewer from './CellValueViewer';
+import {useDragResize} from '../lib/useDragResize';
 
 // Contexto de edição inline (ADR 0004): só existe quando a query é um
 // SELECT simples de tabela única com PK real detectada no catálogo.
@@ -103,7 +106,12 @@ interface MenuState {
     x: number;
     y: number;
     col: number;
+    // row (original, índice em `rows`) usado pra conteúdo (copiar célula/
+    // linha/valor); displayRow (índice visual, pós-filtro) usado só pra
+    // checar se o clique caiu dentro da seleção ativa do grid (gridSelection
+    // é sempre em espaço visual — ver comentário em toOriginalRow).
     row: number;
+    displayRow: number;
 }
 
 function isCellInRange(col: number, row: number, range: {x: number; y: number; width: number; height: number}): boolean {
@@ -133,6 +141,94 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
     // mesmos e desenhamos nosso próprio input posicionado sobre a célula.
     const lastClickRef = useRef<{col: number; row: number; time: number} | null>(null);
     const [directEdit, setDirectEdit] = useState<DirectEdit | null>(null);
+    // Painel dockado de valor (não mais modal — ver docs/analysis/
+    // ui-ux-2026-09-15*.md): aberto/fechado persiste em localStorage, largura
+    // reaproveita o mesmo useDragResize já usado por Sidebar/split editor.
+    // useDragResize não expõe um "setSize" pra zerar a largura ao fechar, por
+    // isso `open` é um boolean separado — o painel só é montado quando aberto.
+    const [valuePanelOpen, setValuePanelOpen] = useState(() => {
+        try {
+            return localStorage.getItem('wisp:valuePanelOpen') === '1';
+        } catch {
+            return false;
+        }
+    });
+    // invert:true — painel ANCORADO À DIREITA (handle na borda esquerda dele);
+    // arrastar em direção ao painel (delta negativo) deve aumentar a largura,
+    // o oposto do caso padrão do hook (painel à esquerda, ex. Sidebar). Bug
+    // real achado em revisão de código: sem isso o arrasto respondia ao
+    // contrário do cursor.
+    const valuePanelResize = useDragResize({axis: 'x', initial: 320, min: 240, max: 640, storageKey: 'wisp:valuePanelWidth', invert: true});
+
+    function openValuePanel() {
+        setValuePanelOpen(true);
+        try {
+            localStorage.setItem('wisp:valuePanelOpen', '1');
+        } catch {
+            // localStorage indisponível — segue só em memória.
+        }
+    }
+
+    function closeValuePanel() {
+        setValuePanelOpen(false);
+        try {
+            localStorage.setItem('wisp:valuePanelOpen', '0');
+        } catch {
+            // localStorage indisponível — segue só em memória.
+        }
+    }
+
+    // Filtro rápido (client-side, sobre as linhas já carregadas — não
+    // requery no servidor, ver docs/ARCHITECTURE.md sobre não ter parser SQL
+    // custom): substring case-insensitive em qualquer coluna da linha.
+    const [filterText, setFilterText] = useState('');
+
+    // filteredIndices é null quando o filtro está vazio (caminho comum, sem
+    // custo de indireção) — nesse caso índice visual == índice em `rows`
+    // (identidade). Com filtro ativo, mapeia índice visual (posição na grade
+    // renderizada) pro índice real em `rows`, já que o Glide Data Grid só
+    // enxerga "quantas linhas existem" (rowCount) e pede conteúdo por
+    // posição visual — sem essa tradução, editar/copiar uma célula filtrada
+    // pegaria a linha errada de `rows`.
+    const filteredIndices = useMemo(() => {
+        const q = filterText.trim().toLowerCase();
+        if (!q) return null;
+        const idx: number[] = [];
+        rows.forEach((row, i) => {
+            if (row.some(v => displayValue(v).toLowerCase().includes(q))) {
+                idx.push(i);
+            }
+        });
+        return idx;
+    }, [filterText, rows]);
+
+    const rowCount = filteredIndices ? filteredIndices.length : rows.length;
+
+    const toOriginalRow = useCallback((displayRow: number): number => {
+        return filteredIndices ? filteredIndices[displayRow] : displayRow;
+    }, [filteredIndices]);
+
+    // A seleção ativa é em espaço visual (pós-filtro) — trocar o filtro muda
+    // o que cada posição visual significa, então uma seleção antiga ficaria
+    // apontando pra linha errada (ou fora dos limites, já que rowCount muda).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    useEffect(() => setGridSelection(undefined), [filterText]);
+
+    // Célula ativa do painel dockado: deriva de gridSelection.current.cell
+    // (espaço visual, mesma armadilha filtro-vs-real de sempre — traduz via
+    // toOriginalRow) só quando o painel está aberto. Painel fechado não
+    // recalcula nada (evita trabalho à toa navegando o grid sem o painel).
+    const valuePanelCell = useMemo(() => {
+        if (!valuePanelOpen) return null;
+        const cur = gridSelection?.current?.cell;
+        if (!cur) return null;
+        const [colIndex, displayRowIndex] = cur;
+        const rowIndex = toOriginalRow(displayRowIndex);
+        const row = rows[rowIndex];
+        const columnName = columns[colIndex];
+        if (!row || columnName === undefined) return null;
+        return {columnName, rawValue: displayValue(row[colIndex])};
+    }, [valuePanelOpen, gridSelection, rows, columns, toOriginalRow]);
 
     const darkTheme: Partial<Theme> = useMemo(() => ({
         accentColor: '#2563eb',
@@ -204,7 +300,8 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
     }, [editContext, columns, editableSet, rowHasPkValues]);
 
     const getCellContent = useCallback((cell: Item): GridCell => {
-        const [colIndex, rowIndex] = cell;
+        const [colIndex, displayRowIndex] = cell;
+        const rowIndex = toOriginalRow(displayRowIndex);
         const row = rows[rowIndex];
         const val = row ? row[colIndex] : null;
 
@@ -240,7 +337,7 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
             data: str,
             displayData: str,
         };
-    }, [rows, isCellEditable]);
+    }, [rows, isCellEditable, toOriginalRow]);
 
     // Diff contra o valor atual e abre o popover de preview do UPDATE (ADR
     // 0004: nunca commitar silencioso). O UPDATE real só executa no
@@ -268,7 +365,8 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
     // 500ms" nós mesmos — onCellClicked dispara de forma simples e
     // confiável a cada clique válido (ver comentário do lastClickRef).
     const handleCellClicked = useCallback((cell: Item) => {
-        const [colIndex, rowIndex] = cell;
+        const [colIndex, displayRowIndex] = cell;
+        const rowIndex = toOriginalRow(displayRowIndex);
         const now = Date.now();
         const last = lastClickRef.current;
         const editable = isCellEditable(colIndex, rowIndex);
@@ -277,8 +375,10 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
         if (!isSecondClick) return;
         // getBounds já soma o rowMarkerOffset internamente (ver
         // data-editor.js: `getBounds: (col,row) => ... gridRef.current?.getBounds((col ?? 0) + rowMarkerOffset, row)`)
-        // — passar o índice lógico (0-based, sem offset manual) aqui.
-        const bounds = gridRef.current?.getBounds(colIndex, rowIndex);
+        // — passar o índice VISUAL (displayRowIndex), já que bounds é
+        // posição na tela; a linha real (rowIndex) só importa pra ler/gravar
+        // o valor em `rows`.
+        const bounds = gridRef.current?.getBounds(colIndex, displayRowIndex);
         if (!bounds) return;
         const row = rows[rowIndex];
         const oldValue = row[colIndex];
@@ -288,7 +388,7 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
             value: oldValue === null || oldValue === undefined ? '' : String(oldValue),
             bounds,
         });
-    }, [isCellEditable, rows]);
+    }, [isCellEditable, rows, toOriginalRow]);
 
     const cancelDirectEdit = useCallback(() => setDirectEdit(null), []);
 
@@ -343,24 +443,32 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
         // `event.location` veio deslocado em 1 coluna (clicar em "name"
         // reportava a célula de "email"), enquanto `cell` bate certo com
         // os índices usados em getCellContent/columns/rows.
-        const [col, row] = cell;
-        if (row < 0 || col < 0) {
+        const [col, displayRow] = cell;
+        if (displayRow < 0 || col < 0) {
             return;
         }
-        setMenu({x: lastMousePos.current.x, y: lastMousePos.current.y, col, row});
-    }, []);
+        setMenu({x: lastMousePos.current.x, y: lastMousePos.current.y, col, row: toOriginalRow(displayRow), displayRow});
+    }, [toOriginalRow]);
 
     // Linhas marcadas via rowMarkers ("number") como matriz completa.
+    // selected.toArray() vem em espaço VISUAL (posição na grade renderizada,
+    // pós-filtro) — traduz cada índice pro real em `rows` via toOriginalRow
+    // antes de devolver, pra quem consome (selectionTarget/handleCopy*)
+    // nunca precisar pensar em espaço visual vs. real.
     const markedRowsMatrix = useCallback((): number[] | null => {
         const selected = gridSelection?.rows;
         if (!selected || selected.length === 0) {
             return null;
         }
-        const valid = selected.toArray().filter(r => r >= 0 && r < rows.length);
+        const valid = selected.toArray()
+            .filter(r => r >= 0 && r < rowCount)
+            .map(toOriginalRow);
         return valid.length > 0 ? valid : null;
-    }, [gridSelection, rows.length]);
+    }, [gridSelection, rowCount, toOriginalRow]);
 
-    // Matriz da seleção retangular atual (range), recortada pros limites reais.
+    // Matriz da seleção retangular atual (range), recortada pros limites
+    // reais — range.y/height são em espaço VISUAL, rowsIdx já sai traduzido
+    // pra espaço real (ver comentário em markedRowsMatrix).
     const rangeMatrix = useCallback((): {cols: number[]; rowsIdx: number[]} | null => {
         const range = gridSelection?.current?.range;
         if (!range || range.width * range.height <= 1) {
@@ -371,25 +479,29 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
             if (c >= 0) cols.push(c);
         }
         const rowsIdx: number[] = [];
-        for (let r = range.y; r < range.y + range.height && r < rows.length; r++) {
-            if (r >= 0) rowsIdx.push(r);
+        for (let r = range.y; r < range.y + range.height && r < rowCount; r++) {
+            if (r >= 0) rowsIdx.push(toOriginalRow(r));
         }
         if (cols.length === 0 || rowsIdx.length === 0) {
             return null;
         }
         return {cols, rowsIdx};
-    }, [gridSelection, columns.length, rows.length]);
+    }, [gridSelection, columns.length, rowCount, toOriginalRow]);
 
-    // Alvo do menu: a seleção ativa quando o clique cai dentro dela,
-    // senão só a célula/linha clicada (não tenta "adivinhar" intenção).
-    const selectionTarget = useCallback((col: number, row: number): {header: string[]; matrix: any[][]} | null => {
+    // Alvo do menu: a seleção ativa quando o clique cai dentro dela, senão só
+    // a célula/linha clicada (não tenta "adivinhar" intenção). displayRow
+    // (não o `row` original) é o parâmetro certo aqui — gridSelection
+    // (hasIndex/range) é sempre espaço VISUAL; marked/rect já saem traduzidos
+    // pra espaço real (ver markedRowsMatrix/rangeMatrix), então o resto do
+    // corpo usa `rows[...]` sem tradução extra.
+    const selectionTarget = useCallback((col: number, displayRow: number): {header: string[]; matrix: any[][]} | null => {
         const marked = markedRowsMatrix();
-        if (marked && gridSelection?.rows.hasIndex(row)) {
+        if (marked && gridSelection?.rows.hasIndex(displayRow)) {
             return {header: columns, matrix: marked.map(r => rows[r] ?? [])};
         }
         const range = gridSelection?.current?.range;
         const rect = rangeMatrix();
-        if (rect && range && isCellInRange(col, row, range)) {
+        if (rect && range && isCellInRange(col, displayRow, range)) {
             return {
                 header: rect.cols.map(c => columns[c]),
                 matrix: rect.rowsIdx.map(r => rect.cols.map(c => (rows[r] ?? [])[c])),
@@ -471,7 +583,7 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
         );
     }
 
-    const target = menu ? selectionTarget(menu.col, menu.row) : null;
+    const target = menu ? selectionTarget(menu.col, menu.displayRow) : null;
     const targetHeader = target ? target.header : columns;
     const targetMatrix = target ? target.matrix : [rows[menu?.row ?? 0] ?? []];
     const menuStyle = menu
@@ -486,7 +598,9 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
             <div className="result-toolbar">
                 <div className="result-stats">
                     <span>Resultados:</span>
-                    <span className="result-stat-badge">{rows.length} {rows.length === 1 ? 'linha' : 'linhas'}</span>
+                    <span className="result-stat-badge">
+                        {filteredIndices ? `${rowCount} de ${rows.length}` : rows.length} {rowCount === 1 ? 'linha' : 'linhas'}
+                    </span>
                     <span className="result-stat-badge">{columns.length} {columns.length === 1 ? 'coluna' : 'colunas'}</span>
                     {editContext && (
                         <span className="result-stat-badge result-editable-badge" title={`Edição inline habilitada via PK (${editContext.pkColumns.join(', ')})`}>
@@ -494,6 +608,21 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
                         </span>
                     )}
                 </div>
+                <input
+                    className="result-filter-input"
+                    type="text"
+                    placeholder="Filtro rápido (qualquer coluna)…"
+                    value={filterText}
+                    onChange={e => setFilterText(e.target.value)}
+                    title="Filtra as linhas já carregadas por substring — não refaz a busca no servidor."
+                />
+                <button
+                    className={`btn btn-secondary ${valuePanelOpen ? 'active' : ''}`}
+                    onClick={() => (valuePanelOpen ? closeValuePanel() : openValuePanel())}
+                    title="Mostrar/ocultar o visor de valor da célula selecionada"
+                >
+                    Valor
+                </button>
             </div>
             {readOnlyNotice && (
                 <div className="result-readonly-notice" title={readOnlyNotice}>
@@ -501,6 +630,7 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
                 </div>
             )}
 
+            <div className="result-body">
             <div
                 className="result-grid-canvas"
                 onContextMenuCapture={handleContextMenuCapture}
@@ -511,7 +641,7 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
                     width="100%"
                     height="100%"
                     columns={gridColumns}
-                    rows={rows.length}
+                    rows={rowCount}
                     getCellContent={getCellContent}
                     onCellClicked={handleCellClicked}
                     onPaste={false}
@@ -553,6 +683,24 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
                     <div ref={menuRef} className="grid-context-menu" style={menuStyle} role="menu">
                         <button className="grid-context-menu-item" onClick={() => handleCopyCell(menu.col, menu.row)}>
                             Copiar célula
+                        </button>
+                        <button
+                            className="grid-context-menu-item"
+                            onClick={() => {
+                                // Move a seleção do grid pra célula clicada — o
+                                // painel deriva o conteúdo de gridSelection
+                                // (valuePanelCell), então isso é o suficiente
+                                // pra ele mostrar o valor certo ao abrir.
+                                setGridSelection({
+                                    current: {cell: [menu.col, menu.displayRow], range: {x: menu.col, y: menu.displayRow, width: 1, height: 1}, rangeStack: []},
+                                    rows: CompactSelection.empty(),
+                                    columns: CompactSelection.empty(),
+                                });
+                                openValuePanel();
+                                setMenu(null);
+                            }}
+                        >
+                            Ver valor…
                         </button>
                         {!target && (
                             <button className="grid-context-menu-item" onClick={() => handleCopyRow(menu.row)}>
@@ -605,6 +753,15 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
                         </div>
                     </div>
                 )}
+            </div>
+            {valuePanelOpen && (
+                <CellValueViewer
+                    cell={valuePanelCell}
+                    width={valuePanelResize.size}
+                    onResizeMouseDown={valuePanelResize.onMouseDown}
+                    onClose={closeValuePanel}
+                />
+            )}
             </div>
         </div>
     );

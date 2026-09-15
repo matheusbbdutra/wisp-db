@@ -1,5 +1,66 @@
 # STATE — Wisp
 
+## ✅ Revisão de código pelo Codex (2026-09-15) + 3 bugs reais corrigidos
+Primeira tentativa (`20260915T233639-wisp-code-review-ui-codex`) falhou: o
+sandbox do Codex bloqueia aprovação de tool call, então `memory` MCP nunca
+respondia (`approval_policy=never` no ambiente dele). Retentei embutindo
+todo o contexto direto no prompt (`--prompt-file`, sem depender de MCP) —
+funcionou. Relatório completo em
+`docs/analysis/code-review-ui-changes-2026-09-15-codex.md` (9 achados,
+verificação explícita dos 6 pontos de risco que eu tinha apontado).
+
+**3 bugs reais confirmados e corrigidos:**
+1. **Arrasto do painel de valor invertido** — `useDragResize` foi desenhado
+   pra painéis à ESQUERDA (Sidebar); o painel de valor é à DIREITA, então
+   arrastar respondia ao contrário do cursor. Fix: novo parâmetro
+   `invert?: boolean` no hook (`frontend/src/lib/useDragResize.ts`), usado
+   pelo `valuePanelResize` em `ResultGrid.tsx`.
+2. **Índice UNIQUE do SQLite sempre mostrava "não"** — `indexInfo` nunca
+   lia o flag de unicidade (comentário antigo dizia "over-engineering",
+   mas isso fazia a UI mentir, não só omitir). Fix: `uniqueIndexNames`
+   novo em `internal/db/sqlite.go`, lê `PRAGMA index_list(tabela)` uma vez
+   e cruza pelo nome do índice.
+3. **`bytea` real virava lixo irrecuperável** — `normalizeCellValue`
+   (fix de XML da rodada anterior) convertia QUALQUER `[]byte` pra
+   `string`, incluindo binário genuíno — bytes que não formam UTF-8 válido
+   viram U+FFFD (replacement character), perda permanente. Fix:
+   `normalizeRowSkipping` (`internal/db/driver.go`) preserva `[]byte` como
+   está pras colunas identificadas como binárias (Postgres: OID 17/bytea
+   via `pgtype.ByteaOID`, `binaryColumnMask` em `postgres.go`; SQLite:
+   `DatabaseTypeName() == "BLOB"`, `binaryColumnMaskSQLite` em
+   `sqlite.go`) — volta a virar base64 em JSON pra esses casos (reversível,
+   comportamento de antes desta sessão), enquanto XML/texto sem codec
+   continua sendo convertido pra string legível.
+
+**Verificado contra Postgres real**: `metadata_xml` (`invoice_lines`)
+continua mostrando texto real depois do fix (não regrediu); coluna
+`bytea` de teste (`decode('deadbeef','hex')`) mostrou `3q2+7w==` — base64
+correto e reversível, não mais bytes mangled.
+
+**Achados do Codex não corrigidos nesta rodada** (documentados no
+relatório completo, ficam pra depois — nenhum é regressão introduzida
+por mim, todos são refinamento):
+- Formatador XML (`valueFormat.ts`) não faz escaping de entidades ao
+  reserializar e descarta CDATA/comentários — o valor exibido/copiado
+  pode divergir sutilmente do original em casos com `&`/`<`/CDATA.
+- FK reconstruída do SQLite (`ListForeignKeys`) perde `ON DELETE/UPDATE
+  CASCADE` e pode gerar `REFERENCES parent ()` (parênteses vazios) se a
+  FK não lista colunas explícitas.
+- Sidebar: indicador "buscando…" pode ficar preso se o usuário limpar a
+  busca no meio de um fetch; erro de `ListTables` durante busca é
+  engolido silenciosamente (não interrompe nem avisa).
+- `valuePanelCell`/seleção do grid: janela transitória (não crash, só
+  render potencialmente desatualizado por um frame) quando o filtro muda
+  com o painel de valor aberto; editar uma célula que deixa de bater com
+  o filtro ativo pode deslocar o "significado" do índice de seleção
+  visual (0 passa a apontar pra outra linha real).
+- `testdata/postgres-seed.sql` não é idempotente se reaplicado sobre um
+  container já inicializado por uma versão anterior do seed (ALTER
+  ausente pras colunas novas) — usar sempre `docker compose down -v &&
+  up -d` pra recriar do zero, não reaplicar o `.sql` num container vivo.
+
+`go build`/`go vet`/`tsc --noEmit`/`npm run build` limpos depois dos 3 fixes.
+
 Checkpoint compacto pra retomar em sessão nova. Histórico detalhado de cada
 mudança está nos commits do git (`git log`), não duplicado aqui.
 
@@ -230,6 +291,185 @@ Adiado deliberadamente pelo usuário — não por causa do open source em si (o 
 - **OpenCode**: `opencode run "..."` funciona headless direto — **nunca colocar `&` no fim do comando quando usar `run_in_background: true` no Bash tool** (bug já cometido: duplica o backgrounding e o comando real nunca roda). Também já mostrou instabilidade de provedor (timeout de 900s) uma vez — se acontecer de novo, matar e pedir pro usuário rodar manualmente.
 - Tarefas que tocam os mesmos arquivos: rodar sequencialmente, nunca em paralelo.
 
+## 🔄 Sincronização com o outro PC + Item 1 do Phase 3 (2026-09-15, sessão nova)
+Puxado `git pull --rebase` do outro PC (commits `1437d13`/`0d78496`): fix real de
+"conn busy" no Postgres (cursor de streaming não fechado antes de rodar
+DDL/Triggers/Funções — fix manda `CancelRequest` antes de fechar), N+1 no
+catálogo (`IntrospectTable` por tabela → `IntrospectSchema`/
+`IntrospectSchemaTables` batched), UX de console (Ctrl+Enter reaproveita aba
+de resultado, confirmação antes de fechar aba/janela com SQL não salvo,
+`RoutineTab` para Triggers/Funções), e `.deb` ganhou `postinst`/`postrm`
+(ícone não aparecia no launcher sem `gtk-update-icon-cache`). Havia uma
+mudança local não commitada em `packaging/deb/build.sh` (heredoc inline dos
+mesmos `postinst`/`postrm`) — descartada por ser redundante com a versão já
+implementada como arquivos próprios pelo outro PC.
+
+Implementado sozinho (sem delegação, contrato pequeno o suficiente pra não
+precisar) o **item 1 do Phase 3** (`docs/ROADMAP.md`): Índices, FKs e
+distinção View/Tabela na exploração de schema. Ver detalhe técnico completo
+na entrada do ROADMAP. Verificado contra Postgres real via Claude in Chrome
+(view/índice/FK criados ad-hoc via `psql`, removidos depois) — sidebar e
+TableTab mostram os dados corretos, exclusão do índice de suporte de
+UNIQUE/PK confirmada. Lógica SQLite (PRAGMA scan) validada via `sqlite3` CLI
+direto (não passou pela UI — sem instância de teste com view/índice/FK à
+mão nesta sessão). `go build`/`go vet`/`tsc --noEmit`/`npm run build`
+limpos.
+
+**Pendente de confirmação do usuário**: testar Índices/FKs/badge de view na
+janela nativa (SQLite real, não só Postgres) antes de considerar o item
+fechado de vez.
+
+## ✅ Item 1 confirmado pelo usuário + Item 2 do Phase 3 implementado (2026-09-15)
+Usuário confirmou o item 1 (Índices/FKs/Views) na janela nativa do `wails
+dev` — FKs especificamente testado lá (não tinha no banco do outro PC);
+Triggers/Funções/DDL não puderam ser re-testados por falta de tabela com
+esse conteúdo no Postgres de teste atual, mas já tinham sido confirmados
+antes no outro PC com um banco maior.
+
+Implementado o **item 2 do Phase 3** (visor de valor de célula + filtro
+rápido + busca), a pedido explícito do usuário incluindo XML como formato
+adicional (além de JSON/texto) e comportamento "tipo DBeaver" (select de
+formato + quebra de linha). Ver detalhe técnico completo na entrada do
+ROADMAP. Ponto de atenção da implementação: o filtro rápido do grid exigiu
+traduzir "posição visual" (o que o Glide Data Grid e sua seleção enxergam)
+pra "índice real em `rows`" em todo ponto de entrada (conteúdo de
+célula/clique/menu de contexto/seleção) — verificado contra Postgres real
+via Claude in Chrome que editar/copiar uma linha filtrada ainda pega a linha
+certa, não a visualmente adjacente. Busca da sidebar busca tabelas de
+schemas ainda não expandidos sob demanda (debounce 300ms, sequencial).
+
+Tudo verificado ao vivo via Claude in Chrome contra Postgres real: "Ver
+valor…" formatou JSON aninhado corretamente com quebra de linha; filtro
+rápido reduziu "3 linhas" pra "1 de 3 linha" e manteve a edição direta
+mirando na linha certa (Bruno Costa, não a linha 0); busca na sidebar
+filtrou `order_items` corretamente escondendo `customers`/`invoice_lines`.
+`go build`/`go vet`/`tsc --noEmit`/`npm run build` limpos.
+
+**Pendente de confirmação do usuário**: testar na janela nativa (não só
+Chrome) — em especial o popover do visor de valor (posicionamento/z-index)
+e a busca da sidebar com um schema de muitas tabelas de verdade.
+
+**Próximo item da fila** (ROADMAP Phase 3, item 3): EXPLAIN / plano de
+execução (v1 textual via `EXPLAIN ANALYZE`).
+
+## 🐛 Bug real corrigido (2026-09-15): coluna XML aparecia como base64 ilegível
+Usuário pediu um seed de teste mais completo (múltiplos schemas, JSON/XML,
+FKs, triggers, funções, índices) pra validar os itens 1-2 do Phase 3 contra
+dados reais — não existe gerador de mock pronto pra estrutura (FK/trigger/
+view/tipo de coluna são decisão de schema, não dado fake; Faker et al.
+geram só dados). Escrevi `testdata/postgres-seed.sql` na mão cobrindo tudo
+isso em 3 schemas (`public`/`sales`/`reporting`), recriei o container
+(`docker compose down -v && up -d`, container só reaplica o seed no
+primeiro init).
+
+Testando o visor de valor contra uma coluna XML real (`invoice_lines.
+metadata_xml`), o grid mostrava a célula como base64 ilegível
+(`PGludn9pY2U+...`) em vez do XML de verdade. **Causa raiz confirmada**:
+pgx v5 tem codec nativo pra JSON/JSONB (decodifica pra `string`), mas NÃO
+pra `xml` do Postgres — `rows.Values()` devolve o valor cru do wire como
+`[]byte` pra qualquer tipo sem codec. `QueryResult.Rows` (`[][]any`) vira
+JSON puro na ponte IPC do Wails, e `encoding/json` do Go serializa
+`[]byte` como base64 automaticamente — silencioso, sem erro.
+
+**Fix**: `normalizeCellValue`/`normalizeRow` em `internal/db/driver.go`
+(convertem `[]byte`→`string` genericamente, não só pra XML — qualquer tipo
+sem codec teria o mesmo problema), aplicado em `Execute`/`FetchNext` de
+`postgres.go` e `scanRows`/`FetchNext` de `sqlite.go` (defensivo, mesmo
+risco em teoria com `database/sql`).
+
+**Verificado contra Postgres real**: `SELECT metadata_xml FROM
+invoice_lines` mostrou o XML de verdade no grid antes e depois do fix
+(antes: base64; depois: `<invoice><line sku="KB-100">...`); "Ver valor…"
+detectou `xml` automaticamente e formatou com indentação correta.
+
+**Todos os itens 1-2 do Phase 3 revalidados contra o seed novo** (3
+schemas, JSON/XML, FKs cruzando schema, 2 índices incluindo composto
+único, trigger, 2 funções, 2 views): sidebar mostra os 3 schemas e a view
+com badge; busca encontrou `sales.deals`/`sales.open_deals` buscando por
+"deals" sem o schema estar expandido antes; `sales.deals` mostra os 2
+índices (incluindo o único composto corretamente marcado) e as 2 FKs
+cruzando pra `public.customers`/`sales.regions`; `customers` mostra o
+trigger `trg_customers_touch` (abre definição correta em aba própria); a
+função `sales.total_by_region` aparece na aba Funções do schema certo.
+
+`go build`/`go vet`/`tsc --noEmit`/`npm run build` limpos.
+
+**Nota operacional**: `testdata/postgres-seed.sql` agora é a fixture de
+referência pra testar contra Postgres real em sessões futuras — cobre
+JSON(B)/XML/multi-schema/FK/trigger/função/índice/view de propósito, não é
+mock de negócio realista. Recriar com `docker compose -f
+testdata/docker-compose.yml down -v && up -d` sempre que precisar resetar
+pro estado do seed (o `-v` remove o volume — perde dado que você tenha
+inserido manualmente na sessão de teste, nunca dados de produção).
+
+## ✅ Melhorias de UX/UI (2026-09-15): visor de valor dockado + sidebar colapsável + saneamento de CSS
+A pedido do usuário, depois de ver o visor de valor funcionando na prática:
+"a opção de ver valor ta muito pouco utilitária... normalmente tem uma
+minibarra lateral... schemas e tabelas poderia ser 'minimizadas'". Em vez de
+implementar direto, rodei uma **análise comparativa em 3 agentes em
+paralelo** (Antigravity, OpenCode, Cursor Agent) via `delegate-run` +
+memória compartilhada (`wisp-ui-ux-analysis-value-viewer-sidebar-task`,
+cada um gravou o resultado com nome próprio pra não sobrescrever —
+`wisp-ui-ux-analysis-result-{antigravity,opencode,cursor}` — e arquivo em
+`docs/analysis/ui-ux-2026-09-15-*.md`). As 3 convergiram fortemente:
+painel de valor dockado à direita dentro do `ResultGrid` (não sobe pra
+`ConsoleTab`/`TableTab`), sidebar colapsa pra escondida (não ícone-only —
+é árvore de texto+busca), e saneamento de vars CSS antes do resto do
+polish. OpenCode e Cursor trouxeram achados extras que Antigravity não
+pegou: 2 vars CSS referenciadas mas nunca definidas (`--font-mono`,
+`--accent-color`), `useDragResize` não expõe `setSize` (colapso precisa de
+boolean `open` separado, não dá pra só zerar a largura), e o cuidado de
+que Histórico/Scripts já dockam à direita do workspace inteiro — por isso
+o painel de valor precisa ficar **escopo-grid**, não workspace, senão
+empilha 3 painéis à direita.
+
+Implementei as 3 melhorias na ordem sugerida (saneamento CSS → sidebar
+colapsável → visor de valor dockado):
+
+1. **CSS**: `--font-mono`/`--accent-color` definidas em `:root`
+   (`App.css`); `--bg-panel`/`--accent-blue-light` novas pra eliminar hex
+   duplicado (`#1e1e22`, `#93c5fd`); demais `#2563eb`/`#131315` soltos
+   trocados por `var(--accent-blue)`/`var(--bg-grid)`.
+2. **Sidebar colapsável**: `Sidebar.tsx` ganhou prop `onCollapse` (botão
+   `‹` no header); `ConsoleTab.tsx` tem `sidebarCollapsed` (boolean,
+   `localStorage wisp:sidebarCollapsed`) — colapsado desmonta a
+   `<Sidebar/>` e mostra uma faixa fina (`.sidebar-reopen-rail`, `‹`/`›`)
+   pra reabrir. Decisão consciente (mesma dos 3 agentes): perder
+   busca/schemas-expandidos em memória ao colapsar é aceitável, elevar
+   esse estado furaria a convenção de não subir estado sem necessidade.
+3. **Visor de valor dockado**: `CellValueViewer.tsx` deixou de ser modal
+   (`.grid-edit-overlay`) e virou painel lateral (`.value-viewer-dock`)
+   dentro do `ResultGrid` (`.result-body`, novo wrapper flex-row ao lado
+   de `.result-grid-canvas`), redimensionável via `useDragResize` mesmo
+   padrão da sidebar (`wisp:valuePanelWidth`). Segue a célula ativa
+   sozinho via `gridSelection.current.cell` (traduzido por
+   `toOriginalRow` — mesma armadilha do filtro rápido, célula errada com
+   filtro ativo se esquecesse essa tradução). Aberto/fechado via botão
+   "Valor" na toolbar (`wisp:valuePanelOpen`) ou pelo item "Ver valor…" do
+   menu de contexto (agora move a seleção do grid pra célula clicada em
+   vez de tirar um snapshot). Empty state quando não há seleção (evita
+   layout pulando). Formato/wrap/copiar preservados sem mudança de lógica.
+
+**Verificado ao vivo via Claude in Chrome** (Postgres real, seed com
+JSON): sidebar colapsa/expande preservando schemas; painel de valor abre
+dockado à direita, JSON pretty-print correto; navegar entre células
+diferentes atualiza o painel sozinho sem reabrir; com filtro rápido ativo,
+o painel continua mostrando a linha certa (não a visualmente adjacente);
+"Ver valor…" do menu de contexto também sincroniza certo. `go build`/
+`go vet`/`tsc --noEmit`/`npm run build` limpos.
+
+**Pendente de confirmação do usuário**: testar na janela nativa (não só
+Chrome) — o redimensionamento por arrasto do painel de valor e a faixa de
+reabertura da sidebar (elementos finos, mais sensíveis a diferenças de
+input entre Chrome de teste e WebKitGTK nativo).
+
+**Itens de polish restantes** (não implementados nesta rodada, ficam pra
+quando o usuário quiser continuar — lista completa nos 3 arquivos
+`docs/analysis/ui-ux-2026-09-15-*.md`): esconder/reduzir o `tabId` cru na
+toolbar, hit-area maior nos resize-handles, `:focus-visible` global,
+segmented control no `.table-subbar`, scrollbars customizadas, contraste
+de `--text-muted`, empty states unificados entre Sidebar/ResultGrid/Meta.
+
 ## Última atualização
 2026-09-15 (fim de sessão) — Autocomplete completo (v1+v2), uppercase automático, pretty-print SQL, copiar especial no grid e **edição inline de células** (item 7, concluído nesta sessão com 4 bugs reais de causa raiz corrigidos — ver seção "Edição inline de células" acima), todos implementados via delegação ao OpenCode + revisão/depuração minha antes de aceitar.
 
@@ -372,3 +612,14 @@ vivo contra Postgres real — badge "editável" aparece agora. Ver memória
 
 `go test ./...` (8 testes), `npm run test` (18 testes), `go build`, `tsc`,
 `npm run build` todos limpos.
+
+## 📋 Análise UX/UI (só proposta) — visor + sidebar + polish (2026-09-15)
+
+Rodada paralela (Antigravity / OpenCode / Cursor) pedida pelo orquestrador.
+**Cursor Agent** gravou análise independente (sem código) em
+`docs/analysis/ui-ux-2026-09-15-cursor.md` e memória
+`wisp-ui-ux-analysis-result-cursor`. Resumo: visor dockado à **direita do
+grid** (escopo `ResultGrid`, não workspace — evita colidir com
+Histórico/Scripts); sidebar **colapsar=esconder** só no Console (TableTab/
+SchemaTab não têm Sidebar); polish P1 de tokens/`--accent-color`/toolbar.
+Aguardando síntese do Claude Code + decisão do usuário antes de implementar.

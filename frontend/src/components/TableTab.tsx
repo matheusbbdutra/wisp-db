@@ -1,11 +1,11 @@
 import {useEffect, useRef, useState} from 'react';
-import {ConnectSaved, Disconnect, RunQuery, FetchRows, IntrospectTable, GetTableDDL, ListTriggers, ListFunctions} from '../lib/tabApi';
+import {ConnectSaved, Disconnect, RunQuery, FetchRows, IntrospectTable, GetTableDDL, ListTriggers, ListFunctions, ListIndexes, ListForeignKeys} from '../lib/tabApi';
 import type {db} from '../../wailsjs/go/models';
 import SqlEditor from './SqlEditor';
 import ResultGrid, {type EditContext} from './ResultGrid';
 import {withQueue} from '../lib/tabCallQueue';
 
-type SubTab = 'dados' | 'colunas' | 'ddl' | 'triggers' | 'funcoes';
+type SubTab = 'dados' | 'colunas' | 'indices' | 'fks' | 'ddl' | 'triggers' | 'funcoes';
 
 const BATCH_SIZE = 200;
 
@@ -52,6 +52,8 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
     const [ddl, setDdl] = useState<string | null>(null);
     const [triggers, setTriggers] = useState<db.Trigger[] | null>(null);
     const [funcoes, setFuncoes] = useState<db.Function[] | null>(null);
+    const [indices, setIndices] = useState<db.Index[] | null>(null);
+    const [foreignKeys, setForeignKeys] = useState<db.ForeignKey[] | null>(null);
     const [metaLoading, setMetaLoading] = useState(false);
     const [metaError, setMetaError] = useState<string | null>(null);
 
@@ -218,6 +220,12 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
                 } else if (next === 'funcoes' && funcoes === null) {
                     setMetaLoading(true);
                     setFuncoes((await ListFunctions(tabId, schema)) ?? []);
+                } else if (next === 'indices' && indices === null) {
+                    setMetaLoading(true);
+                    setIndices((await ListIndexes(tabId, schema, table)) ?? []);
+                } else if (next === 'fks' && foreignKeys === null) {
+                    setMetaLoading(true);
+                    setForeignKeys((await ListForeignKeys(tabId, schema, table)) ?? []);
                 }
             } catch (err) {
                 setMetaError(String(err));
@@ -234,7 +242,7 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
             <div className="toolbar-secondary">
                 <span className="table-tab-title" title={`Tabela ${schema}.${table}`}>{table}</span>
                 <div className="table-subbar" role="tablist">
-                    {(['dados', 'colunas', 'ddl', 'triggers', 'funcoes'] as SubTab[]).map(s => (
+                    {(['dados', 'colunas', 'indices', 'fks', 'ddl', 'triggers', 'funcoes'] as SubTab[]).map(s => (
                         <button
                             key={s}
                             role="tab"
@@ -243,7 +251,7 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
                             disabled={metaLoading && subTab !== s}
                             onClick={() => handleSelectSub(s)}
                         >
-                            {s === 'dados' ? 'Dados' : s === 'colunas' ? 'Colunas' : s === 'ddl' ? 'DDL' : s === 'triggers' ? 'Triggers' : 'Funções'}
+                            {s === 'dados' ? 'Dados' : s === 'colunas' ? 'Colunas' : s === 'indices' ? 'Índices' : s === 'fks' ? 'FKs' : s === 'ddl' ? 'DDL' : s === 'triggers' ? 'Triggers' : 'Funções'}
                         </button>
                     ))}
                 </div>
@@ -305,6 +313,66 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
                                         <td>{c.Nullable ? 'sim' : 'não'}</td>
                                         <td>{c.IsPrimaryKey ? '🔑' : ''}</td>
                                         <td>{c.IsGenerated ? 'sim' : ''}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
+            )}
+
+            {subTab === 'indices' && (
+                <div className="table-meta-pane">
+                    {metaLoading && indices === null && <div className="meta-empty">Carregando índices…</div>}
+                    {metaError && indices === null && <div className="meta-empty">Erro ao carregar índices: {metaError}</div>}
+                    {indices !== null && indices.length === 0 && (
+                        <div className="meta-empty">Nenhum índice explícito nesta tabela.</div>
+                    )}
+                    {indices !== null && indices.length > 0 && (
+                        <table className="columns-table">
+                            <thead>
+                                <tr>
+                                    <th>Nome</th>
+                                    <th>Colunas</th>
+                                    <th>Único</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {indices.map(idx => (
+                                    <tr key={idx.Name} title={idx.Definition}>
+                                        <td>{idx.Name}</td>
+                                        <td>{(idx.Columns ?? []).join(', ')}</td>
+                                        <td>{idx.Unique ? 'sim' : 'não'}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
+            )}
+
+            {subTab === 'fks' && (
+                <div className="table-meta-pane">
+                    {metaLoading && foreignKeys === null && <div className="meta-empty">Carregando foreign keys…</div>}
+                    {metaError && foreignKeys === null && <div className="meta-empty">Erro ao carregar foreign keys: {metaError}</div>}
+                    {foreignKeys !== null && foreignKeys.length === 0 && (
+                        <div className="meta-empty">Nenhuma foreign key nesta tabela.</div>
+                    )}
+                    {foreignKeys !== null && foreignKeys.length > 0 && (
+                        <table className="columns-table">
+                            <thead>
+                                <tr>
+                                    <th>Nome</th>
+                                    <th>Colunas</th>
+                                    <th>Referência</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {foreignKeys.map(fk => (
+                                    <tr key={fk.Name} title={fk.Definition}>
+                                        <td>{fk.Name}</td>
+                                        <td>{(fk.Columns ?? []).join(', ')}</td>
+                                        <td>{fk.RefSchema}.{fk.RefTable} ({(fk.RefColumns ?? []).join(', ')})</td>
                                     </tr>
                                 ))}
                             </tbody>

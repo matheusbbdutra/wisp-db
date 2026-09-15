@@ -50,8 +50,16 @@ export function IntrospectTable(arg1, arg2, arg3) {
   return window['go']['main']['App']['IntrospectTable'](arg1, arg2, arg3);
 }
 
+export function ListForeignKeys(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ListForeignKeys'](arg1, arg2, arg3);
+}
+
 export function ListFunctions(arg1, arg2) {
   return window['go']['main']['App']['ListFunctions'](arg1, arg2);
+}
+
+export function ListIndexes(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ListIndexes'](arg1, arg2, arg3);
 }
 
 export function ListSavedConnections() {

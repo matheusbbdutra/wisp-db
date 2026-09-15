@@ -134,6 +134,32 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
     // limitação de toolkit nativo.
     const sidebarResize = useDragResize({axis: 'x', initial: 250, min: 180, max: 480, storageKey: 'wisp:sidebarWidth'});
     const editorResize = useDragResize({axis: 'y', initial: 220, min: 120, max: 600, storageKey: 'wisp:editorHeight'});
+    // Colapso da Sidebar — separado do resize por arrasto (useDragResize não
+    // expõe um "setSize", e reduzir a 0px perderia a largura preferida do
+    // usuário). Colapsado = escondida (não ícone-only: é árvore de texto +
+    // busca, uma faixa fina não sobra espaço pra nada legível).
+    const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+        try {
+            return localStorage.getItem('wisp:sidebarCollapsed') === '1';
+        } catch {
+            return false;
+        }
+    });
+    // Colapsar desmonta a <Sidebar/> (perde busca/schemas expandidos em
+    // memória) em vez de só escondê-la via CSS — aceito de propósito: elevar
+    // esse estado pra cá furaria a convenção do projeto de não subir estado
+    // sem necessidade real, e colapsar com busca ativa é caso raro.
+    function toggleSidebarCollapsed() {
+        setSidebarCollapsed(prev => {
+            const next = !prev;
+            try {
+                localStorage.setItem('wisp:sidebarCollapsed', next ? '1' : '0');
+            } catch {
+                // localStorage indisponível — segue só em memória.
+            }
+            return next;
+        });
+    }
     const [connected, setConnected] = useState(false);
     const [status, setStatus] = useState('desconectado');
     // Abas de resultado (ver ResultTabState acima) — uma por execução.
@@ -753,15 +779,24 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
             </div>
 
             <div className="workspace">
-                <Sidebar
-                    tabId={tabId}
-                    connected={connected}
-                    onSelectTable={handleSelectTable}
-                    onOpenTable={handleOpenTableRequest}
-                    onOpenSchema={handleOpenSchemaRequest}
-                    style={{width: sidebarResize.size, flex: '0 0 auto'}}
-                />
-                <div className="resize-handle resize-handle-v" onMouseDown={sidebarResize.onMouseDown} title="Arrastar para redimensionar" />
+                {sidebarCollapsed ? (
+                    <button className="sidebar-reopen-rail" onClick={toggleSidebarCollapsed} title="Expandir painel de schemas">
+                        ›
+                    </button>
+                ) : (
+                    <>
+                        <Sidebar
+                            tabId={tabId}
+                            connected={connected}
+                            onSelectTable={handleSelectTable}
+                            onOpenTable={handleOpenTableRequest}
+                            onOpenSchema={handleOpenSchemaRequest}
+                            onCollapse={toggleSidebarCollapsed}
+                            style={{width: sidebarResize.size, flex: '0 0 auto'}}
+                        />
+                        <div className="resize-handle resize-handle-v" onMouseDown={sidebarResize.onMouseDown} title="Arrastar para redimensionar" />
+                    </>
+                )}
 
                 <main className="main-panel">
                     <div className="editor-pane" style={{height: editorResize.size}}>
