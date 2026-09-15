@@ -3,6 +3,21 @@
 Checkpoint compacto pra retomar em sessão nova. Histórico detalhado de cada
 mudança está nos commits do git (`git log`), não duplicado aqui.
 
+## ⏸️ Pausa em 2026-09-15 — retomar daqui amanhã
+
+**Pendências pra você testar/confirmar antes de continuar** (nenhum bloqueia o trabalho, mas ficaram sem confirmação final):
+1. **Copiar especial no grid** — clique direito numa célula → "Copiar célula" deve colar o valor da coluna certa (achei e corrigi um bug de coluna trocada, mas não consegui reconfirmar via automação — ver item 6 abaixo).
+2. Geral: dar uma olhada na janela do Wisp depois de tanta mudança acumulada (autocomplete v1/v2, uppercase automático, pretty-print, copiar especial) — tudo testado por mim via browser, mas nunca dói confirmar na janela nativa.
+
+**Próximo item a implementar (não começado ainda)**: "Tabela como aba própria" (Fase 2.6, item 6 na lista abaixo) — dados/DDL/triggers/funções de uma tabela numa aba dedicada, navegar tabelas de um schema a partir dali. Esse é o maior item pendente: precisa de bindings novos no backend (`app.go`/`internal/db`):
+- **Triggers**: fácil e confiável — Postgres tem `pg_get_triggerdef(oid)` nativo; SQLite tem a definição literal em `sqlite_master.sql` (`WHERE type='trigger'`).
+- **DDL da tabela**: mais difícil — Postgres não tem um "SHOW CREATE TABLE" nativo (diferente de MySQL), precisa reconstruir a partir de `information_schema.columns` + `pg_get_constraintdef` pras constraints; SQLite já guarda o DDL literal em `sqlite_master.sql` (`WHERE type='table'`, direto, sem reconstrução).
+- **Funções do schema**: Postgres via `pg_proc`/`information_schema.routines`; SQLite não tem função de usuário no sentido tradicional (provavelmente lista vazia com nota, não é lacuna real).
+- Frontend: novo "tipo" de aba (`App.tsx`/tab manager) além do console — uma aba de tabela com sub-abas Dados/DDL/Triggers/Funções.
+- Meu plano: desenhar o contrato de dados (structs Go, bindings) e a arquitetura da aba nova eu mesmo (é decisão estrutural), delegar a implementação mecânica por partes ao OpenCode, verificar cada parte via browser antes de aceitar — mesmo padrão usado nos itens anteriores desta sessão.
+
+**Padrão de trabalho que funcionou bem esta sessão** (repetir): eu desenho a spec técnica detalhada (arquitetura, armadilhas, contratos de API) e gravo na `memory-mcp`; delego a implementação mecânica ao OpenCode (`opencode run`) apontando pra essa memória; reviso o diff e rodo `go build`/`tsc --noEmit`/`npm run build` eu mesmo antes de aceitar; quando dá pra testar de verdade, abro `http://localhost:34115` (URL que o `wails dev` do usuário expõe) via Claude in Chrome em vez de só pedir pro usuário testar — isso já achou bugs reais (SuggestController ausente, `ListTables` sem colunas, concorrência "conn busy", offset de coluna no copiar) antes de qualquer coisa chegar ao usuário.
+
 ## O que já funciona (validado com execução real, não só compilado)
 - **Drivers**: SQLite (`modernc.org/sqlite`) e Postgres (`pgx`) via Strategy (`internal/db`). Fetch em **streaming real** (cursor + `FetchNext` em lotes, não carrega tudo em memória) — testado com 5M linhas.
 - **Cancelamento real**: `CancelRunningQuery` nativo (pgx `CancelRequest`) desbloqueia um fetch em andamento sem matar a conexão. **Nunca cancelar `QueryCtx` de uma query com cursor aberto** — mata a conexão do pgx (ver memória `pgx-context-cancel-closes-connection`).
@@ -66,4 +81,4 @@ Adiado deliberadamente pelo usuário — não por causa do open source em si (o 
 - Tarefas que tocam os mesmos arquivos: rodar sequencialmente, nunca em paralelo.
 
 ## Última atualização
-2026-09-15 — RAM/startup medidos (Fase 1 fechada), pacotes Arch/.deb buildados e testados, STATE.md consolidado (histórico detalhado migrado pros commits do git).
+2026-09-15 (fim de sessão) — Autocomplete completo (v1+v2), uppercase automático, pretty-print SQL e copiar especial no grid, todos implementados via delegação ao OpenCode e verificados por mim via browser antes de aceitar. 4 bugs reais de causa raiz encontrados e corrigidos nessas verificações (ver itens 3 e 6 acima). Sessão pausada a pedido do usuário — retomar por "Tabela como aba própria" (item 6), ver seção de pausa no topo deste arquivo.
