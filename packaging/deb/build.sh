@@ -61,11 +61,23 @@ mkdir -p \
   "${STAGE_DIR}/DEBIAN" \
   "${STAGE_DIR}/usr/bin" \
   "${STAGE_DIR}/usr/share/applications" \
-  "${STAGE_DIR}/usr/share/icons/hicolor/1024x1024/apps"
+  "${STAGE_DIR}/usr/share/icons/hicolor/scalable/apps" \
+  "${STAGE_DIR}/usr/share/icons/hicolor/512x512/apps"
 
 install -Dm755 "${BINARIO_BUILDADO}" "${STAGE_DIR}/usr/bin/wisp"
 install -Dm644 "${REPO_ROOT}/packaging/assets/wisp.desktop" "${STAGE_DIR}/usr/share/applications/wisp.desktop"
-install -Dm644 "${REPO_ROOT}/build/appicon.png" "${STAGE_DIR}/usr/share/icons/hicolor/1024x1024/apps/wisp.png"
+# Bug real encontrado testando a instalação de verdade: 1024x1024 NÃO é um
+# tamanho que o hicolor/index.theme do sistema declara em `Directories=`
+# (vai até 512x512 + scalable) — o GTK/GNOME Shell só procura ícone nos
+# diretórios que o tema lista, então um PNG em hicolor/1024x1024/apps fica
+# fisicamente instalado mas é invisível pra busca de ícone, mesmo com o
+# cache atualizado (gtk-update-icon-cache indexa, mas o lookup por tema
+# ainda filtra pelos tamanhos declarados). scalable/ (SVG, sempre
+# declarado, resolução independente) é a entrada primária; 512x512 (maior
+# raster que o hicolor padrão declara) fica como fallback pra ferramentas
+# sem suporte a SVG.
+install -Dm644 "${REPO_ROOT}/build/appicon.svg" "${STAGE_DIR}/usr/share/icons/hicolor/scalable/apps/wisp.svg"
+install -Dm644 "${REPO_ROOT}/build/appicon.png" "${STAGE_DIR}/usr/share/icons/hicolor/512x512/apps/wisp.png"
 # postinst/postrm: sem eles o cache de ícones do hicolor (gtk-update-icon-cache)
 # não é regenerado na instalação e o ícone do Wisp não aparece no launcher.
 install -Dm755 "${SCRIPT_DIR}/postinst" "${STAGE_DIR}/DEBIAN/postinst"

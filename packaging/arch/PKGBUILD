@@ -41,5 +41,13 @@ package() {
   cd "$srcdir/$pkgname-$pkgver"
   install -Dm755 build/bin/wisp "$pkgdir/usr/bin/wisp"
   install -Dm644 packaging/assets/wisp.desktop "$pkgdir/usr/share/applications/wisp.desktop"
-  install -Dm644 build/appicon.png "$pkgdir/usr/share/icons/hicolor/1024x1024/apps/wisp.png"
+  # 1024x1024 NÃO é um tamanho declarado em hicolor/index.theme (vai até
+  # 512x512 + scalable) — ícone ali fica invisível pra busca de ícone do
+  # GTK/Shell mesmo instalado fisicamente. Mesmo bug real corrigido em
+  # packaging/deb/build.sh: scalable/ (SVG) como entrada primária, 512x512
+  # como fallback raster. pacman já roda os hooks de
+  # gtk-update-icon-cache/update-desktop-database sozinho ao instalar
+  # (pacotes gtk3/desktop-file-utils), sem precisar de postinst aqui.
+  install -Dm644 build/appicon.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/wisp.svg"
+  install -Dm644 build/appicon.png "$pkgdir/usr/share/icons/hicolor/512x512/apps/wisp.png"
 }
