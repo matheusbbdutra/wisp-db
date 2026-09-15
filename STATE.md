@@ -298,3 +298,32 @@ correto, conexão recupera. Redimensionar sidebar/editor por arrasto →
 funciona, persiste no localStorage. Ver memória
 `wisp-result-tabs-queue-resizable-panels`. `go build`/`tsc`/`npm run build`
 limpos.
+
+## 🔜 Handoff pra próxima sessão (2026-09-15, fim de sessão)
+**Estado**: `master` limpo e sincronizado com o remote. Releases publicadas:
+`v0.1.0-beta.1` e `v0.1.0-beta.2` (esta última com o fix de conn busy +
+abas de resultado + fila de execução + painéis redimensionáveis).
+
+**Próximo passo combinado com o usuário**: revisar a lista abaixo antes de
+iniciar a próxima leva de implementação (nada foi codado ainda dos itens
+1-5, só planejado/priorizado):
+1. Índices, FKs e distinguir Views de tabelas na exploração de schema.
+2. Ganhos rápidos de ergonomia: visor de valor de célula (JSON/texto longo),
+   filtro rápido na TableTab, busca na sidebar.
+3. EXPLAIN / plano de execução (v1 textual).
+4. INSERT/DELETE de linha no grid (fecha o ciclo da edição inline).
+5. **Verificador de atualização** (GitHub Releases API, só aviso — sem
+   download automático, Wails não tem updater nativo) — usuário confirmou
+   que vale a pena, entra "na próxima release com as novas features" (ou
+   seja, junto com algum dos itens 1-4, não como release isolada).
+
+Ver `docs/ROADMAP.md` (Fase 3) pra detalhe de esforço/risco de cada item, e
+a seção "Fora da próxima leva" pra itens conscientemente adiados (MySQL,
+transação explícita, MCP, exportador grande).
+
+**Pendências reais em aberto**: nenhuma — todo bug relatado nesta sessão
+(conn busy, ctrl+click) foi corrigido e verificado contra ambiente real
+(Postgres com dados reais e/ou base grande simulada). Container de teste
+`wisp-postgres-test` (`testdata/docker-compose.yml`) segue rodando no
+ambiente de dev — sem uso pra próxima sessão, pode subir de novo quando
+precisar (`docker compose up -d`).

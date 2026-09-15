@@ -37,6 +37,13 @@ implementar cada item):
 2. **Ganhos rápidos de ergonomia**: visor de valor de célula pra texto longo/JSON(B) hoje truncado no grid; filtro rápido na TableTab; busca na árvore da sidebar (schemas com muitas tabelas). Todos pequenos, risco baixo.
 3. **EXPLAIN / plano de execução** (v1 textual, `EXPLAIN ANALYZE` renderizado — sem grafo visual ainda).
 4. **INSERT/DELETE de linha no grid** (fecha o ciclo da edição inline/ADR 0004 — hoje só `UpdateCell`). Mesmas regras de PK real e preview; sem PK, read-only. Risco médio.
+5. **Verificador de atualização** (checagem manual/ao abrir, sem download automático): consulta a API do GitHub Releases (`/repos/.../releases/latest`), compara com a versão embutida no binário, mostra aviso com link se houver uma mais nova. Wails não tem updater nativo (diferente de Electron `autoUpdater`/Tauri updater) — escopo v1 é só avisar, nunca baixar/substituir o binário sozinho. Esforço pequeno, risco baixo (só leitura de uma API pública, sem tocar em nada crítico).
+
+**✅ Concluído fora da ordem acima** (pedido direto do usuário em 2026-09-15,
+publicado na v0.1.0-beta.2): abas de resultado (múltiplas execuções sem
+sobrescrever resultado anterior, limite 10), fila de execução (Executar
+enfileira em vez de bloquear), painéis redimensionáveis por arrasto
+(sidebar, split editor/grid). Ver memória `wisp-result-tabs-queue-resizable-panels`.
 
 Fora da próxima leva, mas registrado por diverger entre as duas análises (não
 descartado, só sem evidência de demanda ainda):
