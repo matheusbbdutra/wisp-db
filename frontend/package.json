@@ -16,7 +16,8 @@
     "monaco-editor": "^0.56.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "react-responsive-carousel": "^3.2.23"
+    "react-responsive-carousel": "^3.2.23",
+    "sql-formatter": "^15.8.2"
   },
   "overrides": {
     "dompurify": "^3.4.15"

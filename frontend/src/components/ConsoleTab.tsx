@@ -1,4 +1,8 @@
 import {useState} from 'react';
+// Lib pronta de formatação SQL (ver ADR 0005) — formata o editor inteiro,
+// sem parser próprio no Wisp.
+import {format} from 'sql-formatter';
+import type {SqlLanguage} from 'sql-formatter';
 import {RunQuery, FetchRows, Disconnect, CancelQuery, SaveScript, UpdateScript, ListSchemas, ListTables, IntrospectTable} from '../../wailsjs/go/main/App';
 import type {db} from '../../wailsjs/go/models';
 import SqlEditor, {AUTO_UPPERCASE_STORAGE_KEY, readAutoUppercasePreference} from './SqlEditor';
@@ -225,6 +229,15 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange}: Props) {
         setShowSaveForm(false);
     }
 
+    function handleFormatQuery() {
+        const dialect: SqlLanguage = driver === 'postgres' ? 'postgresql' : driver === 'sqlite' ? 'sqlite' : 'sql';
+        try {
+            setQuery(format(query, {language: dialect}));
+        } catch (err) {
+            setStatus(`erro ao formatar: ${err}`);
+        }
+    }
+
     return (
         <div className="console-tab" hidden={hidden}>
             <ConnectionBar
@@ -285,6 +298,14 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange}: Props) {
                     title="Mostrar/ocultar histórico de queries"
                 >
                     Histórico
+                </button>
+                <button
+                    className="btn btn-secondary"
+                    onClick={handleFormatQuery}
+                    disabled={!query.trim()}
+                    title="Formatar o SQL do editor (pretty-print)"
+                >
+                    Formatar
                 </button>
                 <label className="auto-uppercase-toggle" title="Converter keywords SQL para maiúsculas automaticamente ao digitar">
                     <input

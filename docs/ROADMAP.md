@@ -13,8 +13,8 @@ Ver `docs/ARCHITECTURE.md` e ADRs em `docs/adr/` para o racional de cada decisã
 - ✅ Sidebar com árvore lazy de schemas/tabelas.
 - ✅ Schema cache em duas camadas, TTL + invalidação manual/DDL.
 - ✅ Histórico de queries persistido, painel na UI.
-- ❌ Autocomplete no Monaco via schema cache — **próximo item a implementar** (reordenado antes da exploração de schema/view data em 2026-09-15, a pedido do usuário).
-- ❌ Formatação de SQL (pretty-print) — pendente, na sequência do autocomplete.
+- ✅ Autocomplete no Monaco via schema cache — concluído em 2026-09-15 (schemas, tabelas, colunas, keywords, funções por dialeto, narrowing por ponto).
+- ✅ Formatação de SQL (pretty-print) — concluída em 2026-09-15: botão "Formatar" na toolbar do `ConsoleTab.tsx` via lib `sql-formatter` (ver ADR 0005).
 
 ## Fase 2.5 — Multi-console e organização ✅ concluída (2026-09-15)
 - ✅ Múltiplas abas/consoles (Session Manager isola por `tabId`, UI de tabs em `App.tsx`/`ConsoleTab.tsx`).
