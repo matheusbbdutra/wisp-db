@@ -44,6 +44,99 @@
 }
 
 /* --------------------------------------------------------------------------
+   Tab Bar (múltiplos consoles)
+   -------------------------------------------------------------------------- */
+.tab-bar {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 4px 6px 0;
+    background: var(--bg-app);
+    border-bottom: 1px solid var(--border-default);
+    flex-shrink: 0;
+}
+
+.tab-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-radius: 6px 6px 0 0;
+    background: var(--bg-topbar);
+    color: var(--text-muted, #9ca3af);
+    font-size: 12.5px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    border-bottom: none;
+    max-width: 180px;
+}
+
+.tab-item.active {
+    background: var(--bg-input);
+    color: var(--text-main);
+    border-color: var(--border-default);
+}
+
+.tab-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-muted, #6b7280);
+    flex-shrink: 0;
+}
+
+.tab-dot.connected {
+    background: var(--accent-green, #059669);
+}
+
+.tab-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tab-close {
+    background: none;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0 2px;
+    border-radius: 4px;
+}
+
+.tab-close:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.tab-add {
+    background: none;
+    border: none;
+    color: var(--text-muted, #9ca3af);
+    cursor: pointer;
+    font-size: 15px;
+    padding: 4px 10px;
+    border-radius: 6px;
+}
+
+.tab-add:hover {
+    background: var(--bg-topbar);
+    color: var(--text-main);
+}
+
+.console-tab {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.console-tab[hidden] {
+    display: none;
+}
+
+/* --------------------------------------------------------------------------
    Top Bar / Connection Bar
    -------------------------------------------------------------------------- */
 .topbar {

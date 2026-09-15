@@ -20,8 +20,8 @@ mudança está nos commits do git (`git log`), não duplicado aqui.
 - `.deb` só suporta Debian 12+/Ubuntu 22.04+ (precisa `libwebkit2gtk-4.1-0`, distros mais antigos só têm 4.0).
 
 ## Próximos passos combinados com o usuário (em ordem)
-1. **Múltiplas abas/consoles** — UI de tabs, cada uma com seu próprio `tabId`/query/resultado. Backend já pronto.
-2. **Salvar scripts SQL** — arquivos de query nomeados, editáveis, reabertos (diferente do histórico, que é log automático).
+1. ~~**Múltiplas abas/consoles**~~ — **CONCLUÍDO e confirmado pelo usuário** testando no app real: duas abas simultâneas, uma SQLite e outra Postgres, consultas rodadas independentemente em cada uma, sem interferência. `ConsoleTab.tsx` isola estado por `tabId` (Session Manager já dava suporte no backend); `App.tsx` virou gerenciador de abas (tab bar +/×, abas ficam montadas e ocultas via `hidden` pra preservar estado ao trocar). Fechar aba chama `Disconnect(tabId)`.
+2. **Salvar scripts SQL** — arquivos de query nomeados, editáveis, reabertos (diferente do histórico, que é log automático). **Próximo item a implementar.**
 3. **Tabela como aba própria** — clicar numa tabela na sidebar abre uma aba de dados dedicada (estilo "view data" do DBeaver), inclui ver DDL/triggers/funções da tabela/schema.
 4. **Integração com agentes de terminal** — cogitado como servidor MCP exposto pelo Wisp (conexões já configuradas, agente de terminal lista/consulta via MCP). Deixado por último a pedido do usuário — escopo grande, arquitetura nova.
 
@@ -34,6 +34,7 @@ mudança está nos commits do git (`git log`), não duplicado aqui.
 
 ## Confirmação visual do usuário
 - Redesign visual, Monaco+highlight, Glide Data Grid, streaming/paginação (50k linhas, "Carregar mais"), correção do editor travado, correção do bug "conn closed" — **todos confirmados funcionando** pelo usuário testando na janela.
+- Múltiplas abas/consoles (SQLite + Postgres simultâneos, cada um com sua query rodando independente) — **confirmado funcionando**.
 - Gerenciamento de conexões (modal) — confirmação fraca ("aparentemente OK", sem detalhe de quais fluxos testou).
 
 ## Padrão de delegação (ver memória `delegacao-agy-via-memory-mcp-funciona`)
