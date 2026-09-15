@@ -107,6 +107,17 @@ dentro do editor SQL (abriu a TableTab certa a partir do nome da tabela na
 query). Logs de diagnóstico temporários removidos, build final limpo
 (`go build`, `tsc --noEmit`, `npm run build`).
 
+## 📋 Análise pós-beta.1 — próxima leva (2026-09-15, só proposta)
+Sessão de análise (sem código). Contexto: autor testa `.deb` na empresa pra
+substituir DBeaver. Priorização sugerida (detalhe na resposta da sessão):
+(1) views/índices/FKs na exploração, (2) visor de valor de célula (JSON/texto),
+(3) filtro rápido na TableTab/grid, (4) EXPLAIN textual, (5) INSERT/DELETE
+seguro no grid, (6) busca na sidebar. Despriorizar agora: MCP, query builder,
+busca semântica, sync, SSH (VPN), export grande/Parquet, DuckDB sem demanda.
+`docs/ROADMAP.md` ainda marca edição inline como pendente e Fase 2.6 aberta —
+desatualizado vs release. **Próximo passo**: usuário escolher a leva; só então
+implementar.
+
 ## ✅ Release v0.1.0-beta.1 publicada (2026-09-15)
 Commits `9f448ce` (feature completa) e `cbd0cf9` (versão do .deb) na branch
 `master`, remote `git@github.com:matheusbbdutra/wisp-db.git` configurado via
