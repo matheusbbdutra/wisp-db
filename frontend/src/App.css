@@ -191,6 +191,36 @@
     min-height: 200px;
 }
 
+.columns-table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 12.5px;
+    font-family: var(--font-mono);
+}
+
+.columns-table th {
+    text-align: left;
+    padding: 8px 14px;
+    background: var(--bg-toolbar);
+    border-bottom: 1px solid var(--border-default);
+    color: var(--text-muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    position: sticky;
+    top: 0;
+}
+
+.columns-table td {
+    padding: 6px 14px;
+    border-bottom: 1px solid var(--border-subtle);
+    color: var(--text-secondary);
+}
+
+.columns-table tr:hover td {
+    background: var(--bg-card);
+}
+
 .meta-list {
     display: flex;
     flex-direction: column;

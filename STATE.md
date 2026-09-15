@@ -327,3 +327,27 @@ transação explícita, MCP, exportador grande).
 `wisp-postgres-test` (`testdata/docker-compose.yml`) segue rodando no
 ambiente de dev — sem uso pra próxima sessão, pode subir de novo quando
 precisar (`docker compose up -d`).
+
+## 🐛 Bug real corrigido (2026-09-15): DDL/Triggers/Funções ainda dava conn busy
+Usuário reportou (já na beta.2) que DDL/Triggers/Funções na TableTab
+continuavam dando "conn busy". Causa raiz real: o fix anterior só impedia
+duas chamadas em voo ao MESMO tempo, mas não impedia uma chamada de entrar
+NO MEIO de um par `RunQuery`+`FetchRows` (cursor de streaming do pgx fica
+aberto entre os dois) — clicar em DDL enquanto "Dados" ainda buscava as
+primeiras linhas intercalava a query no meio do cursor aberto.
+
+**Fix**: unificado `${tabId}:mount` (TableTab.tsx) em `${tabId}:query`,
+agora também envolvendo `handleSelectSub` e `handleLoadMore`; ConsoleTab.tsx
+também passou a envolver `handleLoadMore` e o loop de catálogo em
+`handleConnected` na mesma trava (só `handleRun` tinha antes).
+
+**Verificado de verdade**: criei uma VIEW lenta no Postgres real
+(`pg_sleep(2)` embutido) só pra forçar a janela de corrida, e cliquei em
+DDL 369ms depois de abrir a TableTab (via polling programático, não
+manual) — sem erro, tudo carregou certo. Ver memória
+`wisp-tabletab-conn-busy-interleave-fix`.
+
+**Feature nova**: sub-aba "Colunas" na TableTab (Nome/Tipo/Nulo/PK/Gerada),
+pedido do usuário — sem chamada nova ao backend, reusa dado já buscado.
+
+`go build`/`tsc`/`npm run build` limpos.

@@ -134,7 +134,18 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTabl
         // suporta uso concorrente. Bug real: com 2+ schemas as chamadas em
         // paralelo colidiam com erro "conn busy" e derrubavam o catálogo
         // inteiro (ver memória wisp-autocomplete-conn-busy-concurrency).
+        //
+        // Tudo dentro de withQueue(`${tabId}:query`, ...) — mesma chave de
+        // handleRun/handleLoadMore: sem isso, uma chamada deste loop
+        // (IntrospectTable) pode entrar bem no meio de um RunQuery+FetchRows
+        // já em andamento (ex.: usuário roda uma query enquanto o catálogo
+        // ainda carrega numa base grande) e quebrar o cursor de streaming
+        // aberto — "conn busy" real, mesma causa raiz corrigida em
+        // TableTab.tsx. Efeito colateral aceito: uma query nova espera o
+        // catálogo terminar de carregar (base grande = espera perceptível,
+        // sem feedback visual ainda — ver nota em STATE.md).
         try {
+          await withQueue(`${tabId}:query`, async () => {
             const schemas = await ListSchemas(tabId);
             const shallow: db.Table[] = [];
             for (const schema of schemas ?? []) {
@@ -156,6 +167,7 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTabl
                 }
             }
             setCatalog(detailed);
+          });
         } catch (err) {
             // Não falha a conexão por causa do catálogo de autocomplete, mas
             // não engole o erro — autocomplete sem dados fica silencioso pro
@@ -348,13 +360,24 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTabl
     async function handleLoadMore() {
         if (!activeResult) return;
         const id = activeResult.id;
-        const fetched = await fetchBatchFor(id, activeResult.rows, false);
-        // Retry da detecção adiada: se o cursor estava aberto no primeiro
-        // fetch, a introspecção pode ter sido adiada sem aviso — tenta de
-        // novo agora que o resultado avançou (ou se esgotou).
-        if (activeResult.editSourceRef && !activeResult.editContext) {
-            await tryComputeEditContext(id, activeResult.editSourceRef, activeResult.columns, !fetched.hasMore);
-        }
+        const rows = activeResult.rows;
+        const editSourceRef = activeResult.editSourceRef;
+        const editContext = activeResult.editContext;
+        const cols = activeResult.columns;
+        // Mesma chave usada em handleRun — obrigatório: sem isso, abrir
+        // DDL/Triggers/Funções (TableTab) ou rodar uma query nova enquanto
+        // "Carregar mais" está em voo intercala outra query no meio do
+        // cursor de streaming aberto do FetchRows — "conn busy" real
+        // (bug de produção, mesma causa raiz corrigida em TableTab.tsx).
+        await withQueue(`${tabId}:query`, async () => {
+            const fetched = await fetchBatchFor(id, rows, false);
+            // Retry da detecção adiada: se o cursor estava aberto no primeiro
+            // fetch, a introspecção pode ter sido adiada sem aviso — tenta de
+            // novo agora que o resultado avançou (ou se esgotou).
+            if (editSourceRef && !editContext) {
+                await tryComputeEditContext(id, editSourceRef, cols, !fetched.hasMore);
+            }
+        });
     }
 
     function handleCellSaved(rowIndex: number, colIndex: number, newValue: any) {

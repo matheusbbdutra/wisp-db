@@ -5,7 +5,7 @@ import SqlEditor from './SqlEditor';
 import ResultGrid, {type EditContext} from './ResultGrid';
 import {withQueue} from '../lib/tabCallQueue';
 
-type SubTab = 'dados' | 'ddl' | 'triggers' | 'funcoes';
+type SubTab = 'dados' | 'colunas' | 'ddl' | 'triggers' | 'funcoes';
 
 const BATCH_SIZE = 200;
 
@@ -30,6 +30,9 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
     // Colunas reais da tabela (via IntrospectTable, antes de qualquer cursor
     // aberto) — base pro editContext, computado após o primeiro fetch.
     const tableColumnsRef = useRef<db.Column[]>([]);
+    // Espelho em state só pra sub-aba "Colunas" renderizar (ref não dispara
+    // re-render) — mesmos dados de tableColumnsRef, sem chamada extra.
+    const [tableColumns, setTableColumns] = useState<db.Column[]>([]);
 
     // --- Dados ---
     const [columns, setColumns] = useState<string[]>([]);
@@ -58,18 +61,24 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
     useEffect(() => {
         let cancelled = false;
         async function init() {
-            // Chave DIFERENTE de tabId sozinho (`${tabId}:mount`) — de
-            // propósito: os bindings dentro deste bloco (ConnectSaved,
-            // IntrospectTable, RunQuery...) já passam pela fila geral da aba
-            // (tabId puro, ver lib/tabApi.ts); usar a MESMA chave aqui
-            // causaria deadlock (a chamada de dentro nunca entraria na fila
-            // porque este bloco externo ainda não liberou). Esta fila
-            // separada serializa só a decisão "conectar → sou a montagem
-            // válida? senão desconecto" entre duas montagens do StrictMode
-            // (dev) — sem ela, as duas chamadas a ConnectSaved corririam
-            // concorrentes e o Manager.Open (backend) poderia cancelar a
-            // sessão da montagem "vencedora" fora de ordem.
-            await withQueue(`${tabId}:mount`, async () => {
+            // Chave `${tabId}:query` (NUNCA tabId sozinho — os bindings
+            // dentro deste bloco já passam pela fila geral da aba via
+            // lib/tabApi.ts; reusar a mesma causaria deadlock). Esta fila
+            // serve DOIS propósitos com a MESMA chave, de propósito: (1)
+            // serializa a decisão "conectar → sou a montagem válida? senão
+            // desconecto" entre duas montagens do StrictMode (dev); (2) —
+            // motivo real de um bug em produção — garante que NENHUMA outra
+            // operação (GetTableDDL/ListTriggers/ListFunctions/"Carregar
+            // mais", ver handleSelectSub/handleLoadMore abaixo) rode
+            // intercalada entre um RunQuery e o(s) FetchRows que o seguem.
+            // A fila geral da aba (tabId puro) só impede DUAS chamadas em
+            // voo ao MESMO tempo — não impede uma chamada de ENTRAR NO MEIO
+            // de um par RunQuery+FetchRows que precisa ficar contíguo (o
+            // cursor de streaming do pgx fica aberto entre os dois; qualquer
+            // outra query na mesma conexão nesse intervalo quebra com "conn
+            // busy"). Por isso todo bloco que faz RunQuery/FetchRows ou
+            // qualquer outra query nesta aba usa esta MESMA chave.
+            await withQueue(`${tabId}:query`, async () => {
                 try {
                     await ConnectSaved(tabId, connectionId);
                 } catch (err) {
@@ -92,11 +101,13 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
                     const full = await IntrospectTable(tabId, schema, table);
                     if (cancelled) return;
                     tableColumnsRef.current = full?.Columns ?? [];
+                    setTableColumns(tableColumnsRef.current);
                 } catch {
                     // Introspecção falhou: Dados carrega mesmo assim, o grid
                     // fica read-only com aviso (sem os dados de PK).
                     if (cancelled) return;
                     tableColumnsRef.current = [];
+                    setTableColumns([]);
                 }
                 if (cancelled) return;
                 await loadDados();
@@ -156,16 +167,21 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
     }
 
     async function handleLoadMore() {
-        setFetching(true);
-        try {
-            const batch = await FetchRows(tabId, BATCH_SIZE);
-            setRows(prev => [...prev, ...(batch.Rows ?? [])]);
-            setHasMore(batch.HasMore);
-        } catch (err) {
-            setStatus(`erro ao buscar linhas: ${err}`);
-        } finally {
-            setFetching(false);
-        }
+        // Mesma chave de loadDados/handleSelectSub — ver comentário no
+        // useEffect de conexão sobre por que isso é obrigatório (cursor de
+        // streaming não pode ter outra query intercalada na mesma conexão).
+        await withQueue(`${tabId}:query`, async () => {
+            setFetching(true);
+            try {
+                const batch = await FetchRows(tabId, BATCH_SIZE);
+                setRows(prev => [...prev, ...(batch.Rows ?? [])]);
+                setHasMore(batch.HasMore);
+            } catch (err) {
+                setStatus(`erro ao buscar linhas: ${err}`);
+            } finally {
+                setFetching(false);
+            }
+        });
     }
 
     function handleCellSaved(rowIndex: number, colIndex: number, newValue: any) {
@@ -178,25 +194,33 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
     async function handleSelectSub(next: SubTab) {
         setSubTab(next);
         setMetaError(null);
-        if (next === 'dados' || metaLoading) {
+        // "Colunas" não busca nada novo — usa tableColumns, já disponível
+        // desde o mount (mesma introspecção que já embasa o editContext).
+        if (next === 'dados' || next === 'colunas' || metaLoading) {
             return;
         }
-        try {
-            if (next === 'ddl' && ddl === null) {
-                setMetaLoading(true);
-                setDdl(await GetTableDDL(tabId, schema, table));
-            } else if (next === 'triggers' && triggers === null) {
-                setMetaLoading(true);
-                setTriggers((await ListTriggers(tabId, schema, table)) ?? []);
-            } else if (next === 'funcoes' && funcoes === null) {
-                setMetaLoading(true);
-                setFuncoes((await ListFunctions(tabId, schema)) ?? []);
+        // Mesma chave de loadDados/handleLoadMore: sem isso, clicar numa
+        // sub-aba enquanto "Dados" ainda está buscando as primeiras linhas
+        // intercala esta query no meio do cursor de streaming aberto —
+        // bug real de produção, ver comentário completo no useEffect acima.
+        await withQueue(`${tabId}:query`, async () => {
+            try {
+                if (next === 'ddl' && ddl === null) {
+                    setMetaLoading(true);
+                    setDdl(await GetTableDDL(tabId, schema, table));
+                } else if (next === 'triggers' && triggers === null) {
+                    setMetaLoading(true);
+                    setTriggers((await ListTriggers(tabId, schema, table)) ?? []);
+                } else if (next === 'funcoes' && funcoes === null) {
+                    setMetaLoading(true);
+                    setFuncoes((await ListFunctions(tabId, schema)) ?? []);
+                }
+            } catch (err) {
+                setMetaError(String(err));
+            } finally {
+                setMetaLoading(false);
             }
-        } catch (err) {
-            setMetaError(String(err));
-        } finally {
-            setMetaLoading(false);
-        }
+        });
     }
 
     const isError = status.toLowerCase().startsWith('erro');
@@ -206,7 +230,7 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
             <div className="toolbar-secondary">
                 <span className="table-tab-title" title={`Tabela ${schema}.${table}`}>{table}</span>
                 <div className="table-subbar" role="tablist">
-                    {(['dados', 'ddl', 'triggers', 'funcoes'] as SubTab[]).map(s => (
+                    {(['dados', 'colunas', 'ddl', 'triggers', 'funcoes'] as SubTab[]).map(s => (
                         <button
                             key={s}
                             role="tab"
@@ -215,7 +239,7 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
                             disabled={metaLoading && subTab !== s}
                             onClick={() => handleSelectSub(s)}
                         >
-                            {s === 'dados' ? 'Dados' : s === 'ddl' ? 'DDL' : s === 'triggers' ? 'Triggers' : 'Funções'}
+                            {s === 'dados' ? 'Dados' : s === 'colunas' ? 'Colunas' : s === 'ddl' ? 'DDL' : s === 'triggers' ? 'Triggers' : 'Funções'}
                         </button>
                     ))}
                 </div>
@@ -249,6 +273,38 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
                                 </div>
                             )}
                         </>
+                    )}
+                </div>
+            )}
+
+            {subTab === 'colunas' && (
+                <div className="table-meta-pane">
+                    {tableColumns.length === 0 && (
+                        <div className="meta-empty">Não foi possível carregar as colunas desta tabela.</div>
+                    )}
+                    {tableColumns.length > 0 && (
+                        <table className="columns-table">
+                            <thead>
+                                <tr>
+                                    <th>Nome</th>
+                                    <th>Tipo</th>
+                                    <th>Nulo?</th>
+                                    <th>PK</th>
+                                    <th>Gerada</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {tableColumns.map(c => (
+                                    <tr key={c.Name}>
+                                        <td>{c.Name}</td>
+                                        <td>{c.Type}</td>
+                                        <td>{c.Nullable ? 'sim' : 'não'}</td>
+                                        <td>{c.IsPrimaryKey ? '🔑' : ''}</td>
+                                        <td>{c.IsGenerated ? 'sim' : ''}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
                     )}
                 </div>
             )}
