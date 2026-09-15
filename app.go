@@ -30,6 +30,9 @@ type App struct {
 	sessions    *session.Manager
 	store       *store.Store
 	schemaCache *schemacache.Cache
+	// canClose vira true só depois que o frontend confirma (via ConfirmQuit)
+	// que nenhuma aba de console tem SQL não salvo — ver beforeClose.
+	canClose bool
 }
 
 func NewApp() *App {
@@ -77,6 +80,33 @@ func (a *App) shutdown(ctx context.Context) {
 	if a.store != nil {
 		a.store.Close()
 	}
+}
+
+// beforeClose intercepta o fechamento da janela (registrado em main.go via
+// options.App.OnBeforeClose) pra dar ao frontend a chance de perguntar "tem
+// SQL não salvo?" em cada aba de console antes de sair de verdade — mesmo
+// modal já usado pra fechar uma aba individual (ver ConsoleTab.tsx
+// confirmClose), só que orquestrado pra todas as abas de uma vez.
+//
+// SEMPRE bloqueia o primeiro pedido de fechamento (prevent=true) e emite um
+// evento pro frontend decidir. Quando o frontend termina de perguntar (nada
+// pra salvar, ou o usuário confirmou/descartou em todas), ele chama
+// ConfirmQuit — que marca canClose e pede runtime.Quit de novo; dessa vez
+// beforeClose deixa passar (prevent=false), sem re-perguntar em loop.
+func (a *App) beforeClose(ctx context.Context) bool {
+	if a.canClose {
+		return false
+	}
+	runtime.EventsEmit(ctx, "wisp:before-close")
+	return true
+}
+
+// ConfirmQuit é chamado pelo frontend depois de resolver (salvar/descartar)
+// o SQL não salvo de todas as abas de console — ou imediatamente, se nenhuma
+// estava suja. Marca canClose e pede o fechamento de verdade (ver beforeClose).
+func (a *App) ConfirmQuit() {
+	a.canClose = true
+	runtime.Quit(a.ctx)
 }
 
 // --- Bindings expostos ao frontend (Wails IPC) ---
@@ -349,6 +379,51 @@ func (a *App) IntrospectTable(tabID string, schema string, tableName string) (*d
 		_ = a.schemaCache.Set(s.CacheKey, catalog)
 	}
 	return full, nil
+}
+
+// IntrospectSchemaTables retorna todas as tabelas de um schema já com
+// Columns populado, numa única consulta batched (ver
+// internal/db.DatabaseDriver.IntrospectSchema) — usado pelo catálogo de
+// autocomplete do console (ConsoleTab) em vez de um IntrospectTable por
+// tabela, que virava fila lenta em schemas com muitas tabelas. Mesmo padrão
+// de cache de IntrospectTable: cache-hit não vai ao banco.
+func (a *App) IntrospectSchemaTables(tabID string, schema string) ([]db.Table, error) {
+	s, err := a.sessions.Get(tabID)
+	if err != nil {
+		return nil, err
+	}
+
+	if a.schemaCache != nil {
+		if catalog, ok := a.schemaCache.Get(s.CacheKey); ok {
+			if tables, ok := catalog.Tables[schema]; ok {
+				allDetailed := len(tables) > 0
+				for _, t := range tables {
+					if len(t.Columns) == 0 {
+						allDetailed = false
+						break
+					}
+				}
+				if allDetailed {
+					return tables, nil
+				}
+			}
+		}
+	}
+
+	tables, err := s.Driver.IntrospectSchema(s.Ctx, schema)
+	if err != nil {
+		return nil, err
+	}
+
+	if a.schemaCache != nil {
+		catalog, _ := a.schemaCache.Get(s.CacheKey)
+		if catalog.Tables == nil {
+			catalog.Tables = make(map[string][]db.Table)
+		}
+		catalog.Tables[schema] = tables
+		_ = a.schemaCache.Set(s.CacheKey, catalog)
+	}
+	return tables, nil
 }
 
 // RefreshSchema invalida o cache da conexão da aba tabId — usado pelo botão

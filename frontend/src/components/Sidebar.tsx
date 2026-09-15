@@ -1,4 +1,4 @@
-import {useState, type CSSProperties} from 'react';
+import {useState, useEffect, type CSSProperties} from 'react';
 import {ListSchemas, ListTables, RefreshSchema} from '../lib/tabApi';
 import type {db} from '../../wailsjs/go/models';
 import {isCtrlHeld} from '../lib/modifierKeyTracker';
@@ -42,6 +42,34 @@ export default function Sidebar({tabId, connected, onSelectTable, onOpenTable, o
             setLoading(false);
         }
     }
+
+    // Bug real relatado: a sidebar exigia clicar "Atualizar" manualmente
+    // depois de conectar — ficava em "Nenhum schema carregado" mesmo já
+    // conectado. Carrega a lista sozinha ao conectar (ListSchemas, não
+    // RefreshSchema — usa o schema cache do backend se já houver um válido,
+    // não força ida ao banco). Reseta ao desconectar pra não deixar schemas
+    // da conexão anterior aparentando ainda válidos.
+    useEffect(() => {
+        if (!connected) {
+            setSchemas([]);
+            setTablesBySchema({});
+            setExpanded(new Set());
+            return;
+        }
+        let cancelled = false;
+        setLoading(true);
+        ListSchemas(tabId)
+            .then(result => {
+                if (!cancelled) setSchemas(result ?? []);
+            })
+            .finally(() => {
+                if (!cancelled) setLoading(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [connected, tabId]);
 
     async function toggleSchema(schema: string) {
         const next = new Set(expanded);

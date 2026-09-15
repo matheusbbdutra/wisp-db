@@ -307,6 +307,10 @@ interface Props {
     // o "statement" sob o cursor — delimitado por ';'). Ctrl+Enter continua
     // rodando o editor inteiro; Ctrl+Shift+Enter dispara este.
     onRunSelectionRequested?: (text: string) => void;
+    // onRunNewTabRequested força uma aba de resultado NOVA em vez de
+    // reaproveitar a ativa (padrão do Ctrl+Enter) — Ctrl+\, mesmo atalho do
+    // DBeaver pra "Execute SQL Statement in New Tab".
+    onRunNewTabRequested?: () => void;
     catalog?: db.Table[];
     driver?: string;
     autoUppercase?: boolean;
@@ -323,7 +327,7 @@ interface Props {
     ) => void;
 }
 
-export default function SqlEditor({value, onChange, onRunRequested, onRunSelectionRequested, catalog, driver, autoUppercase = true, readOnly = false, onOpenIdentifier}: Props) {
+export default function SqlEditor({value, onChange, onRunRequested, onRunSelectionRequested, onRunNewTabRequested, catalog, driver, autoUppercase = true, readOnly = false, onOpenIdentifier}: Props) {
     const containerRef = useRef<HTMLDivElement>(null);
     const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
     const catalogRef = useRef(catalog);
@@ -333,10 +337,12 @@ export default function SqlEditor({value, onChange, onRunRequested, onRunSelecti
     const onChangeRef = useRef(onChange);
     const onRunRef = useRef(onRunRequested);
     const onRunSelectionRef = useRef(onRunSelectionRequested);
+    const onRunNewTabRef = useRef(onRunNewTabRequested);
     const onOpenIdentifierRef = useRef(onOpenIdentifier);
     onChangeRef.current = onChange;
     onRunRef.current = onRunRequested;
     onRunSelectionRef.current = onRunSelectionRequested;
+    onRunNewTabRef.current = onRunNewTabRequested;
     onOpenIdentifierRef.current = onOpenIdentifier;
     // Refs (não estado) pro listener do Monaco, que é registrado uma vez só
     // na montagem e não re-registra a cada render.
@@ -360,6 +366,13 @@ export default function SqlEditor({value, onChange, onRunRequested, onRunSelecti
             fontSize: 13,
             lineHeight: 20,
             readOnly,
+            // Quebra de linha só nas views somente-leitura (DDL/Trigger/
+            // Função) — são texto pra ler, não SQL pra editar, então uma
+            // definição longa (CREATE FUNCTION com corpo grande, por
+            // exemplo) deve quebrar em vez de exigir scroll horizontal. O
+            // editor principal (query) continua sem wrap — comportamento de
+            // editor de código padrão.
+            wordWrap: readOnly ? 'on' : 'off',
             fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", "JetBrains Mono", Menlo, Consolas, monospace',
             padding: {top: 8, bottom: 8},
             lineNumbersMinChars: 3,
@@ -471,6 +484,15 @@ export default function SqlEditor({value, onChange, onRunRequested, onRunSelecti
             text = text.trim();
             if (text) onRunSelectionRef.current(text);
         });
+
+        // Ctrl+\ (atalho do DBeaver) causava uma regressão real e confirmada
+        // pelo usuário: registrar esse binding quebrava Ctrl+Enter/
+        // Ctrl+Shift+Enter também (provavelmente colisão de scancode em
+        // teclado ABNT2/GTK — Backslash fica em posição física bem diferente
+        // nesse layout — mecanismo exato não confirmado, sem acesso à janela
+        // nativa/devtools daqui). Troquei por Ctrl+Alt+Enter, combinação sem
+        // caractere especial, mais segura entre layouts de teclado.
+        editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.Enter, () => onRunNewTabRef.current?.());
 
         return () => {
             const m = editor.getModel();

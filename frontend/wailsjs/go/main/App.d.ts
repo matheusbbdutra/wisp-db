@@ -6,6 +6,8 @@ import {db} from '../models';
 
 export function CancelQuery(arg1:string):Promise<void>;
 
+export function ConfirmQuit():Promise<void>;
+
 export function Connect(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function ConnectSaved(arg1:string,arg2:string):Promise<void>;
@@ -21,6 +23,8 @@ export function FetchRows(arg1:string,arg2:number):Promise<main.FetchBatch>;
 export function GetQueryHistory(arg1:number):Promise<Array<store.QueryHistoryEntry>>;
 
 export function GetTableDDL(arg1:string,arg2:string,arg3:string):Promise<string>;
+
+export function IntrospectSchemaTables(arg1:string,arg2:string):Promise<Array<db.Table>>;
 
 export function IntrospectTable(arg1:string,arg2:string,arg3:string):Promise<db.Table>;
 

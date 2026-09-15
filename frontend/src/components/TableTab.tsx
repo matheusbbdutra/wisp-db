@@ -16,13 +16,17 @@ interface Props {
     table: string;
     hidden: boolean;
     onConnectedChange: (connected: boolean) => void;
+    // Abre a definição completa de um trigger/função numa aba própria (App.tsx
+    // cuida de criar) — a lista de Triggers/Funções mostra só o nome, sem
+    // despejar o DDL de todos inline (ver comentário em handleSelectSub).
+    onOpenRoutine: (kind: 'trigger' | 'function', name: string, definition: string) => void;
 }
 
 // Aba de tabela (nível superior, irmã do Console): tem tabId e conexão
 // PRÓPRIOS — reconecta no mount via ConnectSaved com o mesmo connectionId
 // salvo da origem, nunca reusa a sessão do console (ver CLAUDE.md:
 // 1 tabId = 1 conexão dedicada). Disconnect centralizado em App.tsx.
-export default function TableTab({tabId, connectionId, schema, table, hidden, onConnectedChange}: Props) {
+export default function TableTab({tabId, connectionId, schema, table, hidden, onConnectedChange, onOpenRoutine}: Props) {
     const [connected, setConnected] = useState(false);
     const [status, setStatus] = useState('conectando…');
     const [subTab, setSubTab] = useState<SubTab>('dados');
@@ -329,14 +333,18 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
                         <div className="meta-empty">Nenhum trigger nesta tabela.</div>
                     )}
                     {triggers !== null && triggers.length > 0 && (
-                        <div className="meta-list">
+                        <ul className="meta-name-list">
                             {triggers.map(t => (
-                                <div key={t.Name} className="meta-item">
-                                    <div className="meta-name">{t.Name}</div>
-                                    <pre className="meta-def">{t.Definition}</pre>
-                                </div>
+                                <li
+                                    key={t.Name}
+                                    className="meta-name-item"
+                                    onClick={() => onOpenRoutine('trigger', t.Name, t.Definition)}
+                                    title={`Abrir definição de ${t.Name} em aba própria`}
+                                >
+                                    {t.Name}
+                                </li>
                             ))}
-                        </div>
+                        </ul>
                     )}
                 </div>
             )}
@@ -352,14 +360,18 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
                         </div>
                     )}
                     {funcoes !== null && funcoes.length > 0 && (
-                        <div className="meta-list">
+                        <ul className="meta-name-list">
                             {funcoes.map(f => (
-                                <div key={f.Name} className="meta-item">
-                                    <div className="meta-name">{f.Name}</div>
-                                    <pre className="meta-def">{f.Definition}</pre>
-                                </div>
+                                <li
+                                    key={f.Name}
+                                    className="meta-name-item"
+                                    onClick={() => onOpenRoutine('function', f.Name, f.Definition)}
+                                    title={`Abrir definição de ${f.Name} em aba própria`}
+                                >
+                                    {f.Name}
+                                </li>
                             ))}
-                        </div>
+                        </ul>
                     )}
                 </div>
             )}

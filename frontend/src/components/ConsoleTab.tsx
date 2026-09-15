@@ -1,10 +1,10 @@
-import {useState, useRef} from 'react';
+import {useState, useRef, useEffect, useImperativeHandle, forwardRef} from 'react';
 // Lib pronta de formatação SQL (ver ADR 0005) — formata o editor inteiro,
 // sem parser próprio no Wisp.
 import {format} from 'sql-formatter';
 import type {SqlLanguage} from 'sql-formatter';
-import {SaveScript, UpdateScript, CancelQuery} from '../../wailsjs/go/main/App';
-import {RunQuery, FetchRows, Disconnect, ListSchemas, ListTables, IntrospectTable} from '../lib/tabApi';
+import {SaveScript, UpdateScript, CancelQuery, ListScripts} from '../../wailsjs/go/main/App';
+import {RunQuery, FetchRows, Disconnect, ListSchemas, IntrospectSchemaTables, IntrospectTable} from '../lib/tabApi';
 import type {db} from '../../wailsjs/go/models';
 import {detectSingleTable, type SingleTableRef} from '../lib/detectSingleTable';
 import SqlEditor, {AUTO_UPPERCASE_STORAGE_KEY, readAutoUppercasePreference} from './SqlEditor';
@@ -48,8 +48,53 @@ interface ResultTabState {
     editSourceRef: SingleTableRef | null;
 }
 
+// Persistência do "último script aberto" (localStorage, mesmo padrão de
+// AUTO_UPPERCASE_STORAGE_KEY/wisp:sidebarWidth) — usada só pela aba de
+// console inicial da sessão (ver Props.restoreLastScriptOnMount em App.tsx)
+// pra recarregar sozinha o script que o usuário tinha aberto da última vez
+// que fechou o app, em vez de sempre começar em branco.
+const LAST_SCRIPT_STORAGE_KEY = 'wisp:lastOpenScript';
+
+function rememberLastScript(id: string, name: string) {
+    try {
+        localStorage.setItem(LAST_SCRIPT_STORAGE_KEY, JSON.stringify({id, name}));
+    } catch {
+        // localStorage indisponível — sem persistência, sem crash.
+    }
+}
+
+function forgetLastScript() {
+    try {
+        localStorage.removeItem(LAST_SCRIPT_STORAGE_KEY);
+    } catch {
+        // idem
+    }
+}
+
+function readLastScript(): {id: string; name: string} | null {
+    try {
+        const raw = localStorage.getItem(LAST_SCRIPT_STORAGE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (typeof parsed?.id === 'string' && typeof parsed?.name === 'string') return parsed;
+        return null;
+    } catch {
+        return null;
+    }
+}
+
+// Nome da aba de resultado: prefere a tabela detectada (mesma detecção que
+// já embasa a edição inline, ver detectSingleTable) — "s_solicitacao" em vez
+// de "SELECT * FROM sigfacil.s_solicitacao_..." truncado, que ficava sempre
+// igual pra queries diferentes na mesma tabela e nunca cabia na pill (ver
+// bug real do "×" escondido, corrigido separadamente com truncamento CSS).
+// Sem tabela única detectável (JOIN, DDL, etc.), cai pro texto truncado.
 function makeResultLabel(text: string, seq: number): string {
-    const firstLine = text.trim().split('\n')[0]?.trim();
+    const trimmed = text.trim();
+    if (!trimmed) return `Resultado ${seq}`;
+    const ref = detectSingleTable(trimmed);
+    if (ref) return ref.schema ? `${ref.schema}.${ref.table}` : ref.table;
+    const firstLine = trimmed.split('\n')[0]?.trim();
     if (!firstLine) return `Resultado ${seq}`;
     return firstLine.length > 40 ? `${firstLine.slice(0, 40)}…` : firstLine;
 }
@@ -60,12 +105,27 @@ interface Props {
     onConnectedChange: (connected: boolean) => void;
     onOpenTable: (connectionId: string, schema: string, table: string) => void;
     onOpenSchema: (connectionId: string, schema: string) => void;
+    // true só na aba de console inicial da sessão (ver App.tsx) — recarrega
+    // sozinha o último script aberto (ver LAST_SCRIPT_STORAGE_KEY), em vez
+    // de sempre começar em branco. Abas criadas via "+" não recebem isso:
+    // seriam sempre em branco de propósito, sem essa surpresa.
+    restoreLastScriptOnMount?: boolean;
+}
+
+// Exposto via ref pra App.tsx perguntar, ANTES de fechar a aba, se há SQL
+// não salvo no editor — App.tsx não tem acesso ao estado interno (query/
+// activeScriptId) de cada ConsoleTab, então o fechamento precisa desse
+// handle imperativo em vez de prop dessendo.
+export interface ConsoleTabHandle {
+    // Resolve true se pode fechar (nada pra salvar, ou o usuário decidiu
+    // salvar/descartar), false se o usuário cancelou o fechamento.
+    confirmClose: () => Promise<boolean>;
 }
 
 // Estado e comportamento de um console isolado (uma aba). Extraído de App.tsx
 // para suportar múltiplas abas: cada instância tem seu próprio tabId, que já
 // é a chave de isolamento no backend (Session Manager, ver internal/session).
-export default function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTable, onOpenSchema}: Props) {
+const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTable, onOpenSchema, restoreLastScriptOnMount}, ref) {
     // Editor começa vazio — "SELECT * FROM customers" era resquício de teste
     // (nenhuma base do usuário tem essa tabela por padrão).
     const [query, setQuery] = useState('');
@@ -97,6 +157,16 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTabl
     const [showSaveForm, setShowSaveForm] = useState(false);
     const [saveNameInput, setSaveNameInput] = useState('');
     const [savingScript, setSavingScript] = useState(false);
+    // Conteúdo do editor no momento do último save bem-sucedido (ou '' antes
+    // de qualquer save) — "sujo" (não salvo) é query !== lastSavedQueryRef,
+    // usado por confirmClose (ver ConsoleTabHandle) pra perguntar antes de
+    // fechar a aba com SQL não salvo, em vez de descartar silenciosamente.
+    const lastSavedQueryRef = useRef('');
+    // Promise pendente do confirmClose enquanto o modal de "fechar sem
+    // salvar?" está aberto — resolvida por qualquer um dos 3 botões do modal.
+    const [closeConfirm, setCloseConfirm] = useState<{resolve: (proceed: boolean) => void} | null>(null);
+    const [closeSaveNameInput, setCloseSaveNameInput] = useState('');
+    const [closeSaving, setCloseSaving] = useState(false);
     // Preferência global de edição (localStorage, padrão ligado). Cada aba lê
     // ao montar e grava ao mudar — sem estado global React formal.
     const [autoUppercase, setAutoUppercase] = useState(() => readAutoUppercasePreference());
@@ -127,55 +197,56 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTabl
         setConnectionId(connectionId);
         setDriver(activeDriver);
         setStatus(connName ? `conectado: ${connName}` : 'conectado');
-        // Catálogo completo pro autocomplete (ListTables é lazy por schema,
-        // como a Sidebar usa). Barato: o schema cache do backend (TTL 15min)
-        // evita round-trip ao banco a cada schema.
+        // Catálogo completo pro autocomplete (ListSchemas + uma query batched
+        // por schema via IntrospectSchemaTables — nunca mais um IntrospectTable
+        // por tabela). Barato: o schema cache do backend (TTL 15min) evita
+        // round-trip ao banco numa reconexão dentro do TTL.
         //
-        // Sequencial, nunca Promise.all: a sessão de uma aba usa uma única
-        // conexão (*sql.Conn/pgx) dedicada (ver internal/session), que não
-        // suporta uso concorrente. Bug real: com 2+ schemas as chamadas em
-        // paralelo colidiam com erro "conn busy" e derrubavam o catálogo
-        // inteiro (ver memória wisp-autocomplete-conn-busy-concurrency).
+        // Sequencial POR SCHEMA, nunca Promise.all: a sessão de uma aba usa
+        // uma única conexão (*sql.Conn/pgx) dedicada (ver internal/session),
+        // que não suporta uso concorrente. Bug real: com 2+ schemas as
+        // chamadas em paralelo colidiam com erro "conn busy" e derrubavam o
+        // catálogo inteiro (ver memória wisp-autocomplete-conn-busy-concurrency).
         //
         // Tudo dentro de withQueue(`${tabId}:query`, ...) — mesma chave de
-        // handleRun/handleLoadMore: sem isso, uma chamada deste loop
-        // (IntrospectTable) pode entrar bem no meio de um RunQuery+FetchRows
-        // já em andamento (ex.: usuário roda uma query enquanto o catálogo
-        // ainda carrega numa base grande) e quebrar o cursor de streaming
-        // aberto — "conn busy" real, mesma causa raiz corrigida em
-        // TableTab.tsx. Efeito colateral aceito: uma query nova espera o
-        // catálogo terminar de carregar (base grande = espera perceptível,
-        // sem feedback visual ainda — ver nota em STATE.md).
+        // handleRun/handleLoadMore: sem isso, uma chamada deste loop pode
+        // entrar bem no meio de um RunQuery+FetchRows já em andamento e
+        // quebrar o cursor de streaming aberto — "conn busy" real, mesma
+        // causa raiz corrigida em TableTab.tsx. Efeito colateral aceito: uma
+        // query nova espera o catálogo terminar de carregar — mas agora é
+        // UMA query por schema (era uma por TABELA, N+1 real que travava a
+        // fila por muito tempo em bases com centenas de tabelas — bug real
+        // relatado pelo usuário, ver IntrospectSchema em internal/db).
         try {
+          // Feedback visual da pendência documentada acima: sem isso, uma
+          // query digitada logo após conectar fica "na fila" sem explicação
+          // — o usuário não tem como saber que está atrás do carregamento
+          // do catálogo, não de outra query dele mesmo.
+          setStatus(prev => `${prev} — carregando catálogo para autocomplete…`);
           await withQueue(`${tabId}:query`, async () => {
             const schemas = await ListSchemas(tabId);
-            const shallow: db.Table[] = [];
-            for (const schema of schemas ?? []) {
-                const tables = await ListTables(tabId, schema);
-                shallow.push(...(tables ?? []));
-            }
-            // ListTables só traz Schema/Name (sem Columns) — enriquece cada
-            // tabela via IntrospectTable antes de gravar o catálogo, para o
-            // autocomplete de colunas funcionar. Falha individual não
-            // derruba o catálogo: mantém a entrada rasa daquela tabela.
             const detailed: db.Table[] = [];
-            for (const table of shallow) {
+            for (const schema of schemas ?? []) {
                 try {
-                    const full = await IntrospectTable(tabId, table.Schema, table.Name);
-                    detailed.push(full ?? table);
-                } catch (tableErr) {
-                    console.error(`erro ao introspectar ${table.Schema}.${table.Name} para autocomplete:`, tableErr);
-                    detailed.push(table);
+                    const tables = await IntrospectSchemaTables(tabId, schema);
+                    detailed.push(...(tables ?? []));
+                } catch (schemaErr) {
+                    console.error(`erro ao introspectar schema ${schema} para autocomplete:`, schemaErr);
                 }
+                // Grava incrementalmente por schema — schemas já processados
+                // ficam disponíveis pro autocomplete/sidebar sem esperar os
+                // demais terminarem.
+                setCatalog([...detailed]);
             }
-            setCatalog(detailed);
           });
+          setStatus(connName ? `conectado: ${connName}` : 'conectado');
         } catch (err) {
             // Não falha a conexão por causa do catálogo de autocomplete, mas
             // não engole o erro — autocomplete sem dados fica silencioso pro
             // usuário, então pelo menos loga pra investigação futura.
             console.error('erro ao carregar catálogo para autocomplete:', err);
             setCatalog([]);
+            setStatus(connName ? `conectado: ${connName}` : 'conectado');
         }
     }
 
@@ -283,19 +354,30 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTabl
         }
     }
 
-    async function handleRun(textOverride?: string) {
+    // Por padrão (Ctrl+Enter/botão Executar) REAPROVEITA a aba de resultado
+    // ativa — estilo DBeaver: rodar de novo substitui o resultado na mesma
+    // aba em vez de acumular uma nova a cada execução. Só cria uma aba nova
+    // quando: não há aba ativa reaproveitável, a ativa está running/queued
+    // (trabalho em voo nunca é descartado), ou o usuário pediu explicitamente
+    // via forceNewTab (Ctrl+Alt+Enter, ver SqlEditor.tsx — Ctrl+\ do DBeaver
+    // quebrava Ctrl+Enter em teclado ABNT2, trocado por essa combinação).
+    async function handleRun(textOverride?: string, forceNewTab = false) {
         // Guarda contra os atalhos de teclado do editor (Ctrl+Enter /
-        // Ctrl+Shift+Enter, ver SqlEditor.tsx) — eles chamam handleRun direto,
-        // sem passar pelo `disabled` do botão "Executar". Bug real: rodava
-        // query sem sessão ativa, estourando "nenhuma sessão ativa para tabId".
+        // Ctrl+Shift+Enter/Ctrl+Alt+Enter, ver SqlEditor.tsx) — eles chamam handleRun
+        // direto, sem passar pelo `disabled` do botão "Executar". Bug real:
+        // rodava query sem sessão ativa, estourando "nenhuma sessão ativa
+        // para tabId".
         if (!connected) {
             setStatus('erro: nenhuma conexão ativa');
             return;
         }
         const text = textOverride ?? query;
-        const id = crypto.randomUUID();
+        const reusable = !forceNewTab && activeResult && activeResult.status !== 'running' && activeResult.status !== 'queued'
+            ? activeResult
+            : null;
+        const id = reusable?.id ?? crypto.randomUUID();
         resultSeqRef.current += 1;
-        const newTab: ResultTabState = {
+        const freshTab: ResultTabState = {
             id,
             queryText: text,
             label: makeResultLabel(text, resultSeqRef.current),
@@ -315,8 +397,11 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTabl
             // comentário em ResultTabState) — qualquer aba anterior perde
             // "carregar mais" no instante em que uma execução nova começa,
             // porque o cursor dela já foi fechado de verdade no backend.
-            const frozen = prev.map(t => (t.hasMore ? {...t, hasMore: false} : t));
-            const next = [...frozen, newTab];
+            const frozen = prev.map(t => (t.hasMore && t.id !== id ? {...t, hasMore: false} : t));
+            if (reusable) {
+                return frozen.map(t => (t.id === id ? freshTab : t));
+            }
+            const next = [...frozen, freshTab];
             if (next.length <= MAX_RESULT_TABS) return next;
             // Descarta as mais antigas já terminadas (done/error) antes de
             // qualquer uma rodando/na fila — nunca descarta trabalho em voo.
@@ -458,6 +543,8 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTabl
         setActiveScriptId(id);
         setActiveScriptName(name);
         setQuery(queryText);
+        lastSavedQueryRef.current = queryText;
+        rememberLastScript(id, name);
     }
 
     // Sem script ativo, "Salvar" abre um campo de nome inline (novo script).
@@ -468,6 +555,7 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTabl
             setSavingScript(true);
             try {
                 await UpdateScript(activeScriptId, activeScriptName, query);
+                lastSavedQueryRef.current = query;
                 setScriptsToken(t => t + 1);
             } finally {
                 setSavingScript(false);
@@ -488,6 +576,8 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTabl
             const id = await SaveScript(name, query);
             setActiveScriptId(id);
             setActiveScriptName(name);
+            lastSavedQueryRef.current = query;
+            rememberLastScript(id, name);
             setShowSaveForm(false);
             setScriptsToken(t => t + 1);
         } finally {
@@ -499,7 +589,79 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTabl
         setActiveScriptId(null);
         setActiveScriptName('');
         setShowSaveForm(false);
+        lastSavedQueryRef.current = '';
+        forgetLastScript();
     }
+
+    // Fecha o modal de "SQL não salvo" e resolve a Promise que confirmClose
+    // devolveu pra App.tsx — proceed=true libera o fechamento da aba.
+    function resolveCloseConfirm(proceed: boolean) {
+        closeConfirm?.resolve(proceed);
+        setCloseConfirm(null);
+        setCloseSaveNameInput('');
+    }
+
+    // "Salvar e fechar": sobrescreve o script ativo, ou — sem script ativo —
+    // salva um novo com o nome digitado no próprio modal (mescla o fluxo de
+    // handleConfirmSaveNew aqui pra não precisar encadear dois diálogos).
+    async function handleCloseSaveAndClose() {
+        setCloseSaving(true);
+        try {
+            if (activeScriptId) {
+                await UpdateScript(activeScriptId, activeScriptName, query);
+            } else {
+                const name = closeSaveNameInput.trim();
+                if (!name) return;
+                await SaveScript(name, query);
+                setScriptsToken(t => t + 1);
+            }
+            lastSavedQueryRef.current = query;
+            resolveCloseConfirm(true);
+        } finally {
+            setCloseSaving(false);
+        }
+    }
+
+    useImperativeHandle(ref, () => ({
+        confirmClose: () => {
+            const dirty = query.trim() !== '' && query !== lastSavedQueryRef.current;
+            if (!dirty) return Promise.resolve(true);
+            return new Promise<boolean>(resolve => {
+                setCloseSaveNameInput('');
+                setCloseConfirm({resolve});
+            });
+        },
+    }), [query]);
+
+    // Recarrega o último script aberto (ver LAST_SCRIPT_STORAGE_KEY) só na
+    // aba de console inicial da sessão — nunca sobrescreve texto que o
+    // usuário já tenha digitado nesta aba antes deste efeito rodar (guarda
+    // `query === ''`, ainda que na prática essa aba comece sempre vazia).
+    // Script apagado/renomeado fora do Wisp entre sessões (ex.: usuário
+    // limpou o banco local) — falha silenciosa, cai pra aba em branco normal.
+    useEffect(() => {
+        if (!restoreLastScriptOnMount) return;
+        const last = readLastScript();
+        if (!last) return;
+        let cancelled = false;
+        ListScripts()
+            .then(scripts => {
+                if (cancelled) return;
+                const found = (scripts ?? []).find(s => s.ID === last.id);
+                if (!found || query !== '') return;
+                setActiveScriptId(found.ID);
+                setActiveScriptName(found.Name);
+                setQuery(found.QueryText);
+                lastSavedQueryRef.current = found.QueryText;
+            })
+            .catch(() => {
+                // Sem sorte restaurando — segue com a aba em branco normal.
+            });
+        return () => {
+            cancelled = true;
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     function handleFormatQuery() {
         const dialect: SqlLanguage = driver === 'postgres' ? 'postgresql' : driver === 'sqlite' ? 'sqlite' : 'sql';
@@ -608,6 +770,7 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTabl
                             onChange={setQuery}
                             onRunRequested={() => handleRun()}
                             onRunSelectionRequested={text => handleRun(text)}
+                            onRunNewTabRequested={() => handleRun(undefined, true)}
                             catalog={catalog}
                             driver={driver}
                             autoUppercase={autoUppercase}
@@ -617,13 +780,20 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTabl
                     <div className="resize-handle resize-handle-h" onMouseDown={editorResize.onMouseDown} title="Arrastar para redimensionar" />
                     <div className="editor-actions">
                         <div className="editor-actions-left">
-                            <button className="btn btn-success" onClick={() => handleRun()} disabled={!connected} title="Executar (Ctrl+Enter) — enfileira se outra já estiver rodando. Selecione um trecho e use Ctrl+Shift+Enter pra rodar só ele.">
+                            <button className="btn btn-success" onClick={() => handleRun()} disabled={!connected} title="Executar (Ctrl+Enter) — reaproveita a aba de resultado ativa. Selecione um trecho e use Ctrl+Shift+Enter pra rodar só ele.">
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                                     <polygon points="5 3 19 12 5 21 5 3" />
                                 </svg>
                                 Executar
                                 <kbd className="kbd-shortcut">Ctrl+Enter</kbd>
                                 <kbd className="kbd-shortcut" title="Executar seleção ou statement atual">Ctrl+Shift+Enter</kbd>
+                            </button>
+                            <button className="btn btn-secondary" onClick={() => handleRun(undefined, true)} disabled={!connected} title="Executar numa aba de resultado nova, sem substituir a atual (Ctrl+Alt+Enter)">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M12 5v14M5 12h14" />
+                                </svg>
+                                Nova aba
+                                <kbd className="kbd-shortcut">Ctrl+Alt+Enter</kbd>
                             </button>
                             {anyRunning && (
                                 <button className="btn btn-danger" onClick={handleCancel} title="Cancelar a consulta em andamento agora">
@@ -681,7 +851,7 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTabl
                                     title={t.queryText}
                                 >
                                     <span className={`result-tab-dot result-tab-dot-${t.status}`} />
-                                    {t.label}
+                                    <span className="result-tab-label">{t.label}</span>
                                     {t.status === 'queued' && <span className="result-tab-hint">na fila</span>}
                                     {t.status === 'running' && <span className="result-tab-hint">rodando…</span>}
                                     <span
@@ -729,6 +899,52 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTabl
                     <QueryHistory onSelectQuery={text => { handleNewScript(); setQuery(text); }} refreshToken={historyToken} />
                 )}
             </div>
+
+            {closeConfirm && (
+                <div className="modal-backdrop" onClick={() => resolveCloseConfirm(false)}>
+                    <div className="modal-container" onClick={e => e.stopPropagation()} style={{maxWidth: 420}}>
+                        <div className="modal-header">
+                            <div className="modal-title-group">
+                                <h2 className="modal-title">Fechar aba sem salvar?</h2>
+                                <span className="modal-subtitle">O SQL desta aba tem alterações não salvas.</span>
+                            </div>
+                            <button className="modal-close-btn" onClick={() => resolveCloseConfirm(false)} title="Cancelar">✕</button>
+                        </div>
+                        <div className="modal-body">
+                            {!activeScriptId && (
+                                <input
+                                    className="input-control"
+                                    autoFocus
+                                    placeholder="Nome do script"
+                                    value={closeSaveNameInput}
+                                    onChange={e => setCloseSaveNameInput(e.target.value)}
+                                    onKeyDown={e => {
+                                        if (e.key === 'Enter' && closeSaveNameInput.trim()) handleCloseSaveAndClose();
+                                    }}
+                                />
+                            )}
+                            <div className="modal-actions" style={{marginTop: 12, display: 'flex', gap: 8, justifyContent: 'flex-end'}}>
+                                <button className="btn btn-secondary" onClick={() => resolveCloseConfirm(false)}>
+                                    Cancelar
+                                </button>
+                                <button className="btn btn-secondary" onClick={() => resolveCloseConfirm(true)}>
+                                    Fechar sem salvar
+                                </button>
+                                <button
+                                    className="btn btn-success"
+                                    onClick={handleCloseSaveAndClose}
+                                    disabled={closeSaving || (!activeScriptId && !closeSaveNameInput.trim())}
+                                    title={activeScriptId ? `Sobrescrever script "${activeScriptName}"` : 'Salvar como novo script'}
+                                >
+                                    {activeScriptId ? `Salvar "${activeScriptName}" e fechar` : 'Salvar e fechar'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
-}
+});
+
+export default ConsoleTab;

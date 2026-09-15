@@ -244,14 +244,25 @@
     border-bottom: 1px solid var(--border-subtle);
 }
 
-.meta-def {
+.meta-name-list {
+    display: flex;
+    flex-direction: column;
+    padding: 8px;
     margin: 0;
-    padding: 8px 10px;
-    font-size: 12px;
+    list-style: none;
+}
+
+.meta-name-item {
+    padding: 7px 10px;
+    font-size: 12.5px;
     font-family: var(--font-mono);
-    color: var(--text-secondary);
-    white-space: pre-wrap;
-    word-break: break-all;
+    color: #93c5fd;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.meta-name-item:hover {
+    background: var(--bg-card);
 }
 
 .meta-empty {
@@ -1278,6 +1289,13 @@
 
 .result-tab-dot-queued {
     background: var(--text-muted);
+}
+
+.result-tab-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
 }
 
 @keyframes result-tab-pulse {

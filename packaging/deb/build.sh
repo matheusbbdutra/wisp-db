@@ -66,6 +66,10 @@ mkdir -p \
 install -Dm755 "${BINARIO_BUILDADO}" "${STAGE_DIR}/usr/bin/wisp"
 install -Dm644 "${REPO_ROOT}/packaging/assets/wisp.desktop" "${STAGE_DIR}/usr/share/applications/wisp.desktop"
 install -Dm644 "${REPO_ROOT}/build/appicon.png" "${STAGE_DIR}/usr/share/icons/hicolor/1024x1024/apps/wisp.png"
+# postinst/postrm: sem eles o cache de ícones do hicolor (gtk-update-icon-cache)
+# não é regenerado na instalação e o ícone do Wisp não aparece no launcher.
+install -Dm755 "${SCRIPT_DIR}/postinst" "${STAGE_DIR}/DEBIAN/postinst"
+install -Dm755 "${SCRIPT_DIR}/postrm" "${STAGE_DIR}/DEBIAN/postrm"
 
 cat > "${STAGE_DIR}/DEBIAN/control" <<CONTROL
 Package: ${PKGNAME}

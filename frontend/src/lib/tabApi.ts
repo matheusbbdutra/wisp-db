@@ -51,6 +51,15 @@ export function IntrospectTable(tabId: string, schema: string, table: string): P
     return withQueue(tabId, () => App.IntrospectTable(tabId, schema, table));
 }
 
+// Equivalente batched de IntrospectTable para o schema inteiro (uma única
+// query no backend em vez de N — ver internal/db.DatabaseDriver.
+// IntrospectSchema). Usado pelo catálogo de autocomplete do console em vez
+// do loop de IntrospectTable por tabela, que travava a fila da aba por muito
+// tempo em schemas com centenas de tabelas.
+export function IntrospectSchemaTables(tabId: string, schema: string): Promise<db.Table[]> {
+    return withQueue(tabId, () => App.IntrospectSchemaTables(tabId, schema));
+}
+
 export function RunQuery(tabId: string, query: string): Promise<main.QueryMetadata> {
     return withQueue(tabId, () => App.RunQuery(tabId, query));
 }

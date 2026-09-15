@@ -30,7 +30,12 @@ func (d *PostgresDriver) Connect(ctx context.Context, dsn string) error {
 }
 
 func (d *PostgresDriver) Close() error {
-	d.CloseCursor()
+	// closePendingCursor (não CloseCursor puro) — mesmo motivo do comentário
+	// em closePendingCursor: sem cancelar primeiro, desconectar no meio de
+	// uma query grande sem LIMIT travaria aqui drenando tudo antes de fechar.
+	if d.conn != nil {
+		d.closePendingCursor(context.Background())
+	}
 	if d.conn == nil {
 		return nil
 	}
@@ -38,6 +43,10 @@ func (d *PostgresDriver) Close() error {
 }
 
 func (d *PostgresDriver) Execute(ctx context.Context, query string) (*QueryResult, error) {
+	// Fecha um cursor de streaming pendente (ExecuteStreaming/FetchNext) antes
+	// de reusar a conexão — pgx recusa uma query nova com "conn busy" enquanto
+	// rows de uma anterior não estão esgotadas/fechadas.
+	d.closePendingCursor(ctx)
 	rows, err := d.conn.Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("executando query: %w", err)
@@ -69,7 +78,7 @@ func (d *PostgresDriver) Execute(ctx context.Context, query string) (*QueryResul
 // "Data Grid Virtualizado" e o pedido do usuário de paginação real em vez
 // de carregar tudo de uma vez).
 func (d *PostgresDriver) ExecuteStreaming(ctx context.Context, query string) ([]string, []string, error) {
-	d.CloseCursor()
+	d.closePendingCursor(ctx)
 
 	rows, err := d.conn.Query(ctx, query)
 	if err != nil {
@@ -119,6 +128,28 @@ func (d *PostgresDriver) CloseCursor() error {
 	return nil
 }
 
+// closePendingCursor fecha um cursor de streaming não esgotado avisando o
+// servidor pra PARAR de produzir linhas antes de fechar.
+//
+// Causa raiz de um bug real de produção (usuário trocando de query com uma
+// anterior grande/sem LIMIT ainda com hasMore=true, "aba trava na fila"):
+// nosso "cursor" não é um cursor real do servidor — é o pgx já recebendo o
+// resultado inteiro da rede, com FetchNext só consumindo aos poucos do que
+// já chegou. rows.Close() (chamado por CloseCursor) LÊ E DESCARTA
+// sincronamente TODAS as linhas restantes do socket até o comando concluir
+// no servidor (ver pgconn.ResultReader.Close, "for !rr.commandConcluded")
+// — numa tabela grande sem LIMIT isso trava por muito tempo. Mandar
+// CancelRequest primeiro faz o servidor abortar a query em andamento, então
+// o dreno que seguer é rápido (erro de cancelamento) em vez de continuar
+// empurrando milhões de linhas só pra jogar fora.
+func (d *PostgresDriver) closePendingCursor(ctx context.Context) {
+	if d.cursor == nil {
+		return
+	}
+	_ = d.conn.PgConn().CancelRequest(ctx)
+	d.CloseCursor()
+}
+
 // CancelRunningQuery dispara o cancelamento nativo do protocolo Postgres
 // (CancelRequest em conexão auxiliar) — é o que garante que "stop" na aba
 // realmente derruba a query no servidor, não só localmente (ver CLAUDE.md,
@@ -131,6 +162,8 @@ func (d *PostgresDriver) CancelRunningQuery(ctx context.Context) error {
 }
 
 func (d *PostgresDriver) ListSchemas(ctx context.Context) ([]string, error) {
+	// Ver comentário em Execute sobre "conn busy" com cursor de streaming aberto.
+	d.closePendingCursor(ctx)
 	rows, err := d.conn.Query(ctx,
 		`SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT LIKE 'pg\_%' AND schema_name != 'information_schema' ORDER BY schema_name`)
 	if err != nil {
@@ -150,6 +183,8 @@ func (d *PostgresDriver) ListSchemas(ctx context.Context) ([]string, error) {
 }
 
 func (d *PostgresDriver) ListTables(ctx context.Context, schema string) ([]Table, error) {
+	// Ver comentário em Execute sobre "conn busy" com cursor de streaming aberto.
+	d.closePendingCursor(ctx)
 	rows, err := d.conn.Query(ctx,
 		`SELECT table_name FROM information_schema.tables WHERE table_schema = $1 ORDER BY table_name`, schema)
 	if err != nil {
@@ -172,6 +207,8 @@ func (d *PostgresDriver) ListTables(ctx context.Context, schema string) ([]Table
 // table_constraints/key_column_usage (PK real) — nunca heurística por nome
 // de coluna, conforme docs/adr/0004-inline-edit-safety.md.
 func (d *PostgresDriver) Introspect(ctx context.Context, schema, table string) (*Table, error) {
+	// Ver comentário em Execute sobre "conn busy" com cursor de streaming aberto.
+	d.closePendingCursor(ctx)
 	rows, err := d.conn.Query(ctx, `
 		SELECT c.column_name, c.data_type, c.is_nullable = 'YES', c.is_generated = 'ALWAYS',
 		       EXISTS (
@@ -202,6 +239,60 @@ func (d *PostgresDriver) Introspect(ctx context.Context, schema, table string) (
 	return result, rows.Err()
 }
 
+// IntrospectSchema é o equivalente batched de Introspect para um schema
+// inteiro: mesma junção information_schema.columns + table_constraints/
+// key_column_usage do Introspect, mas SEM filtro de table_name — uma única
+// query traz as colunas de todas as tabelas do schema, evitando N round-trips
+// (ver comentário na interface DatabaseDriver).
+func (d *PostgresDriver) IntrospectSchema(ctx context.Context, schema string) ([]Table, error) {
+	// Ver comentário em Execute sobre "conn busy" com cursor de streaming aberto.
+	d.closePendingCursor(ctx)
+	rows, err := d.conn.Query(ctx, `
+		SELECT c.table_name, c.column_name, c.data_type, c.is_nullable = 'YES', c.is_generated = 'ALWAYS',
+		       EXISTS (
+		           SELECT 1 FROM information_schema.table_constraints tc
+		           JOIN information_schema.key_column_usage kcu
+		             ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+		           WHERE tc.constraint_type = 'PRIMARY KEY'
+		             AND tc.table_schema = c.table_schema
+		             AND tc.table_name = c.table_name
+		             AND kcu.column_name = c.column_name
+		       ) AS is_primary_key
+		FROM information_schema.columns c
+		WHERE c.table_schema = $1
+		ORDER BY c.table_name, c.ordinal_position`, schema)
+	if err != nil {
+		return nil, fmt.Errorf("introspectando schema %s: %w", schema, err)
+	}
+	defer rows.Close()
+
+	order := []string{}
+	byTable := map[string]*Table{}
+	for rows.Next() {
+		var tableName string
+		var col Column
+		if err := rows.Scan(&tableName, &col.Name, &col.Type, &col.Nullable, &col.IsGenerated, &col.IsPrimaryKey); err != nil {
+			return nil, err
+		}
+		t, ok := byTable[tableName]
+		if !ok {
+			t = &Table{Schema: schema, Name: tableName}
+			byTable[tableName] = t
+			order = append(order, tableName)
+		}
+		t.Columns = append(t.Columns, col)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	result := make([]Table, 0, len(order))
+	for _, name := range order {
+		result = append(result, *byTable[name])
+	}
+	return result, nil
+}
+
 // UpdateCell executa um UPDATE parametrizado de uma única célula com
 // checagem otimista de concorrência (WHERE pk = $n AND coluna_antiga = $n,
 // ver docs/adr/0004-inline-edit-safety.md). Placeholders $1..$n nativos do
@@ -214,6 +305,8 @@ func (d *PostgresDriver) UpdateCell(ctx context.Context, schema, table string, p
 	if err != nil {
 		return 0, err
 	}
+	// Ver comentário em Execute sobre "conn busy" com cursor de streaming aberto.
+	d.closePendingCursor(ctx)
 	tag, err := d.conn.Exec(ctx, query, args...)
 	if err != nil {
 		return 0, fmt.Errorf("atualizando célula de %s.%s: %w", schema, table, err)
@@ -232,6 +325,8 @@ func (d *PostgresDriver) TableDDL(ctx context.Context, schema, table string) (st
 	if schema == "" || schema == "main" {
 		schema = "public"
 	}
+	// Ver comentário em Execute sobre "conn busy" com cursor de streaming aberto.
+	d.closePendingCursor(ctx)
 	colRows, err := d.conn.Query(ctx, `
 		SELECT column_name, data_type, udt_name, character_maximum_length,
 		       is_nullable = 'YES', column_default,
@@ -315,6 +410,8 @@ func (d *PostgresDriver) ListTriggers(ctx context.Context, schema, table string)
 	if schema == "" || schema == "main" {
 		schema = "public"
 	}
+	// Ver comentário em Execute sobre "conn busy" com cursor de streaming aberto.
+	d.closePendingCursor(ctx)
 	rows, err := d.conn.Query(ctx, `
 		SELECT t.tgname, pg_get_triggerdef(t.oid)
 		FROM pg_trigger t
@@ -344,6 +441,8 @@ func (d *PostgresDriver) ListFunctions(ctx context.Context, schema string) ([]Fu
 	if schema == "" || schema == "main" {
 		schema = "public"
 	}
+	// Ver comentário em Execute sobre "conn busy" com cursor de streaming aberto.
+	d.closePendingCursor(ctx)
 	rows, err := d.conn.Query(ctx, `
 		SELECT p.proname, pg_get_functiondef(p.oid)
 		FROM pg_proc p

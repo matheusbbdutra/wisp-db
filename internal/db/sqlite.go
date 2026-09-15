@@ -207,6 +207,26 @@ func (d *SQLiteDriver) Introspect(ctx context.Context, schema, table string) (*T
 	return result, rows.Err()
 }
 
+// IntrospectSchema é o equivalente de IntrospectSchema do Postgres, mas aqui
+// o loop por tabela fica: SQLite é um arquivo local (sem round-trip de rede),
+// então o custo do N+1 que motivou a versão batched do Postgres não existe
+// aqui — não há requisito real pra evitar o loop.
+func (d *SQLiteDriver) IntrospectSchema(ctx context.Context, schema string) ([]Table, error) {
+	tables, err := d.ListTables(ctx, schema)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]Table, 0, len(tables))
+	for _, t := range tables {
+		full, err := d.Introspect(ctx, schema, t.Name)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, *full)
+	}
+	return result, nil
+}
+
 // UpdateCell executa um UPDATE parametrizado de uma única célula com
 // checagem otimista de concorrência (WHERE pk = ? AND coluna_antiga = ?,
 // ver docs/adr/0004-inline-edit-safety.md). Placeholders `?` nativos do

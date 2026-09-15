@@ -1,0 +1,15 @@
+#!/bin/sh
+# Atualiza o cache de ícones/desktop entries após instalar o pacote.
+# Sem isso, o ícone do Wisp instalado em hicolor/1024x1024/apps não aparece
+# no launcher até o cache ser regenerado por outra via (ex.: reboot).
+set -e
+
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -f -t /usr/share/icons/hicolor >/dev/null 2>&1 || true
+fi
+
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database -q /usr/share/applications >/dev/null 2>&1 || true
+fi
+
+exit 0

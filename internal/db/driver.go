@@ -92,6 +92,15 @@ type DatabaseDriver interface {
 	ListTables(ctx context.Context, schema string) ([]Table, error)
 	Introspect(ctx context.Context, schema, table string) (*Table, error)
 
+	// IntrospectSchema retorna TODAS as tabelas de um schema já com Columns
+	// populado, em uma única consulta batched — evita N+1 round-trips (um
+	// Introspect por tabela) ao montar o catálogo de autocomplete pro schema
+	// inteiro de uma vez (ver App.IntrospectSchemaTables). Bug real de
+	// produção corrigido: com schemas de muitas tabelas, o loop de Introspect
+	// sequencial travava a fila da aba (mesma conexão exclusiva) por tempo
+	// suficiente pra parecer que a query do usuário tinha "sumido".
+	IntrospectSchema(ctx context.Context, schema string) ([]Table, error)
+
 	// UpdateCell gera e executa um UPDATE parametrizado de uma única
 	// célula, com checagem otimista de concorrência (WHERE pk... AND
 	// coluna_antiga = ?, ver docs/adr/0004-inline-edit-safety.md).

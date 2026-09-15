@@ -6,6 +6,10 @@ export function CancelQuery(arg1) {
   return window['go']['main']['App']['CancelQuery'](arg1);
 }
 
+export function ConfirmQuit() {
+  return window['go']['main']['App']['ConfirmQuit']();
+}
+
 export function Connect(arg1, arg2, arg3) {
   return window['go']['main']['App']['Connect'](arg1, arg2, arg3);
 }
@@ -36,6 +40,10 @@ export function GetQueryHistory(arg1) {
 
 export function GetTableDDL(arg1, arg2, arg3) {
   return window['go']['main']['App']['GetTableDDL'](arg1, arg2, arg3);
+}
+
+export function IntrospectSchemaTables(arg1, arg2) {
+  return window['go']['main']['App']['IntrospectSchemaTables'](arg1, arg2);
 }
 
 export function IntrospectTable(arg1, arg2, arg3) {
