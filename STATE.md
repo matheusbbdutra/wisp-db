@@ -351,3 +351,24 @@ manual) — sem erro, tudo carregou certo. Ver memória
 pedido do usuário — sem chamada nova ao backend, reusa dado já buscado.
 
 `go build`/`tsc`/`npm run build` limpos.
+
+## ✅ Primeira suíte de testes do projeto (2026-09-15)
+Delegada ao OpenCode (Codex falhou 2x por problemas do próprio ambiente/CLI,
+não do contrato — ver memória `wisp-first-test-suite-result` pro relato
+completo, incluindo a lição de sempre confirmar `pgrep` que um processo
+delegado morreu antes de tentar outro alvo). Resultado: `internal/db/{sqlite,postgres}_test.go`,
+`internal/session/session_test.go` (todos contra SQLite/Postgres reais,
+nenhum mock), `frontend/vitest.config.ts` +
+`frontend/src/lib/{tabCallQueue,detectSingleTable,gridCopyFormats}.test.ts`.
+
+**Bug real encontrado na revisão** (não veio do contrato): `detectSingleTable`
+nunca detectava schema qualificado sem aspas (`public.customers`) — edição
+inline sempre caía em read-only silencioso pra esse caso comum. Causa raiz
+em duas camadas (regex só aceitava schema quotado + o pré-processamento
+apagava identificadores quotados igual a strings antes da extração, então
+nem o caso "com aspas" funcionava de verdade). Corrigido e verificado ao
+vivo contra Postgres real — badge "editável" aparece agora. Ver memória
+`wisp-first-test-suite-result`.
+
+`go test ./...` (8 testes), `npm run test` (18 testes), `go build`, `tsc`,
+`npm run build` todos limpos.
