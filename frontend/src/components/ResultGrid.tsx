@@ -10,7 +10,7 @@ import DataEditor, {
     Theme,
 } from '@glideapps/glide-data-grid';
 import '@glideapps/glide-data-grid/dist/index.css';
-import {UpdateCell} from '../../wailsjs/go/main/App';
+import {UpdateCell} from '../lib/tabApi';
 import {
     copyToClipboard,
     displayValue,

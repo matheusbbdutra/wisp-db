@@ -236,3 +236,37 @@ Adiado deliberadamente pelo usuário — não por causa do open source em si (o 
 **Retomar a próxima sessão por**: "Tabela como aba própria" (item 6 da lista de próximos passos) — dados/DDL/triggers/funções de uma tabela numa aba dedicada. Ver seção própria acima com o plano técnico já esboçado (triggers/DDL/funções por dialeto, novo tipo de aba no frontend). Meu plano: eu desenho o contrato de dados (structs Go, bindings, arquitetura da aba) antes de delegar a implementação mecânica ao OpenCode — mesmo padrão que funcionou bem nesta sessão.
 
 **Pendências de confirmação manual que ficaram em aberto** (não bloqueiam, ver seção de pausa no topo): "Copiar especial no grid" (clique direito → "Copiar célula") e uma olhada geral na janela após tanta mudança acumulada.
+
+## 🐛 Bug real corrigido (2026-09-15, pós-release): "conn busy" em base grande
+Relatado pelo usuário testando no PC da empresa (base corporativa grande,
+sem git configurado nesse PC). Erro: "failed to deallocate cached state,
+conn busy" ao rodar query normal; sidebar de schemas/tabelas nem abriu.
+
+**Causa raiz confirmada**: `ConsoleTab.handleConnected` carrega o catálogo do
+autocomplete num loop sequencial mas NÃO bloqueante (`ListSchemas`→
+`ListTables`→`IntrospectTable` por tabela). Em bases pequenas termina em
+milissegundos; em bases com centenas de tabelas, esse loop ainda roda quando
+o usuário já executou uma query manual — as duas colidem na mesma conexão
+(`*sql.Conn`/pgx, não suporta uso concorrente). Recidiva da mesma classe de
+bug do autocomplete (`wisp-autocomplete-conn-busy-concurrency`), mas agora
+entre QUALQUER chamada da aba, não só dentro do próprio loop.
+
+**Fix geral**: novo `frontend/src/lib/tabCallQueue.ts` (`withQueue`) +
+`frontend/src/lib/tabApi.ts` — reexporta todo binding tabId-scoped (exceto
+`CancelQuery`, que precisa interromper uma chamada em voo e nunca pode
+enfileirar) envolto numa fila por tabId. Todo componente
+(ConsoleTab/Sidebar/ResultGrid/TableTab/SchemaTab/ConnectionBar/
+ConnectionModal) importa de `lib/tabApi` agora. `connectLock.ts` removido
+(substituído, mais genérico) — cuidado: o wrapper de conexão do
+TableTab/SchemaTab usa chave `${tabId}:mount` (não `tabId` puro) pra não
+deadlockar com a fila geral das chamadas internas.
+
+**Verificado contra Postgres real com 403 tabelas** (geradas ad-hoc,
+removidas depois): conectei e disparei Ctrl+Enter imediatamente — rodou
+certo, sem erro; sidebar carregou as 403 tabelas depois. Ver memória
+`wisp-conn-busy-large-db-fix`. `go build`/`tsc --noEmit`/`npm run build` limpos.
+
+**Nota de UX não resolvida**: em bases muito grandes, a query do usuário
+agora fica na fila (sem erro) atrás do carregamento do catálogo, sem feedback
+visual de "carregando" — considerar colunas lazy no autocomplete se isso for
+reportado como lento de novo.

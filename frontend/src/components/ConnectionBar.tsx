@@ -1,5 +1,6 @@
 import {useEffect, useState} from 'react';
-import {ListSavedConnections, ConnectSaved} from '../../wailsjs/go/main/App';
+import {ListSavedConnections} from '../../wailsjs/go/main/App';
+import {ConnectSaved} from '../lib/tabApi';
 import type {store} from '../../wailsjs/go/models';
 import ConnectionModal from './ConnectionModal';
 

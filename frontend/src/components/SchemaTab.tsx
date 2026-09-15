@@ -1,7 +1,7 @@
 import {useEffect, useState} from 'react';
-import {ConnectSaved, Disconnect, ListTables} from '../../wailsjs/go/main/App';
+import {ConnectSaved, Disconnect, ListTables} from '../lib/tabApi';
 import type {db} from '../../wailsjs/go/models';
-import {withConnectLock} from '../lib/connectLock';
+import {withQueue} from '../lib/tabCallQueue';
 
 interface Props {
     tabId: string;
@@ -28,10 +28,10 @@ export default function SchemaTab({tabId, connectionId, schema, hidden, onConnec
     useEffect(() => {
         let cancelled = false;
         async function init() {
-            // withConnectLock serializa por tabId (ver lib/connectLock.ts e
-            // o mesmo comentário em TableTab.tsx) — evita a corrida do
-            // StrictMode (dev) cancelando a sessão fora de ordem.
-            await withConnectLock(tabId, async () => {
+            // Chave `${tabId}:mount` (não tabId puro) pra não colidir com a
+            // fila geral de bindings da aba (lib/tabApi.ts) — ver comentário
+            // completo em TableTab.tsx.
+            await withQueue(`${tabId}:mount`, async () => {
                 try {
                     await ConnectSaved(tabId, connectionId);
                 } catch (err) {

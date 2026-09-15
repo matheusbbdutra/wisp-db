@@ -3,7 +3,8 @@ import {useState} from 'react';
 // sem parser próprio no Wisp.
 import {format} from 'sql-formatter';
 import type {SqlLanguage} from 'sql-formatter';
-import {RunQuery, FetchRows, Disconnect, CancelQuery, SaveScript, UpdateScript, ListSchemas, ListTables, IntrospectTable} from '../../wailsjs/go/main/App';
+import {SaveScript, UpdateScript, CancelQuery} from '../../wailsjs/go/main/App';
+import {RunQuery, FetchRows, Disconnect, ListSchemas, ListTables, IntrospectTable} from '../lib/tabApi';
 import type {db} from '../../wailsjs/go/models';
 import {detectSingleTable, type SingleTableRef} from '../lib/detectSingleTable';
 import SqlEditor, {AUTO_UPPERCASE_STORAGE_KEY, readAutoUppercasePreference} from './SqlEditor';

@@ -1,5 +1,6 @@
 import {useState, useEffect} from 'react';
-import {SaveConnection, ConnectSaved, DeleteSavedConnection, PickSQLiteFile, ListSavedConnections, TestConnection} from '../../wailsjs/go/main/App';
+import {SaveConnection, DeleteSavedConnection, PickSQLiteFile, ListSavedConnections, TestConnection} from '../../wailsjs/go/main/App';
+import {ConnectSaved} from '../lib/tabApi';
 import type {store} from '../../wailsjs/go/models';
 
 interface Props {

@@ -1,5 +1,5 @@
 import {useState} from 'react';
-import {ListSchemas, ListTables, RefreshSchema} from '../../wailsjs/go/main/App';
+import {ListSchemas, ListTables, RefreshSchema} from '../lib/tabApi';
 import type {db} from '../../wailsjs/go/models';
 import {isCtrlHeld} from '../lib/modifierKeyTracker';
 

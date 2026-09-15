@@ -1,9 +1,9 @@
 import {useEffect, useRef, useState} from 'react';
-import {ConnectSaved, Disconnect, RunQuery, FetchRows, IntrospectTable, GetTableDDL, ListTriggers, ListFunctions} from '../../wailsjs/go/main/App';
+import {ConnectSaved, Disconnect, RunQuery, FetchRows, IntrospectTable, GetTableDDL, ListTriggers, ListFunctions} from '../lib/tabApi';
 import type {db} from '../../wailsjs/go/models';
 import SqlEditor from './SqlEditor';
 import ResultGrid, {type EditContext} from './ResultGrid';
-import {withConnectLock} from '../lib/connectLock';
+import {withQueue} from '../lib/tabCallQueue';
 
 type SubTab = 'dados' | 'ddl' | 'triggers' | 'funcoes';
 
@@ -58,12 +58,18 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
     useEffect(() => {
         let cancelled = false;
         async function init() {
-            // withConnectLock serializa por tabId (ver lib/connectLock.ts):
-            // essencial pro StrictMode (dev), que monta/desmonta/remonta este
-            // efeito rapidamente — sem o lock, as duas chamadas a ConnectSaved
-            // (mesmo tabId) correm concorrentes e o Manager.Open (backend)
-            // pode cancelar a sessão da montagem "vencedora" fora de ordem.
-            await withConnectLock(tabId, async () => {
+            // Chave DIFERENTE de tabId sozinho (`${tabId}:mount`) — de
+            // propósito: os bindings dentro deste bloco (ConnectSaved,
+            // IntrospectTable, RunQuery...) já passam pela fila geral da aba
+            // (tabId puro, ver lib/tabApi.ts); usar a MESMA chave aqui
+            // causaria deadlock (a chamada de dentro nunca entraria na fila
+            // porque este bloco externo ainda não liberou). Esta fila
+            // separada serializa só a decisão "conectar → sou a montagem
+            // válida? senão desconecto" entre duas montagens do StrictMode
+            // (dev) — sem ela, as duas chamadas a ConnectSaved corririam
+            // concorrentes e o Manager.Open (backend) poderia cancelar a
+            // sessão da montagem "vencedora" fora de ordem.
+            await withQueue(`${tabId}:mount`, async () => {
                 try {
                     await ConnectSaved(tabId, connectionId);
                 } catch (err) {
