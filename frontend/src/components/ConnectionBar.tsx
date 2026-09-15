@@ -8,7 +8,7 @@ interface Props {
     connected: boolean;
     status: string;
     onDisconnect: () => void;
-    onConnected: (connectionName?: string) => void;
+    onConnected: (connectionName?: string, driver?: string) => void;
     onError: (err: string) => void;
 }
 
@@ -55,7 +55,7 @@ export default function ConnectionBar({
         try {
             await ConnectSaved(tabId, selectedId);
             const found = saved.find(c => c.ID === selectedId);
-            onConnected(found?.Name);
+            onConnected(found?.Name, found?.Driver);
         } catch (err) {
             onError(String(err));
         } finally {
@@ -153,9 +153,9 @@ export default function ConnectionBar({
                 isOpen={isModalOpen}
                 tabId={tabId}
                 onClose={() => setIsModalOpen(false)}
-                onConnected={(id, name) => {
+                onConnected={(id, name, driver) => {
                     setSelectedId(id);
-                    onConnected(name);
+                    onConnected(name, driver);
                     refreshSaved();
                 }}
                 onConnectionsChanged={refreshSaved}

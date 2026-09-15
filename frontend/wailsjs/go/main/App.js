@@ -34,6 +34,10 @@ export function GetQueryHistory(arg1) {
   return window['go']['main']['App']['GetQueryHistory'](arg1);
 }
 
+export function IntrospectTable(arg1, arg2, arg3) {
+  return window['go']['main']['App']['IntrospectTable'](arg1, arg2, arg3);
+}
+
 export function ListSavedConnections() {
   return window['go']['main']['App']['ListSavedConnections']();
 }

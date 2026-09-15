@@ -299,6 +299,58 @@ func (a *App) ListTables(tabID string, schema string) ([]db.Table, error) {
 	return tables, nil
 }
 
+// IntrospectTable retorna uma tabela com Columns populado (usado pelo
+// autocomplete de colunas — ListTables só traz Schema/Name, ver
+// internal/db.DatabaseDriver.Introspect). Consulta o schema cache antes de
+// ir ao banco; grava/atualiza a entrada correspondente no cache após um
+// fetch real (mesmo padrão de ListSchemas/ListTables acima).
+func (a *App) IntrospectTable(tabID string, schema string, tableName string) (*db.Table, error) {
+	s, err := a.sessions.Get(tabID)
+	if err != nil {
+		return nil, err
+	}
+
+	if a.schemaCache != nil {
+		if catalog, ok := a.schemaCache.Get(s.CacheKey); ok {
+			if tables, ok := catalog.Tables[schema]; ok {
+				for _, t := range tables {
+					if t.Name == tableName && len(t.Columns) > 0 {
+						cached := t
+						return &cached, nil
+					}
+				}
+			}
+		}
+	}
+
+	full, err := s.Driver.Introspect(s.Ctx, schema, tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	if a.schemaCache != nil {
+		catalog, _ := a.schemaCache.Get(s.CacheKey)
+		if catalog.Tables == nil {
+			catalog.Tables = make(map[string][]db.Table)
+		}
+		tables := catalog.Tables[schema]
+		replaced := false
+		for i, t := range tables {
+			if t.Name == tableName {
+				tables[i] = *full
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			tables = append(tables, *full)
+		}
+		catalog.Tables[schema] = tables
+		_ = a.schemaCache.Set(s.CacheKey, catalog)
+	}
+	return full, nil
+}
+
 // RefreshSchema invalida o cache da conexão da aba tabId — usado pelo botão
 // "Atualizar" da sidebar para forçar um fetch real em vez de esperar o TTL.
 func (a *App) RefreshSchema(tabID string) error {

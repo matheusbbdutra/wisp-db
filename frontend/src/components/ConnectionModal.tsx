@@ -6,7 +6,7 @@ interface Props {
     isOpen: boolean;
     tabId: string;
     onClose: () => void;
-    onConnected: (connectionId: string, name: string) => void;
+    onConnected: (connectionId: string, name: string, driver: string) => void;
     onConnectionsChanged: () => void;
 }
 
@@ -159,7 +159,7 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
 
             if (connectAfter) {
                 await ConnectSaved(tabId, newId);
-                onConnected(newId, trimmedName);
+                onConnected(newId, trimmedName, built.driver);
                 onClose();
             } else {
                 // Limpa form e recarrega
@@ -443,7 +443,7 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                                                 className="btn btn-primary btn-sm"
                                                 onClick={async () => {
                                                     await ConnectSaved(tabId, c.ID);
-                                                    onConnected(c.ID, c.Name);
+                                                    onConnected(c.ID, c.Name, c.Driver);
                                                     onClose();
                                                 }}
                                             >

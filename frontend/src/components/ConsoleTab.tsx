@@ -1,5 +1,6 @@
 import {useState} from 'react';
-import {RunQuery, FetchRows, Disconnect, CancelQuery, SaveScript, UpdateScript} from '../../wailsjs/go/main/App';
+import {RunQuery, FetchRows, Disconnect, CancelQuery, SaveScript, UpdateScript, ListSchemas, ListTables, IntrospectTable} from '../../wailsjs/go/main/App';
+import type {db} from '../../wailsjs/go/models';
 import SqlEditor from './SqlEditor';
 import ResultGrid from './ResultGrid';
 import Sidebar from './Sidebar';
@@ -36,16 +37,47 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange}: Props) {
     const [scriptsToken, setScriptsToken] = useState(0);
     const [activeScriptId, setActiveScriptId] = useState<string | null>(null);
     const [activeScriptName, setActiveScriptName] = useState('');
+    const [catalog, setCatalog] = useState<db.Table[]>([]);
+    const [driver, setDriver] = useState<string | undefined>(undefined);
     const [showSaveForm, setShowSaveForm] = useState(false);
     const [saveNameInput, setSaveNameInput] = useState('');
     const [savingScript, setSavingScript] = useState(false);
 
     const busy = running || fetching;
 
-    function handleConnected(connName?: string) {
+    async function handleConnected(connName?: string, activeDriver?: string) {
         setConnected(true);
         onConnectedChange(true);
+        setDriver(activeDriver);
         setStatus(connName ? `conectado: ${connName}` : 'conectado');
+        // Catálogo completo pro autocomplete (ListTables é lazy por schema,
+        // como a Sidebar usa). Barato: o schema cache do backend (TTL 15min)
+        // evita round-trip ao banco a cada schema.
+        try {
+            const schemas = await ListSchemas(tabId);
+            const lists = await Promise.all((schemas ?? []).map(schema => ListTables(tabId, schema)));
+            const shallow = lists.flatMap(tables => tables ?? []);
+            // ListTables só traz Schema/Name (sem Columns) — enriquece cada
+            // tabela via IntrospectTable em paralelo antes de gravar o
+            // catálogo, para o autocomplete de colunas funcionar. Falha
+            // individual não derruba o catálogo: mantém a entrada rasa.
+            const detailed = await Promise.all(shallow.map(async table => {
+                try {
+                    const full = await IntrospectTable(tabId, table.Schema, table.Name);
+                    return full ?? table;
+                } catch (tableErr) {
+                    console.error(`erro ao introspectar ${table.Schema}.${table.Name} para autocomplete:`, tableErr);
+                    return table;
+                }
+            }));
+            setCatalog(detailed);
+        } catch (err) {
+            // Não falha a conexão por causa do catálogo de autocomplete, mas
+            // não engole o erro — autocomplete sem dados fica silencioso pro
+            // usuário, então pelo menos loga pra investigação futura.
+            console.error('erro ao carregar catálogo para autocomplete:', err);
+            setCatalog([]);
+        }
     }
 
     function handleError(err: string) {
@@ -59,6 +91,8 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange}: Props) {
         setStatus('desconectado');
         setColumns([]);
         setRows([]);
+        setCatalog([]);
+        setDriver(undefined);
         setHasMore(false);
         setDurationMs(null);
     }
@@ -243,7 +277,8 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange}: Props) {
                             onChange={setQuery}
                             onRunRequested={() => handleRun()}
                             onRunSelectionRequested={text => handleRun(text)}
-                            readOnly={!connected}
+                            catalog={catalog}
+                            driver={driver}
                         />
                     </div>
                     <div className="editor-actions">

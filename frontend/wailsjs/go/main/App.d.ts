@@ -20,6 +20,8 @@ export function FetchRows(arg1:string,arg2:number):Promise<main.FetchBatch>;
 
 export function GetQueryHistory(arg1:number):Promise<Array<store.QueryHistoryEntry>>;
 
+export function IntrospectTable(arg1:string,arg2:string,arg3:string):Promise<db.Table>;
+
 export function ListSavedConnections():Promise<Array<store.SavedConnection>>;
 
 export function ListSchemas(arg1:string):Promise<Array<string>>;
