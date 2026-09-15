@@ -85,4 +85,4 @@ See `CONTRIBUTING.md`.
 
 ## License
 
-Not yet decided — check back before depending on this project in production.
+[MIT](LICENSE).
