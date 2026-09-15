@@ -1,26 +1,26 @@
-# ADR 0002 — Política de CGO: evitar por padrão, exceção documentada para DuckDB
+# ADR 0002 — CGO policy: avoid by default, documented exception for DuckDB
 
-**Status:** Aceito
-**Data:** 2026-09-14
+**Status:** Accepted
+**Date:** 2026-09-14
 
-## Contexto
-A proposta original definia "evitar CGO" como regra absoluta, para simplificar cross-compilation (Linux/macOS/Windows × amd64/arm64). Verificação prática (busca na documentação oficial, setembro/2026) mostrou que:
+## Context
+The original proposal set "avoid CGO" as an absolute rule, to simplify cross-compilation (Linux/macOS/Windows × amd64/arm64). A practical check (official documentation, September 2026) showed that:
 
-- `pgx` (Postgres), `clickhouse-go` (ClickHouse), `go-sql-driver/mysql` (MySQL) e `modernc.org/sqlite` (SQLite, transpilado de C para Go) são **100% Go, sem CGO**.
-- `go-duckdb` (marcboeker) e seu sucessor oficial `duckdb/duckdb-go` **exigem CGO** — linkam contra `libduckdb` nativa. Não existe hoje driver DuckDB Go puro e maduro. Cross-compile exige `CGO_ENABLED=1` + toolchain C cruzada (`CC=...`) por combinação de OS/arch.
-- DuckDB está no escopo da Fase 1 (MVP), então a regra absoluta "sem CGO" quebraria no primeiro milestone.
+- `pgx` (Postgres), `clickhouse-go` (ClickHouse), `go-sql-driver/mysql` (MySQL), and `modernc.org/sqlite` (SQLite, transpiled from C to Go) are **100% Go, no CGO**.
+- `go-duckdb` (marcboeker) and its official successor `duckdb/duckdb-go` **require CGO** — they link against the native `libduckdb`. No mature, pure-Go DuckDB driver exists today. Cross-compiling requires `CGO_ENABLED=1` plus a cross C toolchain (`CC=...`) per OS/arch combination.
+- DuckDB is in the Phase 1 (MVP) scope, so the absolute "no CGO" rule would break at the very first milestone.
 
-## Decisão
-- **Regra geral**: preferir sempre driver 100% Go quando existir opção madura e mantida.
-- **Exceção documentada**: DuckDB é CGO obrigatório. Isso é aceito porque é a única exceção da matriz, não o padrão.
-- **Estratégia de build**: builds de release com suporte a DuckDB rodam em **runners nativos por OS** (GitHub Actions macOS/Linux/Windows), evitando cross-compile forçado sempre que possível. Cross-compile cruzado (`CGO_ENABLED=1` + `CC` cruzado) só é usado se surgir necessidade de arch não coberta por runner nativo (ex. Linux ARM64 a partir de runner amd64).
-- SQLite do **store interno** do Wisp (conexões, histórico, cache) usa `modernc.org/sqlite` (sem CGO) — não usa CGO mesmo indiretamente, mantendo o binário base do app livre de CGO exceto quando o usuário conecta a um DuckDB.
+## Decision
+- **General rule**: always prefer a 100% Go driver when a mature, maintained option exists.
+- **Documented exception**: DuckDB requires CGO. This is accepted because it's the only exception in the matrix, not the norm.
+- **Build strategy**: release builds with DuckDB support run on **native per-OS runners** (GitHub Actions macOS/Linux/Windows), avoiding forced cross-compilation whenever possible. Cross cross-compilation (`CGO_ENABLED=1` + a cross `CC`) is only used if a need arises for an arch not covered by a native runner (e.g. Linux ARM64 from an amd64 runner).
+- Wisp's **internal store** SQLite uses `modernc.org/sqlite` (no CGO) — the app's base binary stays CGO-free even indirectly, except when the user connects to a DuckDB database.
 
-## Alternativas consideradas
-- **Remover DuckDB do escopo**: rejeitado — é um requisito explícito do produto (suporte a bancos analíticos modernos).
-- **Aguardar driver DuckDB puro Go**: não existe previsão; bloquear o roadmap nisso não é razoável.
+## Alternatives considered
+- **Remove DuckDB from scope**: rejected — it's an explicit product requirement (support for modern analytical databases).
+- **Wait for a pure-Go DuckDB driver**: no timeline exists; blocking the roadmap on that isn't reasonable.
 
-## Consequências
-- CI precisa de matriz de build com runners nativos por OS, não só `GOOS=... go build` cross-platform simples.
-- Binário com suporte a DuckDB é maior e depende de `libduckdb` estática por plataforma — aumenta tamanho de distribuição.
-- Se o driver DuckDB puro Go amadurecer no futuro, revisar este ADR.
+## Consequences
+- CI needs a build matrix with native per-OS runners, not just a simple cross-platform `GOOS=... go build`.
+- The DuckDB-enabled binary is larger and depends on a static `libduckdb` per platform — increases distribution size.
+- If a mature pure-Go DuckDB driver appears in the future, revisit this ADR.

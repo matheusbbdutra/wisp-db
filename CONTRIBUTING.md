@@ -1,19 +1,23 @@
-# Contribuindo com o Wisp
+# Contributing to Wisp
 
-## Antes de começar
-1. Leia `docs/ARCHITECTURE.md` e os ADRs em `docs/adr/`.
-2. Leia `STATE.md` para saber o que já foi decidido e o que está em andamento.
-3. Leia `CLAUDE.md` se estiver usando um agente de IA para contribuir — ele define as regras específicas do projeto.
+## Before you start
 
-## Fluxo de trabalho
-1. Toda mudança que altere uma decisão listada em `CLAUDE.md` ou `docs/adr/` precisa de um ADR novo (`docs/adr/000N-titulo.md`), não só um comentário no código.
-2. PRs pequenos e focados — uma mudança lógica por PR.
-3. Antes de abrir PR: `gofmt`/`goimports` no backend, lint padrão do frontend, e os itens da "Definição de pronto" em `CLAUDE.md`.
+1. Read `docs/ARCHITECTURE.md` and the ADRs in `docs/adr/`.
+2. Read `STATE.md` to see what's already decided and what's in progress.
+3. Read `CLAUDE.md` if you're using an AI agent to contribute — it defines the project's specific rules. Note: `CLAUDE.md` and `STATE.md` are written in Brazilian Portuguese (the maintainer's working language for internal notes); the public-facing docs (this file, `README.md`, `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`, ADRs) are in English.
 
-## Testes
-- Testes contra drivers de banco: usar instância real (Docker local, ex. `docker run postgres`), nunca mock puro para validar comportamento de driver — mocks escondem divergência de comportamento real do dialeto.
-- Não escrever teste unitário para código que ainda não existe (regra global do projeto).
+## Workflow
 
-## Estrutura de commits
-- Mensagens em PT-BR, descrevendo o "porquê", não só o "o quê".
-- Referenciar o ADR relacionado quando a mudança implementar uma decisão documentada (ex. `Implementa ADR 0002: build matrix para DuckDB`).
+1. Any change that revisits a decision listed in `CLAUDE.md` or `docs/adr/` needs a new ADR (`docs/adr/000N-title.md`), not just a code comment.
+2. Small, focused PRs — one logical change per PR.
+3. Before opening a PR: `gofmt`/`goimports` on the backend, the frontend's standard lint, and the "Definition of done" checklist in `CLAUDE.md`.
+
+## Tests
+
+- Tests against database drivers: use a real instance (local Docker, e.g. `docker compose -f testdata/docker-compose.yml up -d` for Postgres, a real temp-file SQLite database for SQLite) — never a pure mock to validate driver behavior. Mocks hide real dialect-behavior divergence.
+- Don't write a unit test for code that doesn't exist yet (project-wide rule).
+
+## Commit structure
+
+- Commit messages describing the "why", not just the "what".
+- Reference the related ADR when a change implements a documented decision (e.g. `Implement ADR 0002: build matrix for DuckDB`).

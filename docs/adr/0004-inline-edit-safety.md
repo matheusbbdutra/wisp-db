@@ -1,22 +1,22 @@
-# ADR 0004 — Edição inline de células: escopo restrito por segurança de dados
+# ADR 0004 — Inline cell editing: scope restricted for data safety
 
-**Status:** Aceito
-**Data:** 2026-09-14
+**Status:** Accepted
+**Date:** 2026-09-14
 
-## Contexto
-Edição inline no grid (gerar `UPDATE` automático a partir de uma célula editada) é a maior fonte potencial de corrupção silenciosa de dados de todo o produto: tabelas sem PK, PKs compostas, colunas geradas/computed e concorrência (outro processo alterando a linha entre o fetch e o save) são casos reais, não hipotéticos.
+## Context
+Inline grid editing (auto-generating an `UPDATE` from an edited cell) is the single largest potential source of silent data corruption in the whole product: tables without a PK, composite PKs, generated/computed columns, and concurrency (another process changing the row between fetch and save) are real cases, not hypothetical ones.
 
-## Decisão
-1. **Habilitação por capability, não por heurística.** Ao carregar metadados da tabela, backend marca `isEditable: bool` com base em PK real do catálogo (simples ou composta). Nunca assumir unicidade por nome de coluna (ex. tratar `id` como PK sem checar constraint real).
-2. **Colunas geradas/computed são sempre read-only**, detectadas via metadados de catálogo (`GENERATED ALWAYS AS` no Postgres, equivalentes por dialeto).
-3. **Preview do SQL antes de commitar**: o `UPDATE` gerado é mostrado ao usuário (popover/confirmação) antes de executar — nunca silencioso.
-4. **Checagem otimista de concorrência**: `WHERE pk = ? AND coluna_antiga = ?` usando o valor lido no momento do fetch, não só a PK. Se `0 rows affected`, avisar o usuário explicitamente em vez de assumir sucesso.
-5. Tabela sem PK detectável: grid fica **read-only com aviso visível**, nunca falha silenciosa após tentativa de salvar.
+## Decision
+1. **Enabled by capability, not by heuristic.** When loading table metadata, the backend marks `isEditable: bool` based on a real PK from the catalog (simple or composite). Never assume uniqueness by column name (e.g. treating `id` as a PK without checking the real constraint).
+2. **Generated/computed columns are always read-only**, detected via catalog metadata (`GENERATED ALWAYS AS` in Postgres, per-dialect equivalents).
+3. **SQL preview before committing**: the generated `UPDATE` is shown to the user (popover/confirmation) before running — never silent.
+4. **Optimistic concurrency check**: `WHERE pk = ? AND old_column = ?` using the value read at fetch time, not just the PK. If `0 rows affected`, explicitly warn the user instead of assuming success.
+5. Table with no detectable PK: the grid stays **read-only with a visible notice**, never a silent failure after a save attempt.
 
-## Alternativas consideradas
-- **Edição livre sem checagem de PK**: rejeitado — risco de corrupção silenciosa incompatível com um cliente de produção.
-- **Parser SQL próprio para inferir PK/unicidade**: rejeitado — decisão já fixada de não construir parser customizado (ver ARCHITECTURE.md); catálogo nativo do banco já expõe essa informação de forma confiável.
+## Alternatives considered
+- **Free editing without a PK check**: rejected — silent-corruption risk incompatible with a production client.
+- **Custom SQL parser to infer PK/uniqueness**: rejected — already-fixed decision not to build a custom parser (see `ARCHITECTURE.md`); the database's native catalog already exposes this information reliably.
 
-## Consequências
-- Escopo da Fase 3 é deliberadamente restrito: só tabelas com PK simples/composta detectável entram no MVP de edição inline.
-- Exige que o `DatabaseDriver` (Strategy) exponha introspecção de PK e de colunas geradas por dialeto — isso vira parte do contrato da interface, não opcional.
+## Consequences
+- Phase 3's scope is deliberately restricted: only tables with a detectable simple/composite PK enter the inline-editing MVP.
+- Requires the `DatabaseDriver` (Strategy) to expose PK and generated-column introspection per dialect — this becomes part of the interface contract, not optional.

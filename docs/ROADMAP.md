@@ -1,77 +1,56 @@
 # Wisp — Roadmap
 
-Ver `docs/ARCHITECTURE.md` e ADRs em `docs/adr/` para o racional de cada decisão citada aqui.
+See `docs/ARCHITECTURE.md` and the ADRs in `docs/adr/` for the rationale behind each decision cited here.
 
-## Fase 1 — MVP funcional ✅ concluída (2026-09-15)
-- ✅ Conexão nativa com PostgreSQL e SQLite local (DuckDB ainda não implementado, ver ADR 0002).
-- ✅ Execução de queries com `tabId` dedicado e cancelamento real nativo (não só ctx local — ver memória `pgx-context-cancel-closes-connection`).
-- ✅ Grid virtualizado (Glide Data Grid), fetch em streaming real (cursor, não full-scan), paginação configurável (default 200, "Carregar mais").
-- ✅ Local Store SQLite: conexões cifradas, histórico de queries.
-- ✅ **Critério de performance medido de verdade**: RAM idle ~158-164MB (meta <500MB).
+## Phase 1 — Functional MVP ✅ complete (2026-09-15)
+- ✅ Native connection to PostgreSQL and local SQLite (DuckDB not implemented yet, see ADR 0002).
+- ✅ Query execution with a dedicated `tabId` and real native cancellation (not just a local ctx — see the `pgx-context-cancel-closes-connection` note).
+- ✅ Virtualized grid (Glide Data Grid), real streaming fetch (cursor-based, not a full scan), configurable pagination (default 200, "Load more").
+- ✅ Local SQLite store: encrypted connections, query history.
+- ✅ **Performance target actually measured**: idle RAM ~158-164MB (target was <500MB).
 
-## Fase 2 — Produtividade & Autocomplete
-- ✅ Sidebar com árvore lazy de schemas/tabelas.
-- ✅ Schema cache em duas camadas, TTL + invalidação manual/DDL.
-- ✅ Histórico de queries persistido, painel na UI.
-- ✅ Autocomplete no Monaco via schema cache — concluído em 2026-09-15 (schemas, tabelas, colunas, keywords, funções por dialeto, narrowing por ponto).
-- ✅ Formatação de SQL (pretty-print) — concluída em 2026-09-15: botão "Formatar" na toolbar do `ConsoleTab.tsx` via lib `sql-formatter` (ver ADR 0005).
+## Phase 2 — Productivity & Autocomplete
+- ✅ Sidebar with a lazy schema/table tree.
+- ✅ Two-tier schema cache, TTL + manual/DDL invalidation.
+- ✅ Persisted query history, UI panel.
+- ✅ Monaco autocomplete via the schema cache — completed 2026-09-15 (schemas, tables, columns, keywords, per-dialect functions, dot-narrowing).
+- ✅ SQL formatting (pretty-print) — completed 2026-09-15: a "Format" button in `ConsoleTab.tsx`'s toolbar via the `sql-formatter` lib (see ADR 0005).
 
-## Fase 2.5 — Multi-console e organização ✅ concluída (2026-09-15)
-- ✅ Múltiplas abas/consoles (Session Manager isola por `tabId`, UI de tabs em `App.tsx`/`ConsoleTab.tsx`).
-- ✅ Salvar scripts SQL nomeados (diferente do histórico automático) — `ScriptsPanel.tsx`.
+## Phase 2.5 — Multi-console and organization ✅ complete (2026-09-15)
+- ✅ Multiple tabs/consoles (Session Manager isolates by `tabId`, tab UI in `App.tsx`/`ConsoleTab.tsx`).
+- ✅ Saving named SQL scripts (distinct from automatic history) — `ScriptsPanel.tsx`.
 
-## Fase 2.6 — Exploração de schema / View Data + Copiar ✅ concluída (2026-09-15)
-- ✅ Edição inline de células — ADR 0004, com PK real via introspecção (nunca heurística), checagem otimista de concorrência.
-- ✅ Tabela como aba própria (Dados/DDL/Triggers/Funções por tabela), Schema como aba própria (lista de tabelas), abre por ↗ ou Ctrl+click (sidebar e dentro do editor SQL).
-- ✅ Copiar especial no grid de resultados (célula/linha/seleção, CSV/INSERT SQL/Markdown).
-- ✅ **Release v0.1.0-beta.1 publicada** (github.com/matheusbbdutra/wisp-db).
+## Phase 2.6 — Schema exploration / View Data + Copy ✅ complete (2026-09-15)
+- ✅ Inline cell editing — ADR 0004, with a real PK via introspection (never a heuristic), optimistic concurrency check.
+- ✅ Table as its own tab (Data/DDL/Triggers/Functions/Columns per table), Schema as its own tab (table list), opened via ↗ or Ctrl+click (in the sidebar and inside the SQL editor).
+- ✅ Special copy in the result grid (cell/row/selection, CSV/INSERT SQL/Markdown).
+- ✅ **`v0.1.0-beta.1` through `v0.1.0-beta.3` released** (github.com/matheusbbdutra/wisp-db).
 
-## Fase 3 — Fechar o gap de migração DBeaver (próxima leva, priorizada em 2026-09-15)
-Análise feita via Cursor Agent + OpenCode (independentes) + ponderação própria —
-ver memória `wisp-next-features-analysis-2026-09-15`. Convergência das duas
-análises: o maior gap restante pra substituir o DBeaver no dia a dia não é
-integração com agentes nem query builder, é exploração de objetos + ergonomia
-de inspeção de dados. Ordem sugerida (a confirmar com o usuário antes de
-implementar cada item):
-1. **Índices, FKs e distinguir Views de tabelas** na exploração de schema — hoje `ListTables`/`TableDDL` não expõem isso; é o que mais se sente faltando ao abrir uma tabela desconhecida. Esforço médio, risco baixo/médio.
-2. **Ganhos rápidos de ergonomia**: visor de valor de célula pra texto longo/JSON(B) hoje truncado no grid; filtro rápido na TableTab; busca na árvore da sidebar (schemas com muitas tabelas). Todos pequenos, risco baixo.
-3. **EXPLAIN / plano de execução** (v1 textual, `EXPLAIN ANALYZE` renderizado — sem grafo visual ainda).
-4. **INSERT/DELETE de linha no grid** (fecha o ciclo da edição inline/ADR 0004 — hoje só `UpdateCell`). Mesmas regras de PK real e preview; sem PK, read-only. Risco médio.
-5. **Verificador de atualização** (checagem manual/ao abrir, sem download automático): consulta a API do GitHub Releases (`/repos/.../releases/latest`), compara com a versão embutida no binário, mostra aviso com link se houver uma mais nova. Wails não tem updater nativo (diferente de Electron `autoUpdater`/Tauri updater) — escopo v1 é só avisar, nunca baixar/substituir o binário sozinho. Esforço pequeno, risco baixo (só leitura de uma API pública, sem tocar em nada crítico).
+## Phase 3 — Closing the DBeaver-migration gap (next batch, prioritized 2026-09-15)
+Analysis done via Cursor Agent + OpenCode (independently) plus the maintainer's own judgment. Both analyses converged: the biggest remaining gap to replace DBeaver day-to-day isn't agent integration or a query builder — it's object exploration and data-inspection ergonomics. Suggested order (to confirm with the maintainer before implementing each item):
+1. **Indexes, FKs, and distinguishing Views from tables** in schema exploration — `ListTables`/`TableDDL` don't expose this today; it's the thing most missed when opening an unfamiliar table. Medium effort, low/medium risk.
+2. **Quick ergonomics wins**: a value viewer for long text/JSON(B) currently truncated in the grid; a quick filter in the table tab; search in the sidebar tree (schemas with many tables). All small, low risk.
+3. **EXPLAIN / execution plan** (v1 as rendered text via `EXPLAIN ANALYZE` — no visual graph yet).
+4. **Row INSERT/DELETE in the grid** (closes the loop started by inline editing/ADR 0004 — today only `UpdateCell` exists). Same real-PK and preview rules; without a PK, read-only. Medium risk.
+5. **Update checker** (manual/on-open check, no automatic download): queries the GitHub Releases API (`/repos/.../releases/latest`), compares it against the version embedded in the binary, shows a notice with a link if a newer one exists. Wails has no built-in updater (unlike Electron's `autoUpdater`/Tauri's updater) — v1 scope is notification only, never auto-downloading/replacing the binary. Small effort, low risk (just reading a public API, nothing critical touched).
 
-**✅ Concluído fora da ordem acima** (pedido direto do usuário em 2026-09-15,
-publicado na v0.1.0-beta.2): abas de resultado (múltiplas execuções sem
-sobrescrever resultado anterior, limite 10), fila de execução (Executar
-enfileira em vez de bloquear), painéis redimensionáveis por arrasto
-(sidebar, split editor/grid). Ver memória `wisp-result-tabs-queue-resizable-panels`.
+**✅ Completed out of order** (direct maintainer request on 2026-09-15, shipped in `v0.1.0-beta.2`/`v0.1.0-beta.3`): result tabs (running another query never overwrites the previous result), an execution queue (running a query queues it instead of blocking the UI while another runs), resizable panels via drag (sidebar, editor/grid split), and a real "conn busy" concurrency fix that serializes every backend call per tab.
 
-Fora da próxima leva, mas registrado por diverger entre as duas análises (não
-descartado, só sem evidência de demanda ainda):
-- **Driver MySQL** (ou outro dialeto): o projeto é open source e vai crescer
-  além do uso do autor (hoje só Postgres/SQLite), então isso deve voltar à
-  mesa conforme aparecer demanda real de outros usuários — não implementar
-  especulativamente antes disso.
-- **Transação explícita** (toggle de autocommit, commit/rollback manual): a
-  análise mais aprofundada (OpenCode) marcou como o item de maior risco
-  arquitetural do lote — mexe em invariante do Session Manager (o que
-  acontece com um cursor de streaming aberto dentro de uma transação).
-  Desenhar com calma, só depois do restante da Fase 3 estabilizar.
-- Integração com agentes de terminal via servidor MCP — escopo ainda a
-  desenhar melhor; as duas análises concordam que isso não resolve nenhum
-  gap de migração do DBeaver e deve ficar em exploração, não na fila ativa.
-- Exportador de datasets grandes (CSV, JSON, Parquet) — as duas análises
-  divergiram na prioridade (uma diz subir, outra diz manter baixo por já
-  haver cópia especial pra área de transferência); mantido como baixa
-  prioridade até haver sinal mais forte de uso real.
+Outside the next batch, but recorded because the two analyses diverged on it (not dropped, just no evidence of demand yet):
+- **MySQL driver** (or another dialect): the project is open source and will grow beyond the maintainer's own use (Postgres/SQLite only today), so this should come back on the table once real demand from other users appears — don't implement speculatively before that.
+- **Explicit transactions** (autocommit toggle, manual commit/rollback): the deeper analysis (OpenCode) flagged this as the highest architectural risk item in the batch — it touches a Session Manager invariant (what happens to an open streaming cursor inside a transaction). Design carefully, only once the rest of Phase 3 has settled.
+- Terminal-agent integration via an MCP server exposed by Wisp — scope still needs proper design; both analyses agree this solves no DBeaver-migration gap and should stay exploratory, not in the active queue.
+- Large dataset exporter (CSV, JSON, Parquet) — the two analyses diverged on priority (one says raise it, the other says keep it low since special-copy to clipboard already covers most real usage); kept as low priority until a stronger usage signal appears.
+- **UI translation to English (i18n)**: the app's interface (buttons, labels, messages) is currently Brazilian Portuguese throughout. As the project goes open source, this should move to English (or a language switcher) in a dedicated phase — needs a full string inventory first; not a small change. Public docs (this roadmap, `README.md`, `ARCHITECTURE.md`, ADRs) are already in English as of 2026-09-15; `CLAUDE.md`/`STATE.md` stay in Portuguese (internal working notes).
 
-## Fase 4+ — Explorações futuras (não comprometidas)
-- Query builder visual (Strategy por dialeto SQL) — as duas análises da Fase 3 concordam: irrelevante pra quem já escreve SQL, só entra em planejamento real após a Fase 3 estável e com demanda validada.
-- Busca semântica sobre histórico de queries (`sqlite-vec`, nunca serviço vetorial externo) — só se houver demanda real validada.
-- Sync de conexões salvas entre dispositivos (reabriria avaliação de Turso) — só se houver demanda real validada.
-- **Túnel SSH integrado no fluxo de conexão** (`crypto/ssh`) — o projeto já será open source (não é um "se"), mas isso não torna a feature urgente: o primeiro usuário é o próprio autor, que já tem VPN cobrindo o acesso a bancos atrás de firewall. Fica na fila, despriorizada até haver demanda real (própria ou de outro usuário do projeto).
-- DuckDB (ADR 0002) — CGO + CI nativa por OS é esforço grande; só entra em planejamento real se surgir um caso de uso analítico de verdade, não como "substituto do DBeaver".
+## Phase 4+ — Future explorations (not committed)
+- Visual query builder (Strategy per SQL dialect) — both Phase 3 analyses agree: irrelevant for people who already write SQL, only enters real planning once Phase 3 is stable and demand is validated.
+- Semantic search over query history (`sqlite-vec`, never an external vector service) — only with real validated demand.
+- Syncing saved connections across devices (would reopen the Turso evaluation) — only with real validated demand.
+- **SSH tunnel built into the connection flow** (`crypto/ssh`) — the project will be open source regardless (that's a given, not a condition), but that alone doesn't make the feature urgent: the first user is the maintainer, who already has a VPN covering access to databases behind a firewall. Stays queued, deprioritized until real demand appears (the maintainer's own, or another project user's).
+- DuckDB (ADR 0002) — native per-OS CI is a large effort; only enters real planning if a genuine analytical use case shows up, not as a "DBeaver replacement".
 
-## Fora de escopo (decisão ativa, não esquecimento)
-- Aceleração por GPU em pipeline de dados — nenhum hot path identificado.
-- Parser SQL customizado.
-- Qualquer dependência de rede para funcionalidade core (o app funciona 100% offline exceto pela própria conexão ao banco do usuário).
+## Out of scope (an active decision, not an oversight)
+- GPU acceleration in the data pipeline — no identified hot path.
+- Custom SQL parser.
+- Any network dependency for core functionality (the app works 100% offline except for the user's own database connection).

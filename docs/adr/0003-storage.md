@@ -1,52 +1,36 @@
-# ADR 0003 — Storage interno: SQLite (não JSON, não Turso), sem vetor
+# ADR 0003 — Internal storage: SQLite (not JSON, not Turso), no vector search
 
-**Status:** Aceito
-**Data:** 2026-09-14
+**Status:** Accepted
+**Date:** 2026-09-14
 
-## Contexto
-O Wisp precisa persistir localmente: conexões salvas (com credenciais), histórico de queries executadas, e cache de metadados de schema (catálogo de tabelas/colunas por conexão).
+## Context
+Wisp needs to persist locally: saved connections (with credentials), executed query history, and schema metadata cache (table/column catalog per connection).
 
-## Decisão
-- **SQLite via `modernc.org/sqlite`** (puro Go, sem CGO) para todo o store interno.
-- **Não JSON solto em disco**: falta atomicidade transacional (risco de corrupção em crash no meio de um write) e não escala bem para consulta filtrada (histórico por data/conexão/status).
-- **Não Turso/libSQL**: Turso resolve sync distribuído/multi-réplica, cenário que não existe no escopo atual (app é local, single-user, single-process). Adotá-lo introduziria dependência de rede e complexidade operacional sem necessidade real.
-- **Sem busca vetorial/embeddings** no cache de schema: a busca de tabelas/colunas é exata ou prefix-match; FTS5 nativo do SQLite cobre busca fuzzy por nome se necessário. Embeddings adicionariam custo de geração/indexação sem ganho no caso de uso.
+## Decision
+- **SQLite via `modernc.org/sqlite`** (pure Go, no CGO) for the entire internal store.
+- **Not loose JSON on disk**: lacks transactional atomicity (risk of corruption on a crash mid-write) and doesn't scale well for filtered queries (history by date/connection/status).
+- **Not Turso/libSQL**: Turso solves distributed/multi-replica sync, a scenario that doesn't exist in the current scope (the app is local, single-user, single-process). Adopting it would introduce a network dependency and operational complexity with no real need.
+- **No vector search/embeddings** in the schema cache: table/column search is exact or prefix-match; SQLite's native FTS5 covers fuzzy name search if ever needed. Embeddings would add generation/indexing cost with no gain for this use case.
 
-## Schema inicial (referência, sujeito a migração)
+## Initial schema (reference, subject to migration)
 ```sql
 connections(id, name, driver, host, port, database, username, encrypted_secret, ssh_tunnel_config, created_at)
 query_history(id, connection_id, tab_id, query_text, executed_at, duration_ms, status, row_count)
 schema_cache(connection_id, catalog_json, fetched_at, ttl_expires_at)
 ```
-- `encrypted_secret`: cifrado com chave derivada; chave mestra fica no keychain do SO (`go-keyring` ou equivalente), nunca em texto plano no SQLite.
-- `catalog_json`: blob JSON por conexão — aceitável aqui porque é write-once/read-often por conexão, não uma entidade relacional com múltiplos writers concorrentes.
+- `encrypted_secret`: encrypted with a derived key; the master key lives in the OS keychain (`go-keyring` or equivalent), never in plaintext in SQLite.
+- `catalog_json`: a per-connection JSON blob — acceptable here because it's write-once/read-often per connection, not a relational entity with multiple concurrent writers.
 
-## Atualização 2 (schema cache, 2026-09-14)
-`schema_cache` também mudou do rascunho original: em vez de `connection_id
-TEXT PRIMARY KEY REFERENCES connections(id)`, a chave é `cache_key` — um
-hash SHA-256 de `driver|dsn` (ver `internal/schemacache.Key`), sem FK.
-Motivo: conexões ad-hoc (por DSN direta, sem `SaveConnection`) também se
-beneficiam de cache, e não têm `connection_id`. Implementado em
-`internal/schemacache` (cache em duas camadas: memória + `Store`, TTL de 15
-minutos, invalidação manual e por DDL detectado — ver `app.go`, `isDDL`).
-Validado com execução real: hit/miss, persistência entre "reinícios"
-simulados do app, expiração por TTL e invalidação manual/propagada.
+## Update 2 (schema cache, 2026-09-14)
+`schema_cache` also changed from the original draft: instead of `connection_id TEXT PRIMARY KEY REFERENCES connections(id)`, the key is `cache_key` — a SHA-256 hash of `driver|dsn` (see `internal/schemacache.Key`), with no FK. Reason: ad-hoc connections (via a direct DSN, without `SaveConnection`) also benefit from caching, and they have no `connection_id`. Implemented in `internal/schemacache` (two-tier cache: memory + `Store`, 15-minute TTL, manual invalidation and invalidation on detected DDL — see `app.go`, `isDDL`). Validated with real execution: hit/miss, persistence across simulated app "restarts", TTL expiration, and manual/propagated invalidation.
 
-## Atualização (implementação real, 2026-09-14)
-O schema de `connections` implementado difere do rascunho acima: em vez de
-`host/port/database/username` separados, a **DSN completa é cifrada como um
-único campo** (`encrypted_secret`). Decisão pragmática — decompor a DSN por
-dialeto (Postgres, SQLite, futuramente ClickHouse/MySQL têm formatos bem
-diferentes) é trabalho específico por driver sem ganho real para o MVP.
-Reabrir isso só se surgir necessidade real de editar um campo individual
-(ex. trocar só a senha) sem redigitar a DSN inteira. Ver `internal/store/store.go`
-e `internal/vault/vault.go` (cifragem ChaCha20-Poly1305, chave no keychain do
-SO via `go-keyring`, validado neste sistema com Secret Service/gnome-keyring).
+## Update (real implementation, 2026-09-14)
+The implemented `connections` schema differs from the draft above: instead of separate `host/port/database/username`, the **full DSN is encrypted as a single field** (`encrypted_secret`). A pragmatic decision — decomposing the DSN per dialect (Postgres, SQLite, and eventually ClickHouse/MySQL have quite different formats) is driver-specific work with no real gain for the MVP. Only reopen this if a real need shows up to edit a single field (e.g. changing just the password) without retyping the whole DSN. See `internal/store/store.go` and `internal/vault/vault.go` (ChaCha20-Poly1305 encryption, master key in the OS keychain via `go-keyring`, validated on this system with Secret Service/gnome-keyring).
 
-## Reabertura futura (fora de escopo agora)
-- Se surgir necessidade real de **sync de conexões salvas entre dispositivos**, revisar Turso como opção nesse momento — não antes.
-- Se surgir necessidade real de **busca semântica sobre histórico de queries** (ex. "queries parecidas com esta"), considerar `sqlite-vec` (extensão SQLite, mesmo arquivo local) — nunca serviço vetorial externo, para manter a filosofia de app local sem dependência de rede.
+## Future reopening (out of scope for now)
+- If a real need for **syncing saved connections across devices** appears, revisit Turso as an option at that point — not before.
+- If a real need for **semantic search over query history** appears (e.g. "queries similar to this one"), consider `sqlite-vec` (a SQLite extension, still a local file) — never an external vector service, to keep the local-app-with-no-network-dependency philosophy.
 
-## Consequências
-- Um único arquivo `.db` local concentra todo o estado do app — backup/restore trivial (copiar o arquivo).
-- Exige rotina de migração de schema (versionamento de `schema_cache`/`connections`) conforme o produto evolui.
+## Consequences
+- A single local `.db` file holds the app's entire state — trivial backup/restore (copy the file).
+- Requires a schema migration routine (`schema_cache`/`connections` versioning) as the product evolves.
