@@ -3,10 +3,10 @@
 -- coluna gerada, JSON/XML, índices, FKs, triggers, funções, views, múltiplos
 -- schemas) — ver docs/adr/0004-inline-edit-safety.md e docs/ROADMAP.md
 -- (Phase 3, itens 1 e 2). Só roda automaticamente na PRIMEIRA inicialização
--- do container (docker-entrypoint-initdb.d) — num container já existente,
--- aplique via `docker exec wisp-postgres-test psql -U wisp -d wisp_test -f -
--- < testdata/postgres-seed.sql` (idempotente, todo CREATE tem IF NOT EXISTS
--- ou DROP...IF EXISTS antes).
+-- do container (docker-entrypoint-initdb.d). Reaplicar sobre um container
+-- já inicializado NÃO é suportado: o seed não é idempotente nem migra tabelas.
+-- Recrie sempre do zero (apaga os dados e volumes dos bancos de teste):
+-- docker compose -f testdata/docker-compose.yml down -v && docker compose -f testdata/docker-compose.yml up -d
 
 -- ---------------------------------------------------------------------
 -- Schema public: casos básicos de introspecção (PK simples/composta/coluna

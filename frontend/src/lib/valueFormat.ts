@@ -32,42 +32,45 @@ function prettyJSON(raw: string): string {
     }
 }
 
-// Serializa o DOM parseado com indentação de 2 espaços por nível — o
-// DOMParser nativo não tem um "pretty serializer" embutido (diferente de
-// libs XML de outras linguagens), então a indentação é reconstruída à mão
-// a partir da árvore, ignorando nós de texto vazios (só whitespace).
+// Conteúdo misto e espaços explicitamente preservados ficam intactos:
+// inserir indentação nesses casos pode alterar o valor XML.
 function prettyXML(raw: string): string {
     try {
         const doc = new DOMParser().parseFromString(raw, 'application/xml');
-        if (doc.querySelector('parsererror') || !doc.documentElement) {
-            return raw;
-        }
+        if (doc.querySelector('parsererror') || !doc.documentElement) return raw;
+        if (raw.includes('<?') || doc.doctype) return raw;
+        const elements = Array.from(doc.getElementsByTagName('*'));
+        if (elements.some(el => {
+            const children = Array.from(el.childNodes);
+            return el.getAttribute('xml:space') === 'preserve' ||
+                (children.some(c => c.nodeType === Node.ELEMENT_NODE) &&
+                    children.some(c => c.nodeType === Node.CDATA_SECTION_NODE ||
+                        (c.nodeType === Node.TEXT_NODE && !!c.textContent?.trim())));
+        })) return raw;
+
+        const escapeText = (text: string): string => text.replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\r/g, '&#13;');
+        const escapeAttribute = (text: string): string => escapeText(text)
+            .replace(/"/g, '&quot;').replace(/\n/g, '&#10;').replace(/\t/g, '&#9;');
         const serialize = (node: Node, depth: number): string => {
             const indent = '  '.repeat(depth);
-            if (node.nodeType === Node.TEXT_NODE) {
-                const text = node.textContent?.trim();
-                return text ? `${indent}${text}\n` : '';
-            }
-            if (node.nodeType !== Node.ELEMENT_NODE) {
-                return '';
-            }
+            if (node.nodeType === Node.TEXT_NODE) return escapeText(node.textContent ?? '');
+            if (node.nodeType === Node.CDATA_SECTION_NODE) return `<![CDATA[${node.textContent ?? ''}]]>`;
+            if (node.nodeType === Node.COMMENT_NODE) return `<!--${node.textContent ?? ''}-->`;
+            if (node.nodeType !== Node.ELEMENT_NODE) return '';
             const el = node as Element;
-            const attrs = Array.from(el.attributes).map(a => ` ${a.name}="${a.value}"`).join('');
-            const children = Array.from(el.childNodes).filter(c => !(c.nodeType === Node.TEXT_NODE && !c.textContent?.trim()));
-            if (children.length === 0) {
-                return `${indent}<${el.tagName}${attrs} />\n`;
+            const attrs = Array.from(el.attributes).map(a => ` ${a.name}="${escapeAttribute(a.value)}"`).join('');
+            const children = Array.from(el.childNodes);
+            if (children.length === 0) return `${indent}<${el.tagName}${attrs} />`;
+            if (!children.some(c => c.nodeType === Node.ELEMENT_NODE)) {
+                return `${indent}<${el.tagName}${attrs}>${children.map(c => serialize(c, 0)).join('')}</${el.tagName}>`;
             }
-            const hasElementChildren = children.some(c => c.nodeType === Node.ELEMENT_NODE);
-            if (!hasElementChildren) {
-                const text = el.textContent?.trim() ?? '';
-                return `${indent}<${el.tagName}${attrs}>${text}</${el.tagName}>\n`;
-            }
-            let out = `${indent}<${el.tagName}${attrs}>\n`;
-            children.forEach(c => { out += serialize(c, depth + 1); });
-            out += `${indent}</${el.tagName}>\n`;
-            return out;
+            const content = children.filter(c => c.nodeType !== Node.TEXT_NODE)
+                .map(c => c.nodeType === Node.ELEMENT_NODE ? serialize(c, depth + 1) : `${indent}  ${serialize(c, 0)}`)
+                .join('\n');
+            return `${indent}<${el.tagName}${attrs}>\n${content}\n${indent}</${el.tagName}>`;
         };
-        return serialize(doc.documentElement, 0).trimEnd();
+        return Array.from(doc.childNodes).map(node => serialize(node, 0)).join('\n');
     } catch {
         return raw;
     }

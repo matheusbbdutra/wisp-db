@@ -417,6 +417,7 @@ func (d *SQLiteDriver) ListForeignKeys(ctx context.Context, schema, table string
 
 	byID := map[int]*ForeignKey{}
 	order := []int{}
+	actionsByID := map[int]string{}
 	for rows.Next() {
 		var id, seq int
 		var refTable string
@@ -430,6 +431,12 @@ func (d *SQLiteDriver) ListForeignKeys(ctx context.Context, schema, table string
 			fk = &ForeignKey{Name: fmt.Sprintf("fk_%d", id), RefSchema: "main", RefTable: refTable}
 			byID[id] = fk
 			order = append(order, id)
+			if onDelete != "NO ACTION" {
+				actionsByID[id] += " ON DELETE " + onDelete
+			}
+			if onUpdate != "NO ACTION" {
+				actionsByID[id] += " ON UPDATE " + onUpdate
+			}
 		}
 		if from.Valid {
 			fk.Columns = append(fk.Columns, from.String)
@@ -445,8 +452,20 @@ func (d *SQLiteDriver) ListForeignKeys(ctx context.Context, schema, table string
 	result := make([]ForeignKey, 0, len(order))
 	for _, id := range order {
 		fk := byID[id]
-		fk.Definition = fmt.Sprintf("FOREIGN KEY (%s) REFERENCES %s (%s)",
-			strings.Join(fk.Columns, ", "), fk.RefTable, strings.Join(fk.RefColumns, ", "))
+		columns := make([]string, len(fk.Columns))
+		for i, column := range fk.Columns {
+			columns[i] = quoteIdent(column)
+		}
+		fk.Definition = fmt.Sprintf("FOREIGN KEY (%s) REFERENCES %s",
+			strings.Join(columns, ", "), quoteIdent(fk.RefTable))
+		if len(fk.RefColumns) > 0 {
+			refColumns := make([]string, len(fk.RefColumns))
+			for i, column := range fk.RefColumns {
+				refColumns[i] = quoteIdent(column)
+			}
+			fk.Definition += " (" + strings.Join(refColumns, ", ") + ")"
+		}
+		fk.Definition += actionsByID[id]
 		result = append(result, *fk)
 	}
 	return result, nil

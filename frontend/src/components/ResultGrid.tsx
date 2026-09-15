@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import DataEditor, {
     CellClickedEventArgs,
     CompactSelection,
@@ -213,6 +213,20 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
     // apontando pra linha errada (ou fora dos limites, já que rowCount muda).
     // eslint-disable-next-line react-hooks/exhaustive-deps
     useEffect(() => setGridSelection(undefined), [filterText]);
+
+    const previousFilteredIndices = useRef(filteredIndices);
+    useLayoutEffect(() => {
+        const previous = previousFilteredIndices.current;
+        previousFilteredIndices.current = filteredIndices;
+        const cell = gridSelection?.current?.cell;
+        if (!cell) return;
+        const displayRow = cell[1];
+        const previousRow = previous ? previous[displayRow] : displayRow;
+        // Limpa antes da pintura se uma edição deslocar a linha selecionada no filtro.
+        if (displayRow >= rowCount || previousRow !== toOriginalRow(displayRow)) {
+            setGridSelection(undefined);
+        }
+    }, [filteredIndices, rowCount, gridSelection, toOriginalRow]);
 
     // Célula ativa do painel dockado: deriva de gridSelection.current.cell
     // (espaço visual, mesma armadilha filtro-vs-real de sempre — traduz via

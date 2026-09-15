@@ -166,3 +166,34 @@ func TestSQLiteUpdateCell(t *testing.T) {
 		t.Fatalf("rowsAffected esperado 0 (oldValue não bate mais), obtido %d", affected)
 	}
 }
+
+func TestSQLiteForeignKeyDefinitions(t *testing.T) {
+	ctx := context.Background()
+	d := newTempSQLiteDriver(t)
+	if _, err := d.Execute(ctx, `CREATE TABLE "parent table" ("key""one" INTEGER, "key two" INTEGER, PRIMARY KEY ("key""one", "key two"))`); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name       string
+		definition string
+	}{
+		{"explicit", `FOREIGN KEY ("local""one", "local two") REFERENCES "parent table" ("key""one", "key two") ON DELETE CASCADE ON UPDATE CASCADE`},
+		{"implicit", `FOREIGN KEY ("local""one", "local two") REFERENCES "parent table"`},
+		{"actions", `FOREIGN KEY ("local""one", "local two") REFERENCES "parent table" ON DELETE SET NULL ON UPDATE RESTRICT`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ddl := `CREATE TABLE ` + quoteIdent(tc.name) + ` ("local""one" INTEGER, "local two" INTEGER, ` + tc.definition + `)`
+			if _, err := d.Execute(ctx, ddl); err != nil {
+				t.Fatal(err)
+			}
+			keys, err := d.ListForeignKeys(ctx, "main", tc.name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(keys) != 1 || keys[0].Definition != tc.definition || keys[0].Name != "fk_0" || keys[0].RefSchema != "main" {
+				t.Fatalf("FK reconstruída incorretamente: %+v", keys)
+			}
+		})
+	}
+}

@@ -37,6 +37,7 @@ export default function Sidebar({tabId, connected, onSelectTable, onOpenTable, o
     // novo (tabelas de schemas ainda não expandidos, só enquanto há texto).
     const [search, setSearch] = useState('');
     const [searchLoading, setSearchLoading] = useState(false);
+    const [searchError, setSearchError] = useState('');
 
     async function handleRefresh() {
         setLoading(true);
@@ -85,6 +86,8 @@ export default function Sidebar({tabId, connected, onSelectTable, onOpenTable, o
     // Promise.all, mesma regra de qualquer loop de chamadas na mesma aba —
     // ver lib/tabApi.ts) porque a conexão da aba não suporta uso concorrente.
     useEffect(() => {
+        setSearchLoading(false);
+        setSearchError('');
         if (!search.trim() || !connected) {
             return;
         }
@@ -98,9 +101,14 @@ export default function Sidebar({tabId, connected, onSelectTable, onOpenTable, o
             try {
                 for (const schema of missing) {
                     if (cancelled) return;
-                    const tables = await ListTables(tabId, schema);
-                    if (cancelled) return;
-                    setTablesBySchema(prev => (prev[schema] ? prev : {...prev, [schema]: tables ?? []}));
+                    try {
+                        const tables = await ListTables(tabId, schema);
+                        if (cancelled) return;
+                        setTablesBySchema(prev => (prev[schema] ? prev : {...prev, [schema]: tables ?? []}));
+                    } catch {
+                        if (cancelled) return;
+                        setSearchError(prev => `${prev}${prev ? ' ' : ''}Não foi possível buscar tabelas do schema ${schema}.`);
+                    }
                 }
             } finally {
                 if (!cancelled) setSearchLoading(false);
@@ -109,6 +117,7 @@ export default function Sidebar({tabId, connected, onSelectTable, onOpenTable, o
         return () => {
             cancelled = true;
             clearTimeout(timer);
+            setSearchLoading(false);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [search, schemas, connected, tabId]);
@@ -191,6 +200,8 @@ export default function Sidebar({tabId, connected, onSelectTable, onOpenTable, o
                 />
                 {searchLoading && <span className="sidebar-search-loading">buscando…</span>}
             </div>
+
+            {searchError && <div className="sidebar-empty" role="alert">{searchError}</div>}
 
             <div className="sidebar-tree">
                 {schemas.length === 0 && !loading && (
