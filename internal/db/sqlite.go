@@ -207,6 +207,99 @@ func (d *SQLiteDriver) Introspect(ctx context.Context, schema, table string) (*T
 	return result, rows.Err()
 }
 
+// UpdateCell executa um UPDATE parametrizado de uma única célula com
+// checagem otimista de concorrência (WHERE pk = ? AND coluna_antiga = ?,
+// ver docs/adr/0004-inline-edit-safety.md). Placeholders `?` nativos do
+// driver; identificadores quotados, valores sempre como argumento — nunca
+// concatenados no SQL.
+func (d *SQLiteDriver) UpdateCell(ctx context.Context, schema, table string, pkColumns []string, pkValues []any, column string, oldValue any, newValue any) (int64, error) {
+	query, args, err := buildUpdateCellQuery("?", schema, table, pkColumns, pkValues, column, oldValue, newValue)
+	if err != nil {
+		return 0, err
+	}
+	res, err := d.conn.ExecContext(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("atualizando célula de %q: %w", table, err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("lendo linhas afetadas: %w", err)
+	}
+	return affected, nil
+}
+
+// quoteIdent quota um identificador SQL com aspas duplas, escapando aspas
+// internas por duplicação — evita injeção via nome de tabela/coluna.
+func quoteIdent(ident string) string {
+	return `"` + strings.ReplaceAll(ident, `"`, `""`) + `"`
+}
+
+// buildUpdateCellQuery monta o UPDATE parametrizado compartilhado pelos
+// dialetos: placeholder "?" (SQLite) ou "$n" (Postgres, qualquer outro
+// valor); valores NULL na checagem otimista viram IS NULL em vez de = ?
+// (NULL nunca iguala com =). A ordem dos args acompanha a numeração dos
+// placeholders: PKs, valor antigo, valor novo.
+func buildUpdateCellQuery(placeholder, schema, table string, pkColumns []string, pkValues []any, column string, oldValue any, newValue any) (string, []any, error) {
+	if table == "" {
+		return "", nil, fmt.Errorf("tabela vazia")
+	}
+	if column == "" {
+		return "", nil, fmt.Errorf("coluna vazia")
+	}
+	if len(pkColumns) == 0 {
+		return "", nil, fmt.Errorf("sem colunas de chave primária para %q", table)
+	}
+	if len(pkColumns) != len(pkValues) {
+		return "", nil, fmt.Errorf("pkColumns (%d) e pkValues (%d) divergem", len(pkColumns), len(pkValues))
+	}
+
+	next := 1
+	ph := func() string {
+		if placeholder == "?" {
+			return "?"
+		}
+		s := fmt.Sprintf("$%d", next)
+		next++
+		return s
+	}
+
+	qualified := quoteIdent(table)
+	if schema != "" && schema != "main" {
+		qualified = quoteIdent(schema) + "." + qualified
+	}
+
+	// setPh precisa ser calculado ANTES do loop do WHERE: o placeholder do
+	// SET aparece primeiro no texto final da query, e o binding posicional
+	// do driver ("?" no SQLite) segue a ordem textual dos placeholders, não
+	// a ordem de chamada em Go. args é montado na mesma ordem (newValue
+	// primeiro) pra ficar consistente nos dois estilos de placeholder.
+	setPh := ph()
+	args := []any{newValue}
+
+	var where []string
+	for i, pk := range pkColumns {
+		if pk == "" {
+			return "", nil, fmt.Errorf("nome de coluna de PK vazio")
+		}
+		if pkValues[i] == nil {
+			where = append(where, quoteIdent(pk)+" IS NULL")
+			continue
+		}
+		where = append(where, quoteIdent(pk)+" = "+ph())
+		args = append(args, pkValues[i])
+	}
+	if oldValue == nil {
+		where = append(where, quoteIdent(column)+" IS NULL")
+	} else {
+		where = append(where, quoteIdent(column)+" = "+ph())
+		args = append(args, oldValue)
+	}
+
+	query := fmt.Sprintf("UPDATE %s SET %s = %s WHERE %s",
+		qualified, quoteIdent(column), setPh, strings.Join(where, " AND "))
+	return query, args, nil
+}
+
 // scanRows converte um *sql.Rows genérico no formato de transporte comum
 // {columns, types, rows} usado por todos os drivers.
 func scanRows(rows *sql.Rows) (*QueryResult, error) {

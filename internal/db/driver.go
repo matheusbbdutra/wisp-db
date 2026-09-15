@@ -79,4 +79,12 @@ type DatabaseDriver interface {
 	ListSchemas(ctx context.Context) ([]string, error)
 	ListTables(ctx context.Context, schema string) ([]Table, error)
 	Introspect(ctx context.Context, schema, table string) (*Table, error)
+
+	// UpdateCell gera e executa um UPDATE parametrizado de uma única
+	// célula, com checagem otimista de concorrência (WHERE pk... AND
+	// coluna_antiga = ?, ver docs/adr/0004-inline-edit-safety.md).
+	// Retorna rowsAffected — 0 significa que a linha mudou entre o fetch
+	// e o save (outro processo alterou), não erro; o caller deve avisar
+	// o usuário em vez de assumir sucesso.
+	UpdateCell(ctx context.Context, schema, table string, pkColumns []string, pkValues []any, column string, oldValue any, newValue any) (rowsAffected int64, err error)
 }

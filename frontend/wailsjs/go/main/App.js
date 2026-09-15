@@ -78,6 +78,10 @@ export function TestConnection(arg1, arg2) {
   return window['go']['main']['App']['TestConnection'](arg1, arg2);
 }
 
+export function UpdateCell(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) {
+  return window['go']['main']['App']['UpdateCell'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
+}
+
 export function UpdateScript(arg1, arg2, arg3) {
   return window['go']['main']['App']['UpdateScript'](arg1, arg2, arg3);
 }

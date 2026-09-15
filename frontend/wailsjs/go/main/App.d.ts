@@ -42,4 +42,6 @@ export function SaveScript(arg1:string,arg2:string):Promise<string>;
 
 export function TestConnection(arg1:string,arg2:string):Promise<void>;
 
+export function UpdateCell(arg1:string,arg2:string,arg3:string,arg4:Array<string>,arg5:Array<any>,arg6:string,arg7:any,arg8:any):Promise<number>;
+
 export function UpdateScript(arg1:string,arg2:string,arg3:string):Promise<void>;

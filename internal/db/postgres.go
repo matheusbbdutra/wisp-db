@@ -200,3 +200,22 @@ func (d *PostgresDriver) Introspect(ctx context.Context, schema, table string) (
 	}
 	return result, rows.Err()
 }
+
+// UpdateCell executa um UPDATE parametrizado de uma única célula com
+// checagem otimista de concorrência (WHERE pk = $n AND coluna_antiga = $n,
+// ver docs/adr/0004-inline-edit-safety.md). Placeholders $1..$n nativos do
+// protocolo Postgres; valores sempre como argumento — nunca concatenados.
+func (d *PostgresDriver) UpdateCell(ctx context.Context, schema, table string, pkColumns []string, pkValues []any, column string, oldValue any, newValue any) (int64, error) {
+	if schema == "" || schema == "main" {
+		schema = "public"
+	}
+	query, args, err := buildUpdateCellQuery("$", schema, table, pkColumns, pkValues, column, oldValue, newValue)
+	if err != nil {
+		return 0, err
+	}
+	tag, err := d.conn.Exec(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("atualizando célula de %s.%s: %w", schema, table, err)
+	}
+	return tag.RowsAffected(), nil
+}

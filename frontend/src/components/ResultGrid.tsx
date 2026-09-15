@@ -1,6 +1,7 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import DataEditor, {
     CellClickedEventArgs,
+    DataEditorRef,
     GridCell,
     GridCellKind,
     GridColumn,
@@ -9,6 +10,7 @@ import DataEditor, {
     Theme,
 } from '@glideapps/glide-data-grid';
 import '@glideapps/glide-data-grid/dist/index.css';
+import {UpdateCell} from '../../wailsjs/go/main/App';
 import {
     copyToClipboard,
     displayValue,
@@ -19,10 +21,82 @@ import {
     toMarkdownTable,
 } from '../lib/gridCopyFormats';
 
+// Contexto de edição inline (ADR 0004): só existe quando a query é um
+// SELECT simples de tabela única com PK real detectada no catálogo.
+// editableColumns já é a interseção entre as colunas do resultado e as
+// colunas reais da tabela (expressões/aliases ficam de fora), excluídas
+// as geradas — computado em ConsoleTab via IntrospectTable.
+export interface EditContext {
+    schema: string;
+    table: string;
+    pkColumns: string[];
+    editableColumns: string[];
+}
+
 interface Props {
     columns: string[];
     rows: any[][];
+    tabId: string;
+    editContext?: EditContext | null;
+    readOnlyNotice?: string | null;
+    onCellSaved?: (rowIndex: number, colIndex: number, newValue: any) => void;
+    onStatus?: (msg: string) => void;
     onCopied?: () => void;
+}
+
+interface PendingEdit {
+    col: number;
+    row: number;
+    columnName: string;
+    oldValue: any;
+    newValue: any;
+    preview: string;
+}
+
+interface DirectEdit {
+    col: number;
+    row: number;
+    value: string;
+    bounds: {x: number; y: number; width: number; height: number};
+}
+
+// Formata um valor pra exibição no preview do UPDATE (só visual — a query
+// real é montada parametrizada no backend, nunca com esses literais).
+function formatPreviewValue(val: any): string {
+    if (val === null || val === undefined) {
+        return 'NULL';
+    }
+    if (typeof val === 'number' || typeof val === 'boolean') {
+        return String(val);
+    }
+    return `'${String(val).replace(/'/g, "''")}'`;
+}
+
+// Monta o preview legível do UPDATE com checagem otimista (WHERE pk... AND
+// coluna_antiga...), espelhando o que o backend executa de forma
+// parametrizada (ver db.buildUpdateCellQuery).
+function buildUpdatePreview(schema: string, table: string, pkColumns: string[], pkValues: any[], column: string, oldValue: any, newValue: any): string {
+    const qualified = schema && schema !== 'main' ? `"${schema}"."${table}"` : `"${table}"`;
+    const where = pkColumns.map((pk, i) => {
+        const v = pkValues[i];
+        return v === null || v === undefined ? `"${pk}" IS NULL` : `"${pk}" = ${formatPreviewValue(v)}`;
+    });
+    where.push(oldValue === null || oldValue === undefined ? `"${column}" IS NULL` : `"${column}" = ${formatPreviewValue(oldValue)}`);
+    return `UPDATE ${qualified} SET "${column}" = ${formatPreviewValue(newValue)} WHERE ${where.join(' AND ')}`;
+}
+
+// Converte o texto editado no overlay pro tipo do valor original, pra
+// manter a matriz de linhas tipada (número continua número no grid).
+function coerceEditedValue(oldValue: any, text: string): any {
+    if (typeof oldValue === 'number') {
+        const n = Number(text);
+        return Number.isNaN(n) ? text : n;
+    }
+    if (typeof oldValue === 'boolean') {
+        if (text === 'true' || text === '1') return true;
+        if (text === 'false' || text === '0') return false;
+    }
+    return text;
 }
 
 interface MenuState {
@@ -40,12 +114,25 @@ function isCellInRange(col: number, row: number, range: {x: number; y: number; w
 // Renderização em canvas de alto desempenho, com suporte a milhares de linhas sem travar,
 // tema escuro consistente com o Wisp, colunas redimensionáveis, índice de linha nativo
 // e destaque visual âmbar para valores NULL.
-export default function ResultGrid({columns, rows, onCopied}: Props) {
+export default function ResultGrid({columns, rows, tabId, editContext, readOnlyNotice, onCellSaved, onStatus, onCopied}: Props) {
     const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
     const [gridSelection, setGridSelection] = useState<GridSelection | undefined>(undefined);
     const [menu, setMenu] = useState<MenuState | null>(null);
+    const [pendingEdit, setPendingEdit] = useState<PendingEdit | null>(null);
+    const [savingEdit, setSavingEdit] = useState(false);
     const lastMousePos = useRef({x: 0, y: 0});
     const menuRef = useRef<HTMLDivElement | null>(null);
+    const gridRef = useRef<DataEditorRef | null>(null);
+    // Edição de célula própria (não usa o editor nativo do Glide): a
+    // ativação por duplo-clique da lib depende de um estado interno
+    // (mouseState) cujo closure fica desatualizado entre o mousedown e o
+    // mouseup do mesmo clique (bug real da lib, confirmado lendo o
+    // código-fonte — não é limitação de ambiente). onCellClicked, ao
+    // contrário, dispara de forma simples e confiável a cada clique válido,
+    // então detectamos "segundo clique na mesma célula já selecionada" nós
+    // mesmos e desenhamos nosso próprio input posicionado sobre a célula.
+    const lastClickRef = useRef<{col: number; row: number; time: number} | null>(null);
+    const [directEdit, setDirectEdit] = useState<DirectEdit | null>(null);
 
     const darkTheme: Partial<Theme> = useMemo(() => ({
         accentColor: '#2563eb',
@@ -89,15 +176,52 @@ export default function ResultGrid({columns, rows, onCopied}: Props) {
         }
     }, []);
 
+    // Índices das colunas de PK no resultado; -1 quando a PK não foi
+    // selecionada (ex. SELECT sem a coluna id) — nesse caso nenhuma linha
+    // tem os valores de PK e o grid inteiro fica read-only.
+    const pkIndexes = useMemo(() => {
+        if (!editContext) return [];
+        return editContext.pkColumns.map(pk => columns.indexOf(pk));
+    }, [editContext, columns]);
+
+    const editableSet = useMemo(() => new Set(editContext?.editableColumns ?? []), [editContext]);
+
+    const rowHasPkValues = useCallback((rowIndex: number): boolean => {
+        if (!editContext || pkIndexes.length === 0) return false;
+        const row = rows[rowIndex];
+        if (!row) return false;
+        return pkIndexes.every(i => i >= 0 && row[i] !== null && row[i] !== undefined);
+    }, [editContext, pkIndexes, rows]);
+
+    const isCellEditable = useCallback((colIndex: number, rowIndex: number): boolean => {
+        if (!editContext) return false;
+        const name = columns[colIndex];
+        if (!name || !editableSet.has(name)) return false;
+        // Condição única da spec: coluna editável + PK da linha conhecida e
+        // não-nula. Célula NULL é editável (vira valor via SET; o WHERE usa
+        // IS NULL no backend) — string vazia digitada salva '' (não NULL).
+        return rowHasPkValues(rowIndex);
+    }, [editContext, columns, editableSet, rowHasPkValues]);
+
     const getCellContent = useCallback((cell: Item): GridCell => {
         const [colIndex, rowIndex] = cell;
         const row = rows[rowIndex];
         const val = row ? row[colIndex] : null;
 
         if (val === null || val === undefined) {
+            const editable = isCellEditable(colIndex, rowIndex);
             return {
                 kind: GridCellKind.Text,
+                // allowOverlay sempre false: o editor nativo do Glide é
+                // acionado por double-click/Enter internos à lib, cuja
+                // lógica de ativação tem um bug real de closure obsoleto
+                // (mouseState lido no mouseup reflete o render anterior ao
+                // mousedown do mesmo clique — confirmado lendo o
+                // código-fonte da lib, não é limitação de teste). Edição
+                // própria via handleCellClicked substitui totalmente esse
+                // mecanismo.
                 allowOverlay: false,
+                readonly: !editable,
                 data: 'NULL',
                 displayData: 'NULL',
                 themeOverride: {
@@ -108,13 +232,102 @@ export default function ResultGrid({columns, rows, onCopied}: Props) {
         }
 
         const str = typeof val === 'object' ? JSON.stringify(val) : String(val);
+        const editable = isCellEditable(colIndex, rowIndex);
         return {
             kind: GridCellKind.Text,
             allowOverlay: false,
+            readonly: !editable,
             data: str,
             displayData: str,
         };
-    }, [rows]);
+    }, [rows, isCellEditable]);
+
+    // Diff contra o valor atual e abre o popover de preview do UPDATE (ADR
+    // 0004: nunca commitar silencioso). O UPDATE real só executa no
+    // Confirmar, via binding parametrizado. Usado tanto pelo commit da
+    // edição direta (handleCellClicked/commitDirectEdit) quanto — se algum
+    // dia o overlay nativo for reabilitado — pelo mesmo fluxo.
+    const startPendingEdit = useCallback((colIndex: number, rowIndex: number, typed: any) => {
+        if (!editContext) return;
+        const row = rows[rowIndex];
+        const oldValue = row[colIndex];
+        if (typed === oldValue) return;
+        const pkValues = pkIndexes.map(i => row[i]);
+        const columnName = columns[colIndex];
+        setPendingEdit({
+            col: colIndex,
+            row: rowIndex,
+            columnName,
+            oldValue,
+            newValue: typed,
+            preview: buildUpdatePreview(editContext.schema, editContext.table, editContext.pkColumns, pkValues, columnName, oldValue, typed),
+        });
+    }, [editContext, rows, pkIndexes, columns]);
+
+    // Detecta "segundo clique na mesma célula já selecionada, dentro de
+    // 500ms" nós mesmos — onCellClicked dispara de forma simples e
+    // confiável a cada clique válido (ver comentário do lastClickRef).
+    const handleCellClicked = useCallback((cell: Item) => {
+        const [colIndex, rowIndex] = cell;
+        const now = Date.now();
+        const last = lastClickRef.current;
+        const editable = isCellEditable(colIndex, rowIndex);
+        const isSecondClick = editable && last !== null && last.col === colIndex && last.row === rowIndex && now - last.time < 500;
+        lastClickRef.current = {col: colIndex, row: rowIndex, time: now};
+        if (!isSecondClick) return;
+        // getBounds já soma o rowMarkerOffset internamente (ver
+        // data-editor.js: `getBounds: (col,row) => ... gridRef.current?.getBounds((col ?? 0) + rowMarkerOffset, row)`)
+        // — passar o índice lógico (0-based, sem offset manual) aqui.
+        const bounds = gridRef.current?.getBounds(colIndex, rowIndex);
+        if (!bounds) return;
+        const row = rows[rowIndex];
+        const oldValue = row[colIndex];
+        setDirectEdit({
+            col: colIndex,
+            row: rowIndex,
+            value: oldValue === null || oldValue === undefined ? '' : String(oldValue),
+            bounds,
+        });
+    }, [isCellEditable, rows]);
+
+    const cancelDirectEdit = useCallback(() => setDirectEdit(null), []);
+
+    const commitDirectEdit = useCallback(() => {
+        if (!directEdit) return;
+        const row = rows[directEdit.row];
+        const oldValue = row[directEdit.col];
+        const typed = coerceEditedValue(oldValue, directEdit.value);
+        setDirectEdit(null);
+        startPendingEdit(directEdit.col, directEdit.row, typed);
+    }, [directEdit, rows, startPendingEdit]);
+
+    const cancelPendingEdit = useCallback(() => {
+        if (!savingEdit) setPendingEdit(null);
+    }, [savingEdit]);
+
+    const confirmPendingEdit = useCallback(async () => {
+        if (!pendingEdit || !editContext || savingEdit) return;
+        setSavingEdit(true);
+        try {
+            const row = rows[pendingEdit.row] ?? [];
+            const pkValues = pkIndexes.map(i => row[i]);
+            const affected = await UpdateCell(tabId, editContext.schema, editContext.table, editContext.pkColumns, pkValues, pendingEdit.columnName, pendingEdit.oldValue, pendingEdit.newValue);
+            if (affected === 0) {
+                // Checagem otimista falhou: outro processo alterou a linha
+                // entre o fetch e o save — avisa e reverte (não toca em rows,
+                // então a célula volta ao valor antigo sozinha).
+                onStatus?.(`aviso: a linha foi alterada por outro processo — valor não salvo (0 linhas afetadas)`);
+            } else {
+                onCellSaved?.(pendingEdit.row, pendingEdit.col, pendingEdit.newValue);
+                onStatus?.(`ok — célula atualizada (${affected} linha(s))`);
+            }
+            setPendingEdit(null);
+        } catch (err) {
+            onStatus?.(`erro ao salvar célula: ${err}`);
+        } finally {
+            setSavingEdit(false);
+        }
+    }, [pendingEdit, editContext, savingEdit, rows, pkIndexes, tabId, onCellSaved, onStatus]);
 
     // Captura a posição do mouse na fase de captura (roda antes do handler
     // interno do grid), porque CellClickedEventArgs só traz coordenadas
@@ -188,7 +401,7 @@ export default function ResultGrid({columns, rows, onCopied}: Props) {
     const closeMenu = useCallback(() => setMenu(null), []);
 
     useEffect(() => {
-        if (!menu) {
+        if (!menu && !pendingEdit) {
             return;
         }
         const onPointerDown = (e: MouseEvent) => {
@@ -199,6 +412,7 @@ export default function ResultGrid({columns, rows, onCopied}: Props) {
         const onKeyDown = (e: KeyboardEvent) => {
             if (e.key === 'Escape') {
                 setMenu(null);
+                cancelPendingEdit();
             }
         };
         document.addEventListener('mousedown', onPointerDown);
@@ -207,7 +421,7 @@ export default function ResultGrid({columns, rows, onCopied}: Props) {
             document.removeEventListener('mousedown', onPointerDown);
             document.removeEventListener('keydown', onKeyDown);
         };
-    }, [menu]);
+    }, [menu, pendingEdit, cancelPendingEdit]);
 
     const copyAndClose = useCallback(async (text: string) => {
         const ok = await copyToClipboard(text);
@@ -274,8 +488,18 @@ export default function ResultGrid({columns, rows, onCopied}: Props) {
                     <span>Resultados:</span>
                     <span className="result-stat-badge">{rows.length} {rows.length === 1 ? 'linha' : 'linhas'}</span>
                     <span className="result-stat-badge">{columns.length} {columns.length === 1 ? 'coluna' : 'colunas'}</span>
+                    {editContext && (
+                        <span className="result-stat-badge result-editable-badge" title={`Edição inline habilitada via PK (${editContext.pkColumns.join(', ')})`}>
+                            editável
+                        </span>
+                    )}
                 </div>
             </div>
+            {readOnlyNotice && (
+                <div className="result-readonly-notice" title={readOnlyNotice}>
+                    {readOnlyNotice}
+                </div>
+            )}
 
             <div
                 className="result-grid-canvas"
@@ -283,11 +507,14 @@ export default function ResultGrid({columns, rows, onCopied}: Props) {
                 onContextMenu={e => e.preventDefault()}
             >
                 <DataEditor
+                    ref={gridRef}
                     width="100%"
                     height="100%"
                     columns={gridColumns}
                     rows={rows.length}
                     getCellContent={getCellContent}
+                    onCellClicked={handleCellClicked}
+                    onPaste={false}
                     rowMarkers="number"
                     onColumnResize={onColumnResize}
                     theme={darkTheme}
@@ -297,6 +524,31 @@ export default function ResultGrid({columns, rows, onCopied}: Props) {
                     onGridSelectionChange={setGridSelection}
                     onCellContextMenu={handleCellContextMenu}
                 />
+                {directEdit && (
+                    <input
+                        className="grid-direct-edit-input"
+                        autoFocus
+                        style={{
+                            position: 'fixed',
+                            left: directEdit.bounds.x,
+                            top: directEdit.bounds.y,
+                            width: directEdit.bounds.width,
+                            height: directEdit.bounds.height,
+                        }}
+                        value={directEdit.value}
+                        onChange={e => setDirectEdit(prev => (prev ? {...prev, value: e.target.value} : prev))}
+                        onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                                e.preventDefault();
+                                commitDirectEdit();
+                            } else if (e.key === 'Escape') {
+                                e.preventDefault();
+                                cancelDirectEdit();
+                            }
+                        }}
+                        onBlur={commitDirectEdit}
+                    />
+                )}
                 {menu && (
                     <div ref={menuRef} className="grid-context-menu" style={menuStyle} role="menu">
                         <button className="grid-context-menu-item" onClick={() => handleCopyCell(menu.col, menu.row)}>
@@ -323,6 +575,34 @@ export default function ResultGrid({columns, rows, onCopied}: Props) {
                         <button className="grid-context-menu-item" onClick={() => handleCopyAs('md', targetHeader, targetMatrix)}>
                             Markdown
                         </button>
+                    </div>
+                )}
+                {pendingEdit && (
+                    <div className="grid-edit-overlay" onMouseDown={e => { if (e.target === e.currentTarget) cancelPendingEdit(); }}>
+                        <div className="grid-edit-popover" role="dialog" aria-label="Confirmar atualização">
+                            <div className="grid-context-menu-group-label">Confirmar atualização</div>
+                            <div className="grid-edit-field">
+                                <span className="grid-edit-label">Célula</span>
+                                <span className="grid-edit-value">{pendingEdit.columnName} (linha {pendingEdit.row + 1})</span>
+                            </div>
+                            <div className="grid-edit-field">
+                                <span className="grid-edit-label">De</span>
+                                <span className="grid-edit-value">{displayValue(pendingEdit.oldValue)}</span>
+                            </div>
+                            <div className="grid-edit-field">
+                                <span className="grid-edit-label">Para</span>
+                                <span className="grid-edit-value">{displayValue(pendingEdit.newValue)}</span>
+                            </div>
+                            <code className="grid-edit-preview">{pendingEdit.preview}</code>
+                            <div className="grid-edit-actions">
+                                <button className="btn btn-success" onClick={confirmPendingEdit} disabled={savingEdit}>
+                                    {savingEdit ? 'Salvando…' : 'Confirmar'}
+                                </button>
+                                <button className="btn btn-secondary" onClick={cancelPendingEdit} disabled={savingEdit}>
+                                    Cancelar
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 )}
             </div>

@@ -5,8 +5,9 @@ import {format} from 'sql-formatter';
 import type {SqlLanguage} from 'sql-formatter';
 import {RunQuery, FetchRows, Disconnect, CancelQuery, SaveScript, UpdateScript, ListSchemas, ListTables, IntrospectTable} from '../../wailsjs/go/main/App';
 import type {db} from '../../wailsjs/go/models';
+import {detectSingleTable, type SingleTableRef} from '../lib/detectSingleTable';
 import SqlEditor, {AUTO_UPPERCASE_STORAGE_KEY, readAutoUppercasePreference} from './SqlEditor';
-import ResultGrid from './ResultGrid';
+import ResultGrid, {type EditContext} from './ResultGrid';
 import Sidebar from './Sidebar';
 import QueryHistory from './QueryHistory';
 import ScriptsPanel from './ScriptsPanel';
@@ -43,6 +44,12 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange}: Props) {
     const [activeScriptName, setActiveScriptName] = useState('');
     const [catalog, setCatalog] = useState<db.Table[]>([]);
     const [driver, setDriver] = useState<string | undefined>(undefined);
+    // Edição inline (ADR 0004): contexto computado após cada execução —
+    // tabela-fonte detectada via regex leve + PK real via IntrospectTable.
+    // Sem tabela única/PK, o grid fica read-only com aviso (nunca erro).
+    const [editContext, setEditContext] = useState<EditContext | null>(null);
+    const [readOnlyNotice, setReadOnlyNotice] = useState<string | null>(null);
+    const [editSourceRef, setEditSourceRef] = useState<SingleTableRef | null>(null);
     const [showSaveForm, setShowSaveForm] = useState(false);
     const [saveNameInput, setSaveNameInput] = useState('');
     const [savingScript, setSavingScript] = useState(false);
@@ -121,6 +128,88 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange}: Props) {
         setDriver(undefined);
         setHasMore(false);
         setDurationMs(null);
+        setEditContext(null);
+        setReadOnlyNotice(null);
+        setEditSourceRef(null);
+    }
+
+    // Resolve o schema da tabela detectada pra chamar IntrospectTable (que
+    // exige schema). Com schema explícito na query usa ele; sem schema,
+    // SQLite é sempre "main" e Postgres procura a tabela no catálogo já
+    // carregado (único match vence; ambíguo entre schemas → null, grid
+    // read-only em vez de adivinhar a tabela errada).
+    function resolveEditSchema(detected: string | null, table: string): string | null {
+        if (detected) {
+            return detected;
+        }
+        if (driver === 'sqlite') {
+            return 'main';
+        }
+        const schemas = [...new Set(catalog.filter(t => t.Name === table).map(t => t.Schema))];
+        if (schemas.length === 1) {
+            return schemas[0];
+        }
+        if (schemas.length === 0) {
+            return 'public';
+        }
+        if (schemas.includes('public')) {
+            return 'public';
+        }
+        return null;
+    }
+
+    // Cruza as colunas do resultado com o catálogo real (IntrospectTable) e
+    // computa pkColumns + editableColumns. Uma única chamada sequencial por
+    // vez — nunca Promise.all (conexão single-conn por aba, ver
+    // handleConnected). Falha/introspecção vazia → read-only com aviso, não
+    // erro. Se o cursor ainda está aberto (hasMore), o banco pode recusar a
+    // segunda query na mesma conexão — nesse caso adia sem aviso e tenta de
+    // novo ao carregar o resto em handleLoadMore.
+    async function tryComputeEditContext(ref: SingleTableRef, resultColumns: string[], exhausted: boolean) {
+        const schema = resolveEditSchema(ref.schema, ref.table);
+        if (!schema) {
+            setEditContext(null);
+            setReadOnlyNotice(`Tabela "${ref.table}" existe em mais de um schema — grade somente leitura.`);
+            return;
+        }
+        let full: db.Table | null = null;
+        try {
+            full = await IntrospectTable(tabId, schema, ref.table);
+        } catch {
+            if (exhausted) {
+                setEditContext(null);
+                setReadOnlyNotice(`Não foi possível verificar a chave primária de ${schema}.${ref.table} — grade somente leitura.`);
+            }
+            return;
+        }
+        const cols = full?.Columns ?? [];
+        if (cols.length === 0) {
+            setEditContext(null);
+            setReadOnlyNotice(`Tabela ${schema}.${ref.table} não encontrada no catálogo — grade somente leitura.`);
+            return;
+        }
+        const pkColumns = cols.filter(c => c.IsPrimaryKey).map(c => c.Name);
+        if (pkColumns.length === 0) {
+            setEditContext(null);
+            setReadOnlyNotice(`Tabela ${schema}.${ref.table} sem chave primária — grade somente leitura.`);
+            return;
+        }
+        const byName = new Map(cols.map(c => [c.Name, c]));
+        // Colunas de PK ficam de fora da edição inline: mudar o valor de
+        // uma chave primária é raro e arriscado (referências de FK,
+        // histórico de queries pela PK antiga) — mesma cautela que
+        // DBeaver/outros clientes SQL aplicam por padrão.
+        const editableColumns = resultColumns.filter(name => {
+            const c = byName.get(name);
+            return !!c && !c.IsGenerated && !c.IsPrimaryKey;
+        });
+        if (editableColumns.length === 0) {
+            setEditContext(null);
+            setReadOnlyNotice(`Nenhuma coluna editável em ${schema}.${ref.table} (só expressões ou colunas geradas) — grade somente leitura.`);
+            return;
+        }
+        setEditContext({schema, table: ref.table, pkColumns, editableColumns});
+        setReadOnlyNotice(null);
     }
 
     async function fetchBatch(currentRows: any[][], replace: boolean) {
@@ -131,10 +220,10 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange}: Props) {
             setRows(combined);
             setHasMore(batch.HasMore);
             setStatus(`ok — ${combined.length} linha(s) carregada(s)${batch.HasMore ? ', mais disponíveis' : ''}`);
-            return combined;
+            return {rows: combined, hasMore: batch.HasMore};
         } catch (err) {
             setStatus(`erro ao buscar linhas: ${err}`);
-            return currentRows;
+            return {rows: currentRows, hasMore: false};
         } finally {
             setFetching(false);
         }
@@ -155,12 +244,24 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange}: Props) {
         setRows([]);
         setHasMore(false);
         setDurationMs(null);
+        setEditContext(null);
+        setReadOnlyNotice(null);
+        setEditSourceRef(null);
         try {
             const meta = await RunQuery(tabId, text);
-            setColumns(meta.Columns ?? []);
+            const resultColumns = meta.Columns ?? [];
+            setColumns(resultColumns);
             setDurationMs(meta.DurationMs);
             setRunning(false);
-            await fetchBatch([], true);
+            const fetched = await fetchBatch([], true);
+            // Detecção de tabela única após o fetch (sequencial, nunca
+            // Promise.all — mesma regra de conexão single-conn do
+            // handleConnected). Sem match, o grid segue read-only sem aviso.
+            const ref = detectSingleTable(text);
+            setEditSourceRef(ref);
+            if (ref) {
+                await tryComputeEditContext(ref, resultColumns, !fetched.hasMore);
+            }
         } catch (err) {
             setStatus(`erro ao executar: ${err}`);
             setRunning(false);
@@ -170,7 +271,17 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange}: Props) {
     }
 
     async function handleLoadMore() {
-        await fetchBatch(rows, false);
+        const fetched = await fetchBatch(rows, false);
+        // Retry da detecção adiada: se o cursor estava aberto no primeiro
+        // fetch, a introspecção pode ter sido adiada sem aviso — tenta de
+        // novo agora que o resultado avançou (ou se esgotou).
+        if (editSourceRef && !editContext) {
+            await tryComputeEditContext(editSourceRef, columns, !fetched.hasMore);
+        }
+    }
+
+    function handleCellSaved(rowIndex: number, colIndex: number, newValue: any) {
+        setRows(prev => prev.map((r, i) => (i === rowIndex ? r.map((v, j) => (j === colIndex ? newValue : v)) : r)));
     }
 
     async function handleCancel() {
@@ -387,7 +498,15 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange}: Props) {
                             </label>
                         </div>
                     </div>
-                    <ResultGrid columns={columns} rows={rows} />
+                    <ResultGrid
+                        columns={columns}
+                        rows={rows}
+                        tabId={tabId}
+                        editContext={editContext}
+                        readOnlyNotice={readOnlyNotice}
+                        onCellSaved={handleCellSaved}
+                        onStatus={setStatus}
+                    />
                     {hasMore && (
                         <div className="load-more-bar">
                             <button className="btn btn-secondary" onClick={handleLoadMore} disabled={busy}>

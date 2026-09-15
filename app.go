@@ -364,6 +364,20 @@ func (a *App) RefreshSchema(tabID string) error {
 	return nil
 }
 
+// UpdateCell atualiza uma única célula via UPDATE parametrizado com
+// checagem otimista de concorrência (ver db.DatabaseDriver.UpdateCell e
+// docs/adr/0004-inline-edit-safety.md). Retorna as linhas afetadas — 0
+// significa que outro processo alterou a linha entre o fetch e o save
+// (não erro); o frontend avisa o usuário e reverte a célula. Resolve a
+// sessão pelo tabID igual aos outros bindings (RunQuery/IntrospectTable).
+func (a *App) UpdateCell(tabID string, schema string, table string, pkColumns []string, pkValues []any, column string, oldValue any, newValue any) (int64, error) {
+	s, err := a.sessions.Get(tabID)
+	if err != nil {
+		return 0, err
+	}
+	return s.Driver.UpdateCell(s.Ctx, schema, table, pkColumns, pkValues, column, oldValue, newValue)
+}
+
 // --- Conexões salvas (persistidas cifradas, ver internal/vault) ---
 
 // SaveConnection cifra e persiste uma conexão para reuso futuro (nome amigável
