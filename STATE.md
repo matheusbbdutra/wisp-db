@@ -107,12 +107,24 @@ dentro do editor SQL (abriu a TableTab certa a partir do nome da tabela na
 query). Logs de diagnóstico temporários removidos, build final limpo
 (`go build`, `tsc --noEmit`, `npm run build`).
 
-## Estado final da sessão — pronto pra commit
-Tudo implementado e confirmado nesta sessão (backend + frontend + os 2 bugs de
-causa raiz achados testando contra Postgres real + o bug de plataforma do
-Ctrl+click): "Tabela como aba própria", Ctrl+click (Sidebar e editor SQL) pra
-abrir TableTab/SchemaTab, botão ↗ mantido. Nada commitado ainda — próxima ação
-é o usuário decidir se commita agora ou pede mais alguma verificação antes.
+## ✅ Release v0.1.0-beta.1 publicada (2026-09-15)
+Commits `9f448ce` (feature completa) e `cbd0cf9` (versão do .deb) na branch
+`master`, remote `git@github.com:matheusbbdutra/wisp-db.git` configurado via
+SSH (chave já cadastrada na conta). Tag `v0.1.0-beta.1` criada e enviada.
+Release publicada em https://github.com/matheusbbdutra/wisp-db/releases/tag/v0.1.0-beta.1
+(prerelease=true) com `packaging/deb/wisp_0.1.0~beta1_amd64.deb` anexado —
+`VERSION` do `build.sh` ajustada de `0.1.0` pra `0.1.0~beta1` (convenção
+Debian de pre-release, `~` ordena antes da versão final no dpkg). Nota: o
+GitHub sanitiza `~` no nome do arquivo do asset pra `.` na exibição/download
+(`wisp_0.1.0.beta1_amd64.deb`) — cosmético, o `.deb` em si mantém
+`Version: 0.1.0~beta1` correto no `DEBIAN/control` (o que importa pro apt).
+
+Container de teste `wisp-postgres-test` (docker compose em `testdata/`) ainda
+está de pé no ambiente de dev — não é usado pelo build, pode ser derrubado
+quando não precisar mais (`docker compose -f testdata/docker-compose.yml down`).
+
+**Próximo passo combinado com o usuário**: ele vai testar o `.deb` no ambiente
+da empresa, pra avaliar substituir o DBeaver no uso dele.
 
 ## ⏸️ Pausa em 2026-09-15 — retomar daqui amanhã
 
