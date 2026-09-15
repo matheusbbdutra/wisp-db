@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bgO2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1a2130"/>
+      <stop offset="100%" stop-color="#0c0f14"/>
+    </linearGradient>
+    <linearGradient id="ring1" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#1e40af" stop-opacity="0.15"/>
+      <stop offset="55%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#a5f3fc"/>
+    </linearGradient>
+    <linearGradient id="ring2" x1="100%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#1e40af" stop-opacity="0.15"/>
+      <stop offset="55%" stop-color="#2563eb"/>
+      <stop offset="100%" stop-color="#7dd3fc"/>
+    </linearGradient>
+    <radialGradient id="coreO2" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#7dd3fc"/>
+    </radialGradient>
+  </defs>
+
+  <rect x="0" y="0" width="1024" height="1024" rx="192" fill="url(#bgO2)"/>
+
+  <g transform="translate(512 512)">
+    <ellipse cx="0" cy="0" rx="290" ry="150" transform="rotate(-24)"
+             fill="none" stroke="url(#ring1)" stroke-width="34" stroke-linecap="round"/>
+    <ellipse cx="0" cy="0" rx="290" ry="150" transform="rotate(24)"
+             fill="none" stroke="url(#ring2)" stroke-width="34" stroke-linecap="round"/>
+    <circle cx="0" cy="0" r="66" fill="#0c0f14"/>
+    <circle cx="0" cy="0" r="50" fill="url(#coreO2)"/>
+    <!-- pequena faísca "elétron" numa das órbitas, sugerindo movimento -->
+    <circle cx="243" cy="-14" r="17" fill="#e0f7ff"/>
+  </g>
+</svg>

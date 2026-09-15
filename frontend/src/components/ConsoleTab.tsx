@@ -66,7 +66,9 @@ interface Props {
 // para suportar múltiplas abas: cada instância tem seu próprio tabId, que já
 // é a chave de isolamento no backend (Session Manager, ver internal/session).
 export default function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTable, onOpenSchema}: Props) {
-    const [query, setQuery] = useState('SELECT * FROM customers ORDER BY id');
+    // Editor começa vazio — "SELECT * FROM customers" era resquício de teste
+    // (nenhuma base do usuário tem essa tabela por padrão).
+    const [query, setQuery] = useState('');
     // Painéis redimensionáveis por arrasto (ver lib/useDragResize.ts) —
     // Wails só renderiza uma webview comum, isso é CSS/JS puro, sem
     // limitação de toolkit nativo.
