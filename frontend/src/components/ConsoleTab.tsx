@@ -19,12 +19,14 @@ interface Props {
     tabId: string;
     hidden: boolean;
     onConnectedChange: (connected: boolean) => void;
+    onOpenTable: (connectionId: string, schema: string, table: string) => void;
+    onOpenSchema: (connectionId: string, schema: string) => void;
 }
 
 // Estado e comportamento de um console isolado (uma aba). Extraído de App.tsx
 // para suportar múltiplas abas: cada instância tem seu próprio tabId, que já
 // é a chave de isolamento no backend (Session Manager, ver internal/session).
-export default function ConsoleTab({tabId, hidden, onConnectedChange}: Props) {
+export default function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTable, onOpenSchema}: Props) {
     const [query, setQuery] = useState('SELECT * FROM customers ORDER BY id');
     const [connected, setConnected] = useState(false);
     const [status, setStatus] = useState('desconectado');
@@ -44,6 +46,10 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange}: Props) {
     const [activeScriptName, setActiveScriptName] = useState('');
     const [catalog, setCatalog] = useState<db.Table[]>([]);
     const [driver, setDriver] = useState<string | undefined>(undefined);
+    // ID da conexão salva que originou a sessão desta aba — repassado pra
+    // App.tsx ao abrir uma aba de tabela, que reconecta com ConnectSaved
+    // (conexão própria por aba, nunca reusa a sessão do console).
+    const [connectionId, setConnectionId] = useState<string | null>(null);
     // Edição inline (ADR 0004): contexto computado após cada execução —
     // tabela-fonte detectada via regex leve + PK real via IntrospectTable.
     // Sem tabela única/PK, o grid fica read-only com aviso (nunca erro).
@@ -68,9 +74,10 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange}: Props) {
 
     const busy = running || fetching;
 
-    async function handleConnected(connName?: string, activeDriver?: string) {
+    async function handleConnected(connectionId: string, connName?: string, activeDriver?: string) {
         setConnected(true);
         onConnectedChange(true);
+        setConnectionId(connectionId);
         setDriver(activeDriver);
         setStatus(connName ? `conectado: ${connName}` : 'conectado');
         // Catálogo completo pro autocomplete (ListTables é lazy por schema,
@@ -126,6 +133,7 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange}: Props) {
         setRows([]);
         setCatalog([]);
         setDriver(undefined);
+        setConnectionId(null);
         setHasMore(false);
         setDurationMs(null);
         setEditContext(null);
@@ -293,6 +301,51 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange}: Props) {
         setQuery(`SELECT * FROM ${schema === 'main' ? table : `${schema}.${table}`} LIMIT 200`);
     }
 
+    function handleOpenTableRequest(schema: string, table: string) {
+        // Sem connectionId não há como reconectar a aba nova — Sidebar só
+        // mostra tabelas quando conectado, então isso é só guarda defensiva.
+        if (!connectionId) {
+            return;
+        }
+        onOpenTable(connectionId, schema, table);
+    }
+
+    function handleOpenSchemaRequest(schema: string) {
+        // Mesma guarda defensiva: sem connectionId não há como reconectar.
+        if (!connectionId) {
+            return;
+        }
+        onOpenSchema(connectionId, schema);
+    }
+
+    // Ctrl+click num identificador do editor (ver SqlEditor.onOpenIdentifier):
+    // resolve contra o catálogo já carregado antes de abrir — identificador
+    // que não corresponde a nada real (typo, palavra-chave) é ignorado
+    // silenciosamente, nunca abre aba errada adivinhando.
+    function handleOpenIdentifier(
+        target: {kind: 'table'; schema: string | null; table: string} | {kind: 'schema'; schema: string}
+    ) {
+        if (!connectionId) {
+            return;
+        }
+        if (target.kind === 'schema') {
+            const match = catalog.find(t => t.Schema.toLowerCase() === target.schema.toLowerCase());
+            if (!match) return;
+            onOpenSchema(connectionId, match.Schema);
+            return;
+        }
+        const {schema, table} = target;
+        let match: db.Table | undefined;
+        if (schema) {
+            match = catalog.find(t => t.Schema.toLowerCase() === schema.toLowerCase() && t.Name.toLowerCase() === table.toLowerCase());
+        } else {
+            const candidates = catalog.filter(t => t.Name.toLowerCase() === table.toLowerCase());
+            match = candidates.length === 1 ? candidates[0] : candidates.find(t => t.Schema === 'public');
+        }
+        if (!match) return;
+        onOpenTable(connectionId, match.Schema, match.Name);
+    }
+
     function handleSelectScript(id: string, name: string, queryText: string) {
         setActiveScriptId(id);
         setActiveScriptName(name);
@@ -430,7 +483,7 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange}: Props) {
             </div>
 
             <div className="workspace">
-                <Sidebar tabId={tabId} connected={connected} onSelectTable={handleSelectTable} />
+                <Sidebar tabId={tabId} connected={connected} onSelectTable={handleSelectTable} onOpenTable={handleOpenTableRequest} onOpenSchema={handleOpenSchemaRequest} />
 
                 <main className="main-panel">
                     <div className="editor-pane">
@@ -442,6 +495,7 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange}: Props) {
                             catalog={catalog}
                             driver={driver}
                             autoUppercase={autoUppercase}
+                            onOpenIdentifier={handleOpenIdentifier}
                         />
                     </div>
                     <div className="editor-actions">

@@ -137,6 +137,140 @@
 }
 
 /* --------------------------------------------------------------------------
+   Aba de tabela (TableTab): nível superior, irmã do Console. Reaproveita a
+   paleta do .console-tab/.toolbar-secondary sem estilos novos destoantes.
+   -------------------------------------------------------------------------- */
+.table-tab {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.table-tab[hidden] {
+    display: none;
+}
+
+.table-tab-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-main);
+    font-family: var(--font-mono);
+}
+
+.table-subbar {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.table-subbar .btn.active {
+    background: var(--bg-input);
+    border-color: var(--accent-green, #059669);
+    color: var(--text-main);
+}
+
+.table-dados-pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.table-meta-pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow-y: auto;
+    background: var(--bg-editor);
+}
+
+.ddl-editor-pane {
+    flex: 1;
+    min-height: 200px;
+}
+
+.meta-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px 14px;
+}
+
+.meta-item {
+    border: 1px solid var(--border-default);
+    border-radius: 6px;
+    background: var(--bg-card);
+    overflow: hidden;
+}
+
+.meta-name {
+    padding: 6px 10px;
+    font-size: 12.5px;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    color: #93c5fd;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.meta-def {
+    margin: 0;
+    padding: 8px 10px;
+    font-size: 12px;
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.meta-empty {
+    padding: 32px 16px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 12.5px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+}
+
+.meta-hint {
+    font-size: 11.5px;
+    opacity: 0.8;
+}
+
+/* Affordance "abrir em aba própria" por linha da Sidebar: só aparece no
+   hover pra não poluir a árvore; o clique na linha continua gerando SELECT. */
+.tree-leaf-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tree-leaf-open {
+    display: none;
+    background: none;
+    border: 1px solid var(--border-default);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 11px;
+    line-height: 1;
+    padding: 1px 5px;
+}
+
+.tree-leaf:hover .tree-leaf-open {
+    display: inline-block;
+}
+
+.tree-leaf-open:hover {
+    background: var(--border-strong);
+    color: var(--text-main);
+}
+
+/* --------------------------------------------------------------------------
    Top Bar / Connection Bar
    -------------------------------------------------------------------------- */
 .topbar {

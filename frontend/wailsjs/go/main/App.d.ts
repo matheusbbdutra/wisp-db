@@ -20,7 +20,11 @@ export function FetchRows(arg1:string,arg2:number):Promise<main.FetchBatch>;
 
 export function GetQueryHistory(arg1:number):Promise<Array<store.QueryHistoryEntry>>;
 
+export function GetTableDDL(arg1:string,arg2:string,arg3:string):Promise<string>;
+
 export function IntrospectTable(arg1:string,arg2:string,arg3:string):Promise<db.Table>;
+
+export function ListFunctions(arg1:string,arg2:string):Promise<Array<db.Function>>;
 
 export function ListSavedConnections():Promise<Array<store.SavedConnection>>;
 
@@ -29,6 +33,8 @@ export function ListSchemas(arg1:string):Promise<Array<string>>;
 export function ListScripts():Promise<Array<store.SavedScript>>;
 
 export function ListTables(arg1:string,arg2:string):Promise<Array<db.Table>>;
+
+export function ListTriggers(arg1:string,arg2:string,arg3:string):Promise<Array<db.Trigger>>;
 
 export function PickSQLiteFile():Promise<string>;
 

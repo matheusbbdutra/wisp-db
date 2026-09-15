@@ -378,6 +378,37 @@ func (a *App) UpdateCell(tabID string, schema string, table string, pkColumns []
 	return s.Driver.UpdateCell(s.Ctx, schema, table, pkColumns, pkValues, column, oldValue, newValue)
 }
 
+// GetTableDDL retorna o DDL de criação da tabela na conexão da aba tabId.
+// Resolve a sessão pelo tabID igual a IntrospectTable.
+func (a *App) GetTableDDL(tabID string, schema string, table string) (string, error) {
+	s, err := a.sessions.Get(tabID)
+	if err != nil {
+		return "", err
+	}
+	return s.Driver.TableDDL(s.Ctx, schema, table)
+}
+
+// ListTriggers lista triggers da tabela na conexão da aba tabId.
+// Resolve a sessão pelo tabID igual a IntrospectTable.
+func (a *App) ListTriggers(tabID string, schema string, table string) ([]db.Trigger, error) {
+	s, err := a.sessions.Get(tabID)
+	if err != nil {
+		return nil, err
+	}
+	return s.Driver.ListTriggers(s.Ctx, schema, table)
+}
+
+// ListFunctions lista funções do schema na conexão da aba tabId (nível de
+// schema, não filtrado por tabela). Resolve a sessão pelo tabID igual a
+// IntrospectTable.
+func (a *App) ListFunctions(tabID string, schema string) ([]db.Function, error) {
+	s, err := a.sessions.Get(tabID)
+	if err != nil {
+		return nil, err
+	}
+	return s.Driver.ListFunctions(s.Ctx, schema)
+}
+
 // --- Conexões salvas (persistidas cifradas, ver internal/vault) ---
 
 // SaveConnection cifra e persiste uma conexão para reuso futuro (nome amigável

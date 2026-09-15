@@ -228,6 +228,51 @@ func (d *SQLiteDriver) UpdateCell(ctx context.Context, schema, table string, pkC
 	return affected, nil
 }
 
+// TableDDL retorna o DDL original guardado em sqlite_master.sql — literal,
+// sem reconstrução (o SQLite já persiste o CREATE TABLE verbatim).
+func (d *SQLiteDriver) TableDDL(ctx context.Context, schema, table string) (string, error) {
+	var ddl sql.NullString
+	err := d.conn.QueryRowContext(ctx,
+		`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&ddl)
+	if err != nil {
+		return "", fmt.Errorf("lendo DDL de %q: %w", table, err)
+	}
+	if !ddl.Valid {
+		return "", fmt.Errorf("tabela %q não encontrada", table)
+	}
+	return ddl.String, nil
+}
+
+// ListTriggers lista triggers da tabela via sqlite_master (name + sql).
+func (d *SQLiteDriver) ListTriggers(ctx context.Context, schema, table string) ([]Trigger, error) {
+	rows, err := d.conn.QueryContext(ctx,
+		`SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ? ORDER BY name`, table)
+	if err != nil {
+		return nil, fmt.Errorf("listando triggers de %q: %w", table, err)
+	}
+	defer rows.Close()
+
+	var triggers []Trigger
+	for rows.Next() {
+		var trg Trigger
+		var def sql.NullString
+		if err := rows.Scan(&trg.Name, &def); err != nil {
+			return nil, err
+		}
+		if def.Valid {
+			trg.Definition = def.String
+		}
+		triggers = append(triggers, trg)
+	}
+	return triggers, rows.Err()
+}
+
+// ListFunctions: SQLite não tem função de usuário no sentido tradicional —
+// retorna vazio (não é bug; o frontend mostra estado vazio com nota).
+func (d *SQLiteDriver) ListFunctions(ctx context.Context, schema string) ([]Function, error) {
+	return nil, nil
+}
+
 // quoteIdent quota um identificador SQL com aspas duplas, escapando aspas
 // internas por duplicação — evita injeção via nome de tabela/coluna.
 func quoteIdent(ident string) string {

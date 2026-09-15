@@ -20,6 +20,20 @@ export namespace db {
 	        this.Nullable = source["Nullable"];
 	    }
 	}
+	export class Function {
+	    Name: string;
+	    Definition: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Function(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Name = source["Name"];
+	        this.Definition = source["Definition"];
+	    }
+	}
 	export class Table {
 	    Schema: string;
 	    Name: string;
@@ -53,6 +67,20 @@ export namespace db {
 		    }
 		    return a;
 		}
+	}
+	export class Trigger {
+	    Name: string;
+	    Definition: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Trigger(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Name = source["Name"];
+	        this.Definition = source["Definition"];
+	    }
 	}
 
 }

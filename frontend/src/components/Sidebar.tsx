@@ -1,6 +1,7 @@
 import {useState} from 'react';
 import {ListSchemas, ListTables, RefreshSchema} from '../../wailsjs/go/main/App';
 import type {db} from '../../wailsjs/go/models';
+import {isCtrlHeld} from '../lib/modifierKeyTracker';
 
 // Árvore de schemas/tabelas com introspecção lazy: só busca tabelas de um
 // schema quando ele é expandido, nunca faz dump completo do catálogo de
@@ -12,9 +13,14 @@ interface Props {
     tabId: string;
     connected: boolean;
     onSelectTable: (schema: string, table: string) => void;
+    // Affordance separada do clique simples: abre a tabela numa aba própria
+    // (TableTab, com conexão dedicada). Opcional pra não quebrar outros usos.
+    onOpenTable?: (schema: string, table: string) => void;
+    // Ctrl+click no nome do schema abre uma SchemaTab listando as tabelas.
+    onOpenSchema?: (schema: string) => void;
 }
 
-export default function Sidebar({tabId, connected, onSelectTable}: Props) {
+export default function Sidebar({tabId, connected, onSelectTable, onOpenTable, onOpenSchema}: Props) {
     const [schemas, setSchemas] = useState<string[]>([]);
     const [tablesBySchema, setTablesBySchema] = useState<Record<string, db.Table[]>>({});
     const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -90,7 +96,20 @@ export default function Sidebar({tabId, connected, onSelectTable}: Props) {
 
                         return (
                             <li key={schema}>
-                                <div className="tree-node" onClick={() => toggleSchema(schema)}>
+                                <div
+                                    className="tree-node"
+                                    onClick={() => {
+                                        // isCtrlHeld() em vez de e.ctrlKey: nesta stack (GTK/WebKitGTK
+                                        // sob Wayland) o clique real não chega com ctrlKey correto, ver
+                                        // lib/modifierKeyTracker.ts.
+                                        if (isCtrlHeld() && onOpenSchema) {
+                                            onOpenSchema(schema);
+                                            return;
+                                        }
+                                        toggleSchema(schema);
+                                    }}
+                                    title={`Clique para expandir/colapsar · Ctrl+click para abrir ${schema} em aba própria`}
+                                >
                                     <span className="tree-arrow">
                                         {isExpanded ? '▾' : '▸'}
                                     </span>
@@ -113,14 +132,33 @@ export default function Sidebar({tabId, connected, onSelectTable}: Props) {
                                                 <li
                                                     key={t.Name}
                                                     className="tree-leaf"
-                                                    onClick={() => onSelectTable(schema, t.Name)}
-                                                    title={`Clique para gerar SELECT em ${schema}.${t.Name}`}
+                                                    onClick={() => {
+                                                        // isCtrlHeld() em vez de e.ctrlKey — ver lib/modifierKeyTracker.ts.
+                                                        if (isCtrlHeld() && onOpenTable) {
+                                                            onOpenTable(schema, t.Name);
+                                                            return;
+                                                        }
+                                                        onSelectTable(schema, t.Name);
+                                                    }}
+                                                    title={`Clique para gerar SELECT · Ctrl+click para abrir ${schema}.${t.Name} em aba própria`}
                                                 >
                                                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                                         <rect x="3" y="3" width="18" height="18" rx="2" />
                                                         <path d="M3 9h18M3 15h18M9 3v18" />
                                                     </svg>
-                                                    <span>{t.Name}</span>
+                                                    <span className="tree-leaf-name">{t.Name}</span>
+                                                    {onOpenTable && (
+                                                        <button
+                                                            className="tree-leaf-open"
+                                                            title={`Abrir ${schema}.${t.Name} em aba própria`}
+                                                            onClick={e => {
+                                                                e.stopPropagation();
+                                                                onOpenTable(schema, t.Name);
+                                                            }}
+                                                        >
+                                                            ↗
+                                                        </button>
+                                                    )}
                                                 </li>
                                             ))
                                         )}

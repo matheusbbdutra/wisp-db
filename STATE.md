@@ -3,6 +3,117 @@
 Checkpoint compacto pra retomar em sessão nova. Histórico detalhado de cada
 mudança está nos commits do git (`git log`), não duplicado aqui.
 
+## ✅ Concluído nesta sessão (2026-09-15) — "Tabela como aba própria" + Ctrl+click
+
+Commit da feature anterior (edição inline de células) feito no início da
+sessão (`4a74409`). Contratos técnicos completos nas memórias
+`wisp-table-tab-task-context` e `wisp-ctrlclick-open-tabs-task-context`.
+Decisão confirmada com o usuário: cada aba de tabela/schema aberta tem
+`tabId`/conexão **próprios** (reconecta via `ConnectSaved` com o mesmo
+`connectionId` da origem), nunca reusa a sessão do console — custo aceito:
+N abas = N conexões reais.
+
+**Backend** (`Trigger`/`Function` + `TableDDL`/`ListTriggers`/`ListFunctions`
+na interface `DatabaseDriver`, Postgres via `information_schema`+`pg_get_*def`,
+SQLite via literal de `sqlite_master.sql`, 3 bindings em `app.go`) — via
+OpenCode + minha revisão. **Bug real corrigido por mim**: a query de
+constraints do Postgres (`TableDDL`) não selecionava `conname`, gerando SQL
+inválido (`CONSTRAINT PRIMARY KEY (id)` sem nome). **Validado contra SQLite
+real** (DDL/Triggers/Functions corretos). Postgres real ainda não testado
+(serviço local inativo nesta sessão).
+
+**Frontend**: `App.tsx` com `TabState` união de 3 kinds (`console`/`table`/
+`schema`); `Sidebar.tsx` com botão ↗ por tabela E ctrl+click (tabela → abre
+TableTab; schema → abre SchemaTab; sem ctrl, comportamento antigo inalterado);
+`TableTab.tsx` (sub-abas Dados/DDL/Triggers/Funções, lazy-load); `SchemaTab.tsx`
+(lista de tabelas do schema, cada uma abre sua própria TableTab) — via OpenCode
++ minha revisão, 2 rodadas de delegação.
+
+**Bug real de causa raiz encontrado e corrigido por mim** (não veio da
+delegação — achei testando via Claude in Chrome): `TableTab`/`SchemaTab`
+conectam no mount via `useEffect`; o React StrictMode (dev) monta→desmonta→
+remonta o efeito rapidamente, e as duas chamadas a `ConnectSaved` (mesmo
+tabId) corriam concorrentes no backend — `Manager.Open` (`internal/session`)
+cancela a sessão existente do mesmo tabId ao reconectar (comportamento
+correto isoladamente), mas se a chamada da montagem obsoleta terminasse
+DEPOIS da montagem real, cancelava a sessão que já estava em uso →
+`"context canceled"` na primeira query da aba nova. Fix: novo módulo
+`frontend/src/lib/connectLock.ts` (`withConnectLock`) serializa o connect por
+tabId; a montagem obsoleta se desconecta antes de liberar o lock. **Ver
+memória `wisp-table-schema-tab-context-canceled-fix`** pro relato completo.
+
+**Nota tangencial resolvida**: uma exceção genérica `Cannot read properties of
+null (reading 'nodes')` em `wails/ipc.js` apareceu recorrentemente durante os
+testes — confirmado que é ruído do dev-bridge do Wails ao testar via Chrome
+puro (não correlaciona com falha real, aparece até em cliques que funcionam
+perfeitamente). Não é bug, não precisa de mais investigação.
+
+**Verificado de ponta a ponta por mim mesmo** via Claude in Chrome (SQLite
+real, `wails dev -tags webkit2_41`): ctrl+click numa tabela abre TableTab e
+carrega Dados/DDL/Triggers/Funções corretos; ctrl+click num schema abre
+SchemaTab, lista tabelas, clicar numa delas abre sua própria TableTab
+aninhada — sem `context canceled` depois do fix. `go build`, `tsc --noEmit`
+e `npm run build` limpos em todas as rodadas.
+
+**Testado contra Postgres real** (subimos `docker compose up -d` em
+`testdata/docker-compose.yml`, seed com PK simples/composta/coluna gerada +
+trigger/função ad-hoc criados via `psql` só para o teste, removidos depois):
+- `customers` (PK simples + UNIQUE `email`): DDL correto, incluindo o nome
+  da constraint UNIQUE (`customers_email_key`) — confirma o fix de `conname`.
+- `order_items` (PK composta): DDL com `PRIMARY KEY (order_id, item_seq)` correto.
+- `invoice_lines` (coluna gerada `total`): **2º bug real encontrado e
+  corrigido nesta rodada** — `TableDDL` perdia a expressão `GENERATED ALWAYS
+  AS (...) STORED` completamente (gerava só `"total" numeric,`, que rodado de
+  verdade criaria uma coluna normal em vez de gerada). Fix: query de colunas
+  agora também lê `is_generated`/`generation_expression` de
+  `information_schema.columns`. Revalidado depois do fix: DDL mostra
+  `GENERATED ALWAYS AS ((unit_price * (quantity)::numeric)) STORED,`
+  corretamente. Ver memória `wisp-table-ddl-generated-column-fix`.
+- Trigger e função reais (`trg_customers_touch`/`touch_updated_at`, criados
+  ad-hoc, removidos depois de testar): definição completa e correta nas
+  sub-abas Triggers/Funções.
+
+`go build`, `tsc --noEmit` e `npm run build` limpos depois do 2º fix.
+
+## Ctrl+click não funcionava na janela nativa — bug real de plataforma encontrado e corrigido
+Depois de reportar a feature como pronta, o usuário testou na janela nativa e
+Ctrl+click não fazia nada — nem na Sidebar, nem no editor. Eu errei ao concluir
+de cara "é o seu WM/Hyprland engolindo globalmente" sem evidência — o usuário
+contestou corretamente (se fosse isso, precisaria configurar TODO app). Investigação
+real: Ctrl+Enter (atalho já existente, via `editor.addCommand` do Monaco) sempre
+funcionou pro usuário — prova que o Ctrl chega certo via teclado (keydown/keyup),
+mas **`MouseEvent.ctrlKey` de um clique real não chega correto** nesse ambiente
+(GTK/WebKitGTK sob Wayland/Hyprland) — bug real de plataforma, não do nosso código
+nem do WM interceptando. Ver memória `wisp-ctrlclick-mouseevent-ctrlkey-unreliable-fix`
+pro relato completo (inclui um mal-entendido de UI no meio do caminho: o usuário
+queria Ctrl+click **dentro do editor SQL** estilo DBeaver, não só na Sidebar).
+
+**Fix**: novo `frontend/src/lib/modifierKeyTracker.ts` (`isCtrlHeld()`) rastreia
+Ctrl/Meta via `keydown`/`keyup` global, independente do clique. Usado em
+`Sidebar.tsx` (substituindo `e.ctrlKey`) e na **feature nova**: Ctrl+click num
+identificador dentro do editor Monaco (`SqlEditor.tsx`, novo `onMouseDown` +
+prop `onOpenIdentifier`) abre a TableTab/SchemaTab do nome clicado na query —
+`ConsoleTab.tsx` resolve contra o catálogo já carregado, ignora silenciosamente
+identificadores que não correspondem a nada real (typo/keyword).
+
+**Verificado via Claude in Chrome** simulando o estado real de teclado com
+`window.dispatchEvent(new KeyboardEvent('keydown'/'keyup', {key:'Control'}))`
+(não `modifiers:'ctrl'` do CDP no clique, que não reproduz/valida o bug real):
+Ctrl+click em "customers" dentro de `SELECT * FROM public.customers` abriu a
+TableTab certa; Ctrl+click em "public" abriu a SchemaTab certa.
+
+**Confirmado pelo usuário na janela nativa**: Ctrl+click funciona na Sidebar E
+dentro do editor SQL (abriu a TableTab certa a partir do nome da tabela na
+query). Logs de diagnóstico temporários removidos, build final limpo
+(`go build`, `tsc --noEmit`, `npm run build`).
+
+## Estado final da sessão — pronto pra commit
+Tudo implementado e confirmado nesta sessão (backend + frontend + os 2 bugs de
+causa raiz achados testando contra Postgres real + o bug de plataforma do
+Ctrl+click): "Tabela como aba própria", Ctrl+click (Sidebar e editor SQL) pra
+abrir TableTab/SchemaTab, botão ↗ mantido. Nada commitado ainda — próxima ação
+é o usuário decidir se commita agora ou pede mais alguma verificação antes.
+
 ## ⏸️ Pausa em 2026-09-15 — retomar daqui amanhã
 
 **Pendências pra você testar/confirmar antes de continuar** (nenhum bloqueia o trabalho, mas ficaram sem confirmação final):

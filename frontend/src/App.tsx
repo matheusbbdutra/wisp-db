@@ -2,18 +2,42 @@ import {useState} from 'react';
 import './App.css';
 import {Disconnect} from '../wailsjs/go/main/App';
 import ConsoleTab from './components/ConsoleTab';
+import TableTab from './components/TableTab';
+import SchemaTab from './components/SchemaTab';
 
-interface TabState {
+interface ConsoleTabState {
+    kind: 'console';
     id: string;
     title: string;
     connected: boolean;
 }
 
+interface TableTabState {
+    kind: 'table';
+    id: string;
+    title: string;
+    connected: boolean;
+    connectionId: string;
+    schema: string;
+    table: string;
+}
+
+interface SchemaTabState {
+    kind: 'schema';
+    id: string;
+    title: string;
+    connected: boolean;
+    connectionId: string;
+    schema: string;
+}
+
+type TabState = ConsoleTabState | TableTabState | SchemaTabState;
+
 let tabCounter = 1;
 
-function createTab(): TabState {
+function createTab(): ConsoleTabState {
     const n = tabCounter++;
-    return {id: `tab-${crypto.randomUUID()}`, title: `Console ${n}`, connected: false};
+    return {kind: 'console', id: `tab-${crypto.randomUUID()}`, title: `Console ${n}`, connected: false};
 }
 
 function App() {
@@ -22,6 +46,38 @@ function App() {
 
     function handleAddTab() {
         const tab = createTab();
+        setTabs(prev => [...prev, tab]);
+        setActiveId(tab.id);
+    }
+
+    // Abre a tabela numa aba própria (irmã do Console): tabId novo com
+    // conexão própria via ConnectSaved no mount do TableTab — nunca reusa
+    // a sessão do console de origem (1 tabId = 1 conexão dedicada).
+    function handleOpenTable(connectionId: string, schema: string, table: string) {
+        const tab: TableTabState = {
+            kind: 'table',
+            id: `tab-${crypto.randomUUID()}`,
+            title: table,
+            connected: false,
+            connectionId,
+            schema,
+            table,
+        };
+        setTabs(prev => [...prev, tab]);
+        setActiveId(tab.id);
+    }
+
+    // Abre o schema numa aba própria listando suas tabelas — mesmo padrão:
+    // tabId novo, conexão própria via ConnectSaved no mount do SchemaTab.
+    function handleOpenSchema(connectionId: string, schema: string) {
+        const tab: SchemaTabState = {
+            kind: 'schema',
+            id: `tab-${crypto.randomUUID()}`,
+            title: schema,
+            connected: false,
+            connectionId,
+            schema,
+        };
         setTabs(prev => [...prev, tab]);
         setActiveId(tab.id);
     }
@@ -81,12 +137,36 @@ function App() {
             </div>
 
             {tabs.map(tab => (
-                <ConsoleTab
-                    key={tab.id}
-                    tabId={tab.id}
-                    hidden={tab.id !== activeId}
-                    onConnectedChange={connected => handleConnectedChange(tab.id, connected)}
-                />
+                tab.kind === 'console' ? (
+                    <ConsoleTab
+                        key={tab.id}
+                        tabId={tab.id}
+                        hidden={tab.id !== activeId}
+                        onConnectedChange={connected => handleConnectedChange(tab.id, connected)}
+                        onOpenTable={(connectionId, schema, table) => handleOpenTable(connectionId, schema, table)}
+                        onOpenSchema={(connectionId, schema) => handleOpenSchema(connectionId, schema)}
+                    />
+                ) : tab.kind === 'table' ? (
+                    <TableTab
+                        key={tab.id}
+                        tabId={tab.id}
+                        connectionId={tab.connectionId}
+                        schema={tab.schema}
+                        table={tab.table}
+                        hidden={tab.id !== activeId}
+                        onConnectedChange={connected => handleConnectedChange(tab.id, connected)}
+                    />
+                ) : (
+                    <SchemaTab
+                        key={tab.id}
+                        tabId={tab.id}
+                        connectionId={tab.connectionId}
+                        schema={tab.schema}
+                        hidden={tab.id !== activeId}
+                        onConnectedChange={connected => handleConnectedChange(tab.id, connected)}
+                        onOpenTable={(connectionId, schema, table) => handleOpenTable(connectionId, schema, table)}
+                    />
+                )
             ))}
         </div>
     )

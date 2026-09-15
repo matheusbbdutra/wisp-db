@@ -34,8 +34,16 @@ export function GetQueryHistory(arg1) {
   return window['go']['main']['App']['GetQueryHistory'](arg1);
 }
 
+export function GetTableDDL(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GetTableDDL'](arg1, arg2, arg3);
+}
+
 export function IntrospectTable(arg1, arg2, arg3) {
   return window['go']['main']['App']['IntrospectTable'](arg1, arg2, arg3);
+}
+
+export function ListFunctions(arg1, arg2) {
+  return window['go']['main']['App']['ListFunctions'](arg1, arg2);
 }
 
 export function ListSavedConnections() {
@@ -52,6 +60,10 @@ export function ListScripts() {
 
 export function ListTables(arg1, arg2) {
   return window['go']['main']['App']['ListTables'](arg1, arg2);
+}
+
+export function ListTriggers(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ListTriggers'](arg1, arg2, arg3);
 }
 
 export function PickSQLiteFile() {

@@ -32,6 +32,18 @@ type Table struct {
 	Columns []Column
 }
 
+// Trigger descreve um trigger de tabela com seu DDL completo, verbatim.
+type Trigger struct {
+	Name       string
+	Definition string
+}
+
+// Function descreve uma função do schema com seu DDL completo, verbatim.
+type Function struct {
+	Name       string
+	Definition string
+}
+
 // DatabaseDriver é o contrato que todo dialeto suportado deve implementar.
 // Uma instância representa uma única conexão viva, isolada por tabId no
 // Session Manager — nunca compartilhada entre abas.
@@ -87,4 +99,11 @@ type DatabaseDriver interface {
 	// e o save (outro processo alterou), não erro; o caller deve avisar
 	// o usuário em vez de assumir sucesso.
 	UpdateCell(ctx context.Context, schema, table string, pkColumns []string, pkValues []any, column string, oldValue any, newValue any) (rowsAffected int64, err error)
+
+	// TableDDL retorna o DDL de criação da tabela.
+	TableDDL(ctx context.Context, schema, table string) (string, error)
+	// ListTriggers lista triggers de uma tabela, com DDL completo.
+	ListTriggers(ctx context.Context, schema, table string) ([]Trigger, error)
+	// ListFunctions lista funções do schema (não é por tabela).
+	ListFunctions(ctx context.Context, schema string) ([]Function, error)
 }

@@ -16,6 +16,7 @@ import {conf as sqlConf, language as sqlLanguage} from 'monaco-editor/languages/
 import 'monaco-editor/editor/contrib/suggest/browser/suggestController.js';
 import type {db} from '../../wailsjs/go/models';
 import editorWorker from 'monaco-editor/editor/editor.worker?worker';
+import {isCtrlHeld} from '../lib/modifierKeyTracker';
 
 // Registro manual do SQL em vez de importar o "basic-languages" agregado
 // (que nesta versão do monaco-editor puxa TODAS as linguagens suportadas
@@ -309,9 +310,20 @@ interface Props {
     catalog?: db.Table[];
     driver?: string;
     autoUppercase?: boolean;
+    // Somente leitura (ex.: visualização de DDL na aba de tabela): bloqueia
+    // digitação no Monaco sem mudar nada do modo edição existente.
+    readOnly?: boolean;
+    // Ctrl+click num identificador da query (tabela, ou schema em
+    // "schema.tabela") — ConsoleTab resolve contra o catálogo e decide se
+    // abre TableTab ou SchemaTab.
+    onOpenIdentifier?: (
+        target:
+            | {kind: 'table'; schema: string | null; table: string}
+            | {kind: 'schema'; schema: string}
+    ) => void;
 }
 
-export default function SqlEditor({value, onChange, onRunRequested, onRunSelectionRequested, catalog, driver, autoUppercase = true}: Props) {
+export default function SqlEditor({value, onChange, onRunRequested, onRunSelectionRequested, catalog, driver, autoUppercase = true, readOnly = false, onOpenIdentifier}: Props) {
     const containerRef = useRef<HTMLDivElement>(null);
     const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
     const catalogRef = useRef(catalog);
@@ -321,9 +333,11 @@ export default function SqlEditor({value, onChange, onRunRequested, onRunSelecti
     const onChangeRef = useRef(onChange);
     const onRunRef = useRef(onRunRequested);
     const onRunSelectionRef = useRef(onRunSelectionRequested);
+    const onOpenIdentifierRef = useRef(onOpenIdentifier);
     onChangeRef.current = onChange;
     onRunRef.current = onRunRequested;
     onRunSelectionRef.current = onRunSelectionRequested;
+    onOpenIdentifierRef.current = onOpenIdentifier;
     // Refs (não estado) pro listener do Monaco, que é registrado uma vez só
     // na montagem e não re-registra a cada render.
     const autoUppercaseRef = useRef(autoUppercase);
@@ -345,6 +359,7 @@ export default function SqlEditor({value, onChange, onRunRequested, onRunSelecti
             minimap: {enabled: false},
             fontSize: 13,
             lineHeight: 20,
+            readOnly,
             fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", "JetBrains Mono", Menlo, Consolas, monospace',
             padding: {top: 8, bottom: 8},
             lineNumbersMinChars: 3,
@@ -405,6 +420,32 @@ export default function SqlEditor({value, onChange, onRunRequested, onRunSelecti
             }
         });
         editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => onRunRef.current());
+
+        // Ctrl+click num identificador da query abre a tabela/schema numa
+        // aba própria (ver Props.onOpenIdentifier). Usa isCtrlHeld() (rastreado
+        // via keydown/keyup) em vez de e.event.ctrlKey do próprio clique —
+        // nesta stack (GTK/WebKitGTK sob Wayland) o clique real não chega com
+        // ctrlKey correto, mas keydown/keyup chegam certos (mesma razão de
+        // Ctrl+Enter acima funcionar). Ver lib/modifierKeyTracker.ts.
+        editor.onMouseDown(e => {
+            if (!isCtrlHeld() || !onOpenIdentifierRef.current) return;
+            const model = editor.getModel();
+            const position = e.target.position;
+            if (!model || !position) return;
+            const word = model.getWordAtPosition(position);
+            if (!word) return;
+            const line = model.getLineContent(position.lineNumber);
+            const before = line.slice(0, word.startColumn - 1);
+            const after = line.slice(word.endColumn - 1);
+            const qualifier = before.match(/([A-Za-z_][A-Za-z0-9_]*)\.$/)?.[1] ?? null;
+            // Se o próprio identificador clicado é seguido de "." (ex.: "public"
+            // em "public.customers"), ele é o schema — não uma tabela.
+            if (qualifier === null && after.startsWith('.')) {
+                onOpenIdentifierRef.current({kind: 'schema', schema: word.word});
+                return;
+            }
+            onOpenIdentifierRef.current({kind: 'table', schema: qualifier, table: word.word});
+        });
 
         // Ctrl+Shift+Enter: roda só o texto selecionado, ou (sem seleção) o
         // "statement" sob o cursor — texto entre o ';' anterior e o próximo.

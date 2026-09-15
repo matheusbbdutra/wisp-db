@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -218,4 +219,176 @@ func (d *PostgresDriver) UpdateCell(ctx context.Context, schema, table string, p
 		return 0, fmt.Errorf("atualizando célula de %s.%s: %w", schema, table, err)
 	}
 	return tag.RowsAffected(), nil
+}
+
+// TableDDL reconstrói o CREATE TABLE a partir do catálogo, pois o Postgres
+// NÃO tem "SHOW CREATE TABLE" nativo: colunas via information_schema.columns
+// (ordenadas por ordinal_position) + constraints via pg_get_constraintdef(oid)
+// filtrando conrelid pelo oid da tabela (pg_class/pg_namespace).
+// Escopo v1 (gap conhecido): colunas + constraints. Índices
+// (pg_indexes.indexdef) ficam de fora — documentado como limitação, não
+// implementado silenciosamente incompleto.
+func (d *PostgresDriver) TableDDL(ctx context.Context, schema, table string) (string, error) {
+	if schema == "" || schema == "main" {
+		schema = "public"
+	}
+	colRows, err := d.conn.Query(ctx, `
+		SELECT column_name, data_type, udt_name, character_maximum_length,
+		       is_nullable = 'YES', column_default,
+		       is_generated = 'ALWAYS', generation_expression
+		FROM information_schema.columns
+		WHERE table_schema = $1 AND table_name = $2
+		ORDER BY ordinal_position`, schema, table)
+	if err != nil {
+		return "", fmt.Errorf("lendo colunas de %s.%s: %w", schema, table, err)
+	}
+	defer colRows.Close()
+
+	var defs []string
+	found := false
+	for colRows.Next() {
+		var name, dataType, udtName string
+		var maxLen *int
+		var nullable, generated bool
+		var dflt, genExpr *string
+		if err := colRows.Scan(&name, &dataType, &udtName, &maxLen, &nullable, &dflt, &generated, &genExpr); err != nil {
+			return "", err
+		}
+		found = true
+		colType := resolveColumnType(dataType, udtName, maxLen)
+		def := fmt.Sprintf("  %s %s", quoteIdentPG(name), colType)
+		if generated && genExpr != nil {
+			// Coluna gerada (STORED — Postgres não suporta VIRTUAL): sem a
+			// expressão, a reconstrução perderia a geração e criaria uma
+			// coluna normal (bug real encontrado testando contra Postgres
+			// real, ver memória wisp-table-schema-tab-context-canceled-fix).
+			def += fmt.Sprintf(" GENERATED ALWAYS AS (%s) STORED", *genExpr)
+		} else {
+			if !nullable {
+				def += " NOT NULL"
+			}
+			if dflt != nil && *dflt != "" {
+				def += " DEFAULT " + *dflt
+			}
+		}
+		defs = append(defs, def)
+	}
+	if err := colRows.Err(); err != nil {
+		return "", err
+	}
+	if !found {
+		return "", fmt.Errorf("tabela %s.%s não encontrada", schema, table)
+	}
+
+	conRows, err := d.conn.Query(ctx, `
+		SELECT c.conname, pg_get_constraintdef(c.oid)
+		FROM pg_constraint c
+		JOIN pg_class t ON t.oid = c.conrelid
+		JOIN pg_namespace n ON n.oid = t.relnamespace
+		WHERE n.nspname = $1 AND t.relname = $2
+		ORDER BY c.oid`, schema, table)
+	if err != nil {
+		return "", fmt.Errorf("lendo constraints de %s.%s: %w", schema, table, err)
+	}
+	defer conRows.Close()
+
+	for conRows.Next() {
+		var conname, condef string
+		if err := conRows.Scan(&conname, &condef); err != nil {
+			return "", err
+		}
+		defs = append(defs, fmt.Sprintf("  CONSTRAINT %s %s", quoteIdentPG(conname), condef))
+	}
+	if err := conRows.Err(); err != nil {
+		return "", err
+	}
+
+	ddl := fmt.Sprintf("CREATE TABLE %s.%s (\n%s\n);",
+		quoteIdentPG(schema), quoteIdentPG(table), strings.Join(defs, ",\n"))
+	return ddl, nil
+}
+
+// ListTriggers retorna triggers de usuário da tabela via pg_trigger +
+// pg_get_triggerdef(oid), excluindo tgisinternal (triggers internos de FK
+// não são "triggers do usuário").
+func (d *PostgresDriver) ListTriggers(ctx context.Context, schema, table string) ([]Trigger, error) {
+	if schema == "" || schema == "main" {
+		schema = "public"
+	}
+	rows, err := d.conn.Query(ctx, `
+		SELECT t.tgname, pg_get_triggerdef(t.oid)
+		FROM pg_trigger t
+		JOIN pg_class c ON c.oid = t.tgrelid
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname = $1 AND c.relname = $2 AND NOT t.tgisinternal
+		ORDER BY t.tgname`, schema, table)
+	if err != nil {
+		return nil, fmt.Errorf("listando triggers de %s.%s: %w", schema, table, err)
+	}
+	defer rows.Close()
+
+	var triggers []Trigger
+	for rows.Next() {
+		var trg Trigger
+		if err := rows.Scan(&trg.Name, &trg.Definition); err != nil {
+			return nil, err
+		}
+		triggers = append(triggers, trg)
+	}
+	return triggers, rows.Err()
+}
+
+// ListFunctions retorna funções do schema via pg_proc + pg_get_functiondef,
+// só prokind = 'f' (funções normais — exclui agregados/window).
+func (d *PostgresDriver) ListFunctions(ctx context.Context, schema string) ([]Function, error) {
+	if schema == "" || schema == "main" {
+		schema = "public"
+	}
+	rows, err := d.conn.Query(ctx, `
+		SELECT p.proname, pg_get_functiondef(p.oid)
+		FROM pg_proc p
+		JOIN pg_namespace n ON n.oid = p.pronamespace
+		WHERE n.nspname = $1 AND p.prokind = 'f'
+		ORDER BY p.proname`, schema)
+	if err != nil {
+		return nil, fmt.Errorf("listando funções de %q: %w", schema, err)
+	}
+	defer rows.Close()
+
+	var functions []Function
+	for rows.Next() {
+		var fn Function
+		if err := rows.Scan(&fn.Name, &fn.Definition); err != nil {
+			return nil, err
+		}
+		functions = append(functions, fn)
+	}
+	return functions, rows.Err()
+}
+
+// quoteIdentPG quota um identificador Postgres com aspas duplas, escapando
+// aspas internas por duplicação — evita injeção via nome de schema/tabela.
+func quoteIdentPG(ident string) string {
+	return `"` + strings.ReplaceAll(ident, `"`, `""`) + `"`
+}
+
+// resolveColumnType mapeia o trio data_type/udt_name/character_maximum_length
+// do information_schema para um tipo exibível no DDL reconstruído.
+func resolveColumnType(dataType, udtName string, maxLen *int) string {
+	switch dataType {
+	case "character varying":
+		if maxLen != nil {
+			return fmt.Sprintf("character varying(%d)", *maxLen)
+		}
+		return "character varying"
+	case "character":
+		if maxLen != nil {
+			return fmt.Sprintf("character(%d)", *maxLen)
+		}
+		return "character"
+	case "USER-DEFINED":
+		return udtName
+	default:
+		return dataType
+	}
 }
