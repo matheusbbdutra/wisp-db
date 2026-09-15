@@ -9,28 +9,34 @@ Ver `docs/ARCHITECTURE.md` e ADRs em `docs/adr/` para o racional de cada decisã
 - ✅ Local Store SQLite: conexões cifradas, histórico de queries.
 - ✅ **Critério de performance medido de verdade**: RAM idle ~158-164MB (meta <500MB).
 
-## Fase 2 — Produtividade & Autocomplete (parcial)
+## Fase 2 — Produtividade & Autocomplete
 - ✅ Sidebar com árvore lazy de schemas/tabelas.
 - ✅ Schema cache em duas camadas, TTL + invalidação manual/DDL.
 - ✅ Histórico de queries persistido, painel na UI.
-- ❌ Autocomplete no Monaco via schema cache — pendente.
-- ❌ Formatação de SQL (pretty-print) — pendente.
+- ❌ Autocomplete no Monaco via schema cache — **próximo item a implementar** (reordenado antes da exploração de schema/view data em 2026-09-15, a pedido do usuário).
+- ❌ Formatação de SQL (pretty-print) — pendente, na sequência do autocomplete.
 
-## Fase 2.5 — Multi-console e organização (nova, combinada com o usuário em 2026-09-15)
-- Múltiplas abas/consoles (backend já suporta via Session Manager, falta UI).
-- Salvar scripts SQL nomeados (diferente do histórico automático).
-- Abrir tabela como aba própria (estilo "view data"), incluindo ver DDL/triggers/funções.
+## Fase 2.5 — Multi-console e organização ✅ concluída (2026-09-15)
+- ✅ Múltiplas abas/consoles (Session Manager isola por `tabId`, UI de tabs em `App.tsx`/`ConsoleTab.tsx`).
+- ✅ Salvar scripts SQL nomeados (diferente do histórico automático) — `ScriptsPanel.tsx`.
+
+## Fase 2.6 — Exploração de schema / View Data + Copiar (nova, combinada com o usuário em 2026-09-15)
+Escopo mais amplo do que o item original "tabela como aba própria" — inclui navegação de schema além de uma única tabela, mais a feature de copiar (uso frequente do usuário no dia a dia, priorizada junto por tocar no mesmo grid/exploração de dados).
+- Abrir tabela como aba própria (estilo "view data" do DBeaver), incluindo dados, DDL, triggers e funções da tabela.
+- Navegar/listar tabelas de um schema a partir dessa exploração (não só a árvore lazy da sidebar).
+- **Copiar especial no grid de resultados** (estilo DBeaver): menu de contexto com copiar célula única, copiar linha inteira, copiar seleção de várias células, e formatar como CSV/INSERT SQL/Markdown.
+- Demais detalhes (ex.: views, índices) a definir conforme necessidade real ao implementar — não especular além do que o usuário use no dia a dia.
 
 ## Fase 3 — Recursos avançados
-- Túnel SSH integrado no fluxo de conexão (`crypto/ssh`) — pendente.
 - Edição inline de células — **escopo restrito conforme ADR 0004** — pendente.
-- Exportador de datasets grandes (CSV, JSON, Parquet) — pendente.
-- Integração com agentes de terminal via servidor MCP exposto pelo Wisp — deixado por último a pedido do usuário, escopo grande/arquitetura nova.
+- Integração com agentes de terminal via servidor MCP exposto pelo Wisp — escopo ainda a desenhar melhor com o usuário antes de entrar em implementação (arquitetura nova, não é só "próximo item da fila").
+- Exportador de datasets grandes (CSV, JSON, Parquet) — baixa prioridade, usuário raramente usa; fica na fila mas sem pressa.
 
 ## Fase 4+ — Explorações futuras (não comprometidas)
 - Query builder visual (Strategy por dialeto SQL) — só entra em planejamento real após Fase 3 estável.
 - Busca semântica sobre histórico de queries (`sqlite-vec`, nunca serviço vetorial externo) — só se houver demanda real validada.
 - Sync de conexões salvas entre dispositivos (reabriria avaliação de Turso) — só se houver demanda real validada.
+- **Túnel SSH integrado no fluxo de conexão** (`crypto/ssh`) — o projeto já será open source (não é um "se"), mas isso não torna a feature urgente: o primeiro usuário é o próprio autor, que já tem VPN cobrindo o acesso a bancos atrás de firewall. Fica na fila, despriorizada até haver demanda real (própria ou de outro usuário do projeto).
 
 ## Fora de escopo (decisão ativa, não esquecimento)
 - Aceleração por GPU em pipeline de dados — nenhum hot path identificado.
