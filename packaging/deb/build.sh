@@ -3,7 +3,7 @@
 # Roda a partir do próprio repositório atual (não depende de tarball).
 #
 # Uso: packaging/deb/build.sh
-# Saída: packaging/deb/wisp_0.1.0~beta1_amd64.deb
+# Saída: packaging/deb/wisp_<VERSION>_amd64.deb (ver VERSION abaixo)
 #
 # COMPATIBILIDADE WEBKIT — LEIA ANTES DE INSTALAR EM OUTRA DISTRO:
 # O Wisp é buildado com a tag `webkit2_41` (ver README.md), ou seja, ele
@@ -17,7 +17,7 @@ PKGNAME="wisp"
 # ~beta1 (não -beta1): convenção de versionamento Debian pra pre-release —
 # "~" ordena ANTES da versão final na comparação dpkg (0.1.0~beta1 < 0.1.0),
 # hífen seria interpretado como separador do debian_revision.
-VERSION="0.1.0~beta1"
+VERSION="0.1.0~beta2"
 ARCH="amd64"
 MAINTAINER="Matheus Dutra <matheusbbdutra@gmail.com>"
 DEB_FILE="${PKGNAME}_${VERSION}_${ARCH}.deb"
