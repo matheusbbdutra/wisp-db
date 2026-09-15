@@ -853,14 +853,45 @@
    Sidebar
    -------------------------------------------------------------------------- */
 .sidebar {
+    /* Largura controlada via inline style (redimensionamento por arrasto,
+       ver lib/useDragResize.ts) — min/max já aplicados lá (180-480px). */
     width: 250px;
-    min-width: 200px;
-    max-width: 320px;
     background: var(--bg-sidebar);
     border-right: 1px solid var(--border-default);
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    flex-shrink: 0;
+}
+
+/* --------------------------------------------------------------------------
+   Handles de redimensionamento por arrasto (sidebar e split editor/grid)
+   -------------------------------------------------------------------------- */
+.resize-handle {
+    flex-shrink: 0;
+    background: transparent;
+    transition: background 0.12s;
+    position: relative;
+    z-index: 1;
+}
+
+.resize-handle:hover,
+.resize-handle:active {
+    background: var(--accent-color, #3b82f6);
+}
+
+.resize-handle-v {
+    width: 4px;
+    cursor: col-resize;
+    margin-left: -2px;
+    margin-right: -2px;
+}
+
+.resize-handle-h {
+    height: 4px;
+    cursor: row-resize;
+    margin-top: -2px;
+    margin-bottom: -2px;
 }
 
 .sidebar-header {
@@ -1062,10 +1093,12 @@
 }
 
 .editor-pane {
+    /* Altura controlada via inline style (redimensionamento por arrasto,
+       ver lib/useDragResize.ts) — min/max já aplicados lá (120-600px). */
     height: 220px;
-    min-height: 120px;
     background: var(--bg-editor);
     position: relative;
+    flex-shrink: 0;
 }
 
 /* Editor Action Toolbar */
@@ -1150,6 +1183,102 @@
 .load-more-hint {
     font-size: 11px;
     color: var(--text-muted);
+}
+
+/* --------------------------------------------------------------------------
+   Abas de resultado (múltiplas execuções por console, estilo DBeaver)
+   -------------------------------------------------------------------------- */
+.result-tab-bar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    background: var(--bg-toolbar);
+    border-top: 1px solid var(--border-default);
+    border-bottom: 1px solid var(--border-default);
+    overflow-x: auto;
+    flex-shrink: 0;
+}
+
+.result-tab-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-default);
+    border-radius: 5px;
+    color: var(--text-secondary);
+    padding: 3px 6px 3px 8px;
+    font-size: 11.5px;
+    cursor: pointer;
+    white-space: nowrap;
+    max-width: 220px;
+    transition: all 0.12s;
+}
+
+.result-tab-pill:hover {
+    background: var(--border-strong);
+}
+
+.result-tab-pill.active {
+    border-color: #3b82f6;
+    color: var(--text-main);
+}
+
+.result-tab-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: var(--text-muted);
+}
+
+.result-tab-dot-done {
+    background: #22c55e;
+}
+
+.result-tab-dot-error {
+    background: #ef4444;
+}
+
+.result-tab-dot-running {
+    background: #f59e0b;
+    animation: result-tab-pulse 1s ease-in-out infinite;
+}
+
+.result-tab-dot-queued {
+    background: var(--text-muted);
+}
+
+@keyframes result-tab-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+}
+
+.result-tab-hint {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.result-tab-close {
+    margin-left: 2px;
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1;
+    padding: 0 2px;
+}
+
+.result-tab-close:hover {
+    color: var(--text-main);
+}
+
+.result-error-banner {
+    padding: 8px 12px;
+    background: rgba(239, 68, 68, 0.1);
+    border-bottom: 1px solid rgba(239, 68, 68, 0.3);
+    color: #f87171;
+    font-size: 12px;
 }
 
 /* --------------------------------------------------------------------------

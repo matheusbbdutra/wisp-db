@@ -1,4 +1,4 @@
-import {useState} from 'react';
+import {useState, type CSSProperties} from 'react';
 import {ListSchemas, ListTables, RefreshSchema} from '../lib/tabApi';
 import type {db} from '../../wailsjs/go/models';
 import {isCtrlHeld} from '../lib/modifierKeyTracker';
@@ -18,9 +18,13 @@ interface Props {
     onOpenTable?: (schema: string, table: string) => void;
     // Ctrl+click no nome do schema abre uma SchemaTab listando as tabelas.
     onOpenSchema?: (schema: string) => void;
+    // Largura controlada por fora (redimensionamento por arrasto, ver
+    // lib/useDragResize.ts em ConsoleTab.tsx) — inline style vence a largura
+    // fixa do CSS.
+    style?: CSSProperties;
 }
 
-export default function Sidebar({tabId, connected, onSelectTable, onOpenTable, onOpenSchema}: Props) {
+export default function Sidebar({tabId, connected, onSelectTable, onOpenTable, onOpenSchema, style}: Props) {
     const [schemas, setSchemas] = useState<string[]>([]);
     const [tablesBySchema, setTablesBySchema] = useState<Record<string, db.Table[]>>({});
     const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -57,7 +61,7 @@ export default function Sidebar({tabId, connected, onSelectTable, onOpenTable, o
 
     if (!connected) {
         return (
-            <aside className="sidebar">
+            <aside className="sidebar" style={style}>
                 <div className="sidebar-empty">
                     <svg className="sidebar-empty-icon" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                         <ellipse cx="12" cy="5" rx="9" ry="3" />
@@ -71,7 +75,7 @@ export default function Sidebar({tabId, connected, onSelectTable, onOpenTable, o
     }
 
     return (
-        <aside className="sidebar">
+        <aside className="sidebar" style={style}>
             <div className="sidebar-header">
                 <span className="sidebar-heading">Schemas & Tabelas</span>
                 <button className="sidebar-refresh-btn" onClick={handleRefresh} disabled={loading} title="Recarregar catálogo (ignora o cache)">

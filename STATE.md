@@ -270,3 +270,31 @@ certo, sem erro; sidebar carregou as 403 tabelas depois. Ver memória
 agora fica na fila (sem erro) atrás do carregamento do catálogo, sem feedback
 visual de "carregando" — considerar colunas lazy no autocomplete se isso for
 reportado como lento de novo.
+
+## ✨ Abas de resultado + fila de execução + painéis redimensionáveis (2026-09-15)
+Pedido do usuário: (1) múltiplas queries no console sem perder resultado
+anterior; (2) painéis redimensionáveis por arrasto (não precisa de Qt/GTK,
+Wails é webview comum, CSS/JS puro); (3) fila de execução (Executar com
+outra rodando enfileira, não bloqueia).
+
+**Restrição real exposta antes de implementar**: backend só mantém 1 cursor
+de streaming ativo por sessão — só a aba de resultado MAIS RECENTE pode ter
+"Carregar mais"; abas anteriores congelam ao iniciar uma execução nova
+(aceito pelo usuário, é o comportamento comum de clientes SQL).
+
+**Implementação**: `frontend/src/lib/useDragResize.ts` (hook genérico,
+sem lib nova) pros painéis. `ConsoleTab.tsx`: estado único de resultado
+trocado por `resultTabs: ResultTabState[]` (limite 10, descarta as mais
+antigas já terminadas); cada `handleRun` serializa a sequência completa via
+`withQueue(`${tabId}:query`, ...)` — chave DIFERENTE de `tabId` puro (usado
+pelos bindings individuais via `lib/tabApi.ts`), mesmo cuidado anti-deadlock
+do TableTab/SchemaTab. "Executar" sempre clicável; "Cancelar" só quando algo
+roda/está na fila.
+
+**Verificado contra Postgres real**: `pg_sleep(3)` + query imediata depois
+→ 2ª só roda após 1ª terminar, sem se sobrescreverem; `order_items` depois
+→ 3ª aba ok, conexão saudável; cancelar `pg_sleep(30)` real → erro pgx
+correto, conexão recupera. Redimensionar sidebar/editor por arrasto →
+funciona, persiste no localStorage. Ver memória
+`wisp-result-tabs-queue-resizable-panels`. `go build`/`tsc`/`npm run build`
+limpos.

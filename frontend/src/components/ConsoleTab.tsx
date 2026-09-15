@@ -1,4 +1,4 @@
-import {useState} from 'react';
+import {useState, useRef} from 'react';
 // Lib pronta de formatação SQL (ver ADR 0005) — formata o editor inteiro,
 // sem parser próprio no Wisp.
 import {format} from 'sql-formatter';
@@ -13,8 +13,46 @@ import Sidebar from './Sidebar';
 import QueryHistory from './QueryHistory';
 import ScriptsPanel from './ScriptsPanel';
 import ConnectionBar from './ConnectionBar';
+import {useDragResize} from '../lib/useDragResize';
+import {withQueue} from '../lib/tabCallQueue';
 
 const DEFAULT_BATCH_SIZE = 200;
+// Abas de resultado por console — limite pra não crescer memória sem parar
+// numa sessão longa com muitas execuções (ver ResultTabState abaixo).
+const MAX_RESULT_TABS = 10;
+
+// Um resultado de execução, numa aba própria (estilo DBeaver "Result Sets").
+// Cada handleRun cria uma nova entrada em vez de sobrescrever um estado
+// único — múltiplas execuções não perdem resultados anteriores.
+//
+// Restrição real do backend (não contornável sem reabrir o Session Manager):
+// uma sessão só mantém UM cursor de streaming ativo por vez — uma nova
+// ExecuteStreaming fecha o cursor anterior (ver internal/db/driver.go,
+// internal/session). Por isso, ao iniciar uma NOVA execução, TODAS as abas
+// de resultado anteriores têm hasMore forçado pra false ("congela" — não
+// tentam mais "Carregar mais", pois o cursor delas já foi fechado de
+// verdade no backend). Só a aba mais recente pode ter hasMore=true.
+interface ResultTabState {
+    id: string;
+    queryText: string;
+    label: string;
+    status: 'queued' | 'running' | 'done' | 'error';
+    columns: string[];
+    rows: any[][];
+    hasMore: boolean;
+    fetching: boolean;
+    durationMs: number | null;
+    errorMsg: string | null;
+    editContext: EditContext | null;
+    readOnlyNotice: string | null;
+    editSourceRef: SingleTableRef | null;
+}
+
+function makeResultLabel(text: string, seq: number): string {
+    const firstLine = text.trim().split('\n')[0]?.trim();
+    if (!firstLine) return `Resultado ${seq}`;
+    return firstLine.length > 40 ? `${firstLine.slice(0, 40)}…` : firstLine;
+}
 
 interface Props {
     tabId: string;
@@ -29,14 +67,17 @@ interface Props {
 // é a chave de isolamento no backend (Session Manager, ver internal/session).
 export default function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTable, onOpenSchema}: Props) {
     const [query, setQuery] = useState('SELECT * FROM customers ORDER BY id');
+    // Painéis redimensionáveis por arrasto (ver lib/useDragResize.ts) —
+    // Wails só renderiza uma webview comum, isso é CSS/JS puro, sem
+    // limitação de toolkit nativo.
+    const sidebarResize = useDragResize({axis: 'x', initial: 250, min: 180, max: 480, storageKey: 'wisp:sidebarWidth'});
+    const editorResize = useDragResize({axis: 'y', initial: 220, min: 120, max: 600, storageKey: 'wisp:editorHeight'});
     const [connected, setConnected] = useState(false);
     const [status, setStatus] = useState('desconectado');
-    const [columns, setColumns] = useState<string[]>([]);
-    const [rows, setRows] = useState<any[][]>([]);
-    const [hasMore, setHasMore] = useState(false);
-    const [running, setRunning] = useState(false);
-    const [fetching, setFetching] = useState(false);
-    const [durationMs, setDurationMs] = useState<number | null>(null);
+    // Abas de resultado (ver ResultTabState acima) — uma por execução.
+    const [resultTabs, setResultTabs] = useState<ResultTabState[]>([]);
+    const [activeResultId, setActiveResultId] = useState<string | null>(null);
+    const resultSeqRef = useRef(0);
     const [batchSize, setBatchSize] = useState(DEFAULT_BATCH_SIZE);
     const [batchSizeInput, setBatchSizeInput] = useState(String(DEFAULT_BATCH_SIZE));
     const [showHistory, setShowHistory] = useState(false);
@@ -51,12 +92,6 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTabl
     // App.tsx ao abrir uma aba de tabela, que reconecta com ConnectSaved
     // (conexão própria por aba, nunca reusa a sessão do console).
     const [connectionId, setConnectionId] = useState<string | null>(null);
-    // Edição inline (ADR 0004): contexto computado após cada execução —
-    // tabela-fonte detectada via regex leve + PK real via IntrospectTable.
-    // Sem tabela única/PK, o grid fica read-only com aviso (nunca erro).
-    const [editContext, setEditContext] = useState<EditContext | null>(null);
-    const [readOnlyNotice, setReadOnlyNotice] = useState<string | null>(null);
-    const [editSourceRef, setEditSourceRef] = useState<SingleTableRef | null>(null);
     const [showSaveForm, setShowSaveForm] = useState(false);
     const [saveNameInput, setSaveNameInput] = useState('');
     const [savingScript, setSavingScript] = useState(false);
@@ -73,7 +108,16 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTabl
         }
     }
 
-    const busy = running || fetching;
+    // "Executar" fica sempre clicável quando conectado (enfileira mais uma
+    // execução, ver handleRun) — "Cancelar" só interrompe a que está
+    // rodando de verdade agora (a fila garante que só uma roda por vez).
+    const anyRunning = resultTabs.some(t => t.status === 'running' || t.status === 'queued');
+    const activeResult = resultTabs.find(t => t.id === activeResultId) ?? null;
+    const activeFetching = activeResult?.fetching ?? false;
+
+    function updateResultTab(id: string, updater: (t: ResultTabState) => ResultTabState) {
+        setResultTabs(prev => prev.map(t => (t.id === id ? updater(t) : t)));
+    }
 
     async function handleConnected(connectionId: string, connName?: string, activeDriver?: string) {
         setConnected(true);
@@ -130,16 +174,11 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTabl
         setConnected(false);
         onConnectedChange(false);
         setStatus('desconectado');
-        setColumns([]);
-        setRows([]);
+        setResultTabs([]);
+        setActiveResultId(null);
         setCatalog([]);
         setDriver(undefined);
         setConnectionId(null);
-        setHasMore(false);
-        setDurationMs(null);
-        setEditContext(null);
-        setReadOnlyNotice(null);
-        setEditSourceRef(null);
     }
 
     // Resolve o schema da tabela detectada pra chamar IntrospectTable (que
@@ -174,11 +213,10 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTabl
     // erro. Se o cursor ainda está aberto (hasMore), o banco pode recusar a
     // segunda query na mesma conexão — nesse caso adia sem aviso e tenta de
     // novo ao carregar o resto em handleLoadMore.
-    async function tryComputeEditContext(ref: SingleTableRef, resultColumns: string[], exhausted: boolean) {
+    async function tryComputeEditContext(id: string, ref: SingleTableRef, resultColumns: string[], exhausted: boolean) {
         const schema = resolveEditSchema(ref.schema, ref.table);
         if (!schema) {
-            setEditContext(null);
-            setReadOnlyNotice(`Tabela "${ref.table}" existe em mais de um schema — grade somente leitura.`);
+            updateResultTab(id, t => ({...t, editContext: null, readOnlyNotice: `Tabela "${ref.table}" existe em mais de um schema — grade somente leitura.`}));
             return;
         }
         let full: db.Table | null = null;
@@ -186,21 +224,18 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTabl
             full = await IntrospectTable(tabId, schema, ref.table);
         } catch {
             if (exhausted) {
-                setEditContext(null);
-                setReadOnlyNotice(`Não foi possível verificar a chave primária de ${schema}.${ref.table} — grade somente leitura.`);
+                updateResultTab(id, t => ({...t, editContext: null, readOnlyNotice: `Não foi possível verificar a chave primária de ${schema}.${ref.table} — grade somente leitura.`}));
             }
             return;
         }
         const cols = full?.Columns ?? [];
         if (cols.length === 0) {
-            setEditContext(null);
-            setReadOnlyNotice(`Tabela ${schema}.${ref.table} não encontrada no catálogo — grade somente leitura.`);
+            updateResultTab(id, t => ({...t, editContext: null, readOnlyNotice: `Tabela ${schema}.${ref.table} não encontrada no catálogo — grade somente leitura.`}));
             return;
         }
         const pkColumns = cols.filter(c => c.IsPrimaryKey).map(c => c.Name);
         if (pkColumns.length === 0) {
-            setEditContext(null);
-            setReadOnlyNotice(`Tabela ${schema}.${ref.table} sem chave primária — grade somente leitura.`);
+            updateResultTab(id, t => ({...t, editContext: null, readOnlyNotice: `Tabela ${schema}.${ref.table} sem chave primária — grade somente leitura.`}));
             return;
         }
         const byName = new Map(cols.map(c => [c.Name, c]));
@@ -213,28 +248,24 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTabl
             return !!c && !c.IsGenerated && !c.IsPrimaryKey;
         });
         if (editableColumns.length === 0) {
-            setEditContext(null);
-            setReadOnlyNotice(`Nenhuma coluna editável em ${schema}.${ref.table} (só expressões ou colunas geradas) — grade somente leitura.`);
+            updateResultTab(id, t => ({...t, editContext: null, readOnlyNotice: `Nenhuma coluna editável em ${schema}.${ref.table} (só expressões ou colunas geradas) — grade somente leitura.`}));
             return;
         }
-        setEditContext({schema, table: ref.table, pkColumns, editableColumns});
-        setReadOnlyNotice(null);
+        updateResultTab(id, t => ({...t, editContext: {schema, table: ref.table, pkColumns, editableColumns}, readOnlyNotice: null}));
     }
 
-    async function fetchBatch(currentRows: any[][], replace: boolean) {
-        setFetching(true);
+    async function fetchBatchFor(id: string, currentRows: any[][], replace: boolean) {
+        updateResultTab(id, t => ({...t, fetching: true}));
         try {
             const batch = await FetchRows(tabId, batchSize);
             const combined = replace ? (batch.Rows ?? []) : [...currentRows, ...(batch.Rows ?? [])];
-            setRows(combined);
-            setHasMore(batch.HasMore);
+            updateResultTab(id, t => ({...t, rows: combined, hasMore: batch.HasMore, fetching: false}));
             setStatus(`ok — ${combined.length} linha(s) carregada(s)${batch.HasMore ? ', mais disponíveis' : ''}`);
             return {rows: combined, hasMore: batch.HasMore};
         } catch (err) {
+            updateResultTab(id, t => ({...t, fetching: false}));
             setStatus(`erro ao buscar linhas: ${err}`);
             return {rows: currentRows, hasMore: false};
-        } finally {
-            setFetching(false);
         }
     }
 
@@ -248,53 +279,104 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTabl
             return;
         }
         const text = textOverride ?? query;
-        setRunning(true);
-        setColumns([]);
-        setRows([]);
-        setHasMore(false);
-        setDurationMs(null);
-        setEditContext(null);
-        setReadOnlyNotice(null);
-        setEditSourceRef(null);
-        try {
-            const meta = await RunQuery(tabId, text);
-            const resultColumns = meta.Columns ?? [];
-            setColumns(resultColumns);
-            setDurationMs(meta.DurationMs);
-            setRunning(false);
-            const fetched = await fetchBatch([], true);
-            // Detecção de tabela única após o fetch (sequencial, nunca
-            // Promise.all — mesma regra de conexão single-conn do
-            // handleConnected). Sem match, o grid segue read-only sem aviso.
-            const ref = detectSingleTable(text);
-            setEditSourceRef(ref);
-            if (ref) {
-                await tryComputeEditContext(ref, resultColumns, !fetched.hasMore);
+        const id = crypto.randomUUID();
+        resultSeqRef.current += 1;
+        const newTab: ResultTabState = {
+            id,
+            queryText: text,
+            label: makeResultLabel(text, resultSeqRef.current),
+            status: 'queued',
+            columns: [],
+            rows: [],
+            hasMore: false,
+            fetching: false,
+            durationMs: null,
+            errorMsg: null,
+            editContext: null,
+            readOnlyNotice: null,
+            editSourceRef: null,
+        };
+        setResultTabs(prev => {
+            // Cursor do backend só existe pra ÚLTIMA query executada (ver
+            // comentário em ResultTabState) — qualquer aba anterior perde
+            // "carregar mais" no instante em que uma execução nova começa,
+            // porque o cursor dela já foi fechado de verdade no backend.
+            const frozen = prev.map(t => (t.hasMore ? {...t, hasMore: false} : t));
+            const next = [...frozen, newTab];
+            if (next.length <= MAX_RESULT_TABS) return next;
+            // Descarta as mais antigas já terminadas (done/error) antes de
+            // qualquer uma rodando/na fila — nunca descarta trabalho em voo.
+            const removable = next.filter(t => t.status === 'done' || t.status === 'error');
+            const toDrop = next.length - MAX_RESULT_TABS;
+            const dropIds = new Set(removable.slice(0, toDrop).map(t => t.id));
+            return next.filter(t => !dropIds.has(t.id));
+        });
+        setActiveResultId(id);
+
+        // withQueue com chave `${tabId}:query` (NUNCA `tabId` puro — os
+        // bindings individuais abaixo já usam essa chave via lib/tabApi.ts;
+        // reusar a mesma aqui causaria deadlock, mesmo cuidado de
+        // TableTab.tsx) serializa a sequência INTEIRA (RunQuery+FetchRows+
+        // detecção) de cada execução em relação às outras — é isso que
+        // implementa a fila: clicar Executar de novo com uma já rodando só
+        // adiciona ao fim da fila, sem bloquear a UI nem colidir na conexão.
+        await withQueue(`${tabId}:query`, async () => {
+            updateResultTab(id, t => ({...t, status: 'running'}));
+            try {
+                const meta = await RunQuery(tabId, text);
+                const resultColumns = meta.Columns ?? [];
+                updateResultTab(id, t => ({...t, columns: resultColumns, durationMs: meta.DurationMs}));
+                const fetched = await fetchBatchFor(id, [], true);
+                // Detecção de tabela única após o fetch (sequencial, nunca
+                // Promise.all — mesma regra de conexão single-conn do
+                // handleConnected). Sem match, o grid segue read-only sem aviso.
+                const ref = detectSingleTable(text);
+                updateResultTab(id, t => ({...t, editSourceRef: ref}));
+                if (ref) {
+                    await tryComputeEditContext(id, ref, resultColumns, !fetched.hasMore);
+                }
+                updateResultTab(id, t => ({...t, status: 'done'}));
+            } catch (err) {
+                updateResultTab(id, t => ({...t, status: 'error', errorMsg: String(err)}));
+                setStatus(`erro ao executar: ${err}`);
+            } finally {
+                setHistoryToken(t => t + 1);
             }
-        } catch (err) {
-            setStatus(`erro ao executar: ${err}`);
-            setRunning(false);
-        } finally {
-            setHistoryToken(t => t + 1);
-        }
+        });
     }
 
     async function handleLoadMore() {
-        const fetched = await fetchBatch(rows, false);
+        if (!activeResult) return;
+        const id = activeResult.id;
+        const fetched = await fetchBatchFor(id, activeResult.rows, false);
         // Retry da detecção adiada: se o cursor estava aberto no primeiro
         // fetch, a introspecção pode ter sido adiada sem aviso — tenta de
         // novo agora que o resultado avançou (ou se esgotou).
-        if (editSourceRef && !editContext) {
-            await tryComputeEditContext(editSourceRef, columns, !fetched.hasMore);
+        if (activeResult.editSourceRef && !activeResult.editContext) {
+            await tryComputeEditContext(id, activeResult.editSourceRef, activeResult.columns, !fetched.hasMore);
         }
     }
 
     function handleCellSaved(rowIndex: number, colIndex: number, newValue: any) {
-        setRows(prev => prev.map((r, i) => (i === rowIndex ? r.map((v, j) => (j === colIndex ? newValue : v)) : r)));
+        if (!activeResultId) return;
+        updateResultTab(activeResultId, t => ({
+            ...t,
+            rows: t.rows.map((r, i) => (i === rowIndex ? r.map((v, j) => (j === colIndex ? newValue : v)) : r)),
+        }));
     }
 
     async function handleCancel() {
         await CancelQuery(tabId);
+    }
+
+    function handleCloseResultTab(id: string) {
+        setResultTabs(prev => {
+            const next = prev.filter(t => t.id !== id);
+            if (activeResultId === id) {
+                setActiveResultId(next.length > 0 ? next[next.length - 1].id : null);
+            }
+            return next;
+        });
     }
 
     function handleSelectTable(schema: string, table: string) {
@@ -484,10 +566,18 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTabl
             </div>
 
             <div className="workspace">
-                <Sidebar tabId={tabId} connected={connected} onSelectTable={handleSelectTable} onOpenTable={handleOpenTableRequest} onOpenSchema={handleOpenSchemaRequest} />
+                <Sidebar
+                    tabId={tabId}
+                    connected={connected}
+                    onSelectTable={handleSelectTable}
+                    onOpenTable={handleOpenTableRequest}
+                    onOpenSchema={handleOpenSchemaRequest}
+                    style={{width: sidebarResize.size, flex: '0 0 auto'}}
+                />
+                <div className="resize-handle resize-handle-v" onMouseDown={sidebarResize.onMouseDown} title="Arrastar para redimensionar" />
 
                 <main className="main-panel">
-                    <div className="editor-pane">
+                    <div className="editor-pane" style={{height: editorResize.size}}>
                         <SqlEditor
                             value={query}
                             onChange={setQuery}
@@ -499,29 +589,29 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTabl
                             onOpenIdentifier={handleOpenIdentifier}
                         />
                     </div>
+                    <div className="resize-handle resize-handle-h" onMouseDown={editorResize.onMouseDown} title="Arrastar para redimensionar" />
                     <div className="editor-actions">
                         <div className="editor-actions-left">
-                            {busy ? (
-                                <button className="btn btn-danger" onClick={handleCancel} title="Cancelar consulta em andamento">
+                            <button className="btn btn-success" onClick={() => handleRun()} disabled={!connected} title="Executar (Ctrl+Enter) — enfileira se outra já estiver rodando. Selecione um trecho e use Ctrl+Shift+Enter pra rodar só ele.">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                                    <polygon points="5 3 19 12 5 21 5 3" />
+                                </svg>
+                                Executar
+                                <kbd className="kbd-shortcut">Ctrl+Enter</kbd>
+                                <kbd className="kbd-shortcut" title="Executar seleção ou statement atual">Ctrl+Shift+Enter</kbd>
+                            </button>
+                            {anyRunning && (
+                                <button className="btn btn-danger" onClick={handleCancel} title="Cancelar a consulta em andamento agora">
                                     <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                                         <rect x="4" y="4" width="16" height="16" rx="2" />
                                     </svg>
                                     Cancelar
                                 </button>
-                            ) : (
-                                <button className="btn btn-success" onClick={() => handleRun()} disabled={!connected} title="Executar tudo (Ctrl+Enter) — ou selecione um trecho e use Ctrl+Shift+Enter para rodar só ele">
-                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                                        <polygon points="5 3 19 12 5 21 5 3" />
-                                    </svg>
-                                    Executar
-                                    <kbd className="kbd-shortcut">Ctrl+Enter</kbd>
-                                    <kbd className="kbd-shortcut" title="Executar seleção ou statement atual">Ctrl+Shift+Enter</kbd>
-                                </button>
                             )}
 
-                            {durationMs !== null && (
+                            {activeResult?.durationMs != null && (
                                 <span className="duration-badge" title="Tempo de execução no servidor (não inclui o tempo de buscar as linhas)">
-                                    {durationMs} ms
+                                    {activeResult.durationMs} ms
                                 </span>
                             )}
                         </div>
@@ -547,25 +637,60 @@ export default function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTabl
                                             setBatchSizeInput(String(batchSize));
                                         }
                                     }}
-                                    disabled={busy}
+                                    disabled={activeFetching}
                                 />
                                 por vez
                             </label>
                         </div>
                     </div>
+
+                    {resultTabs.length > 0 && (
+                        <div className="result-tab-bar" role="tablist">
+                            {resultTabs.map(t => (
+                                <button
+                                    key={t.id}
+                                    role="tab"
+                                    aria-selected={t.id === activeResultId}
+                                    className={`result-tab-pill ${t.id === activeResultId ? 'active' : ''} result-tab-${t.status}`}
+                                    onClick={() => setActiveResultId(t.id)}
+                                    title={t.queryText}
+                                >
+                                    <span className={`result-tab-dot result-tab-dot-${t.status}`} />
+                                    {t.label}
+                                    {t.status === 'queued' && <span className="result-tab-hint">na fila</span>}
+                                    {t.status === 'running' && <span className="result-tab-hint">rodando…</span>}
+                                    <span
+                                        className="result-tab-close"
+                                        onClick={e => {
+                                            e.stopPropagation();
+                                            handleCloseResultTab(t.id);
+                                        }}
+                                        title="Fechar este resultado"
+                                    >
+                                        ×
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
+                    )}
+
+                    {activeResult && activeResult.status === 'error' && (
+                        <div className="result-error-banner">Erro: {activeResult.errorMsg}</div>
+                    )}
+
                     <ResultGrid
-                        columns={columns}
-                        rows={rows}
+                        columns={activeResult?.columns ?? []}
+                        rows={activeResult?.rows ?? []}
                         tabId={tabId}
-                        editContext={editContext}
-                        readOnlyNotice={readOnlyNotice}
+                        editContext={activeResult?.editContext ?? null}
+                        readOnlyNotice={activeResult?.readOnlyNotice ?? null}
                         onCellSaved={handleCellSaved}
                         onStatus={setStatus}
                     />
-                    {hasMore && (
+                    {activeResult?.hasMore && (
                         <div className="load-more-bar">
-                            <button className="btn btn-secondary" onClick={handleLoadMore} disabled={busy}>
-                                {fetching ? 'Carregando…' : `Carregar mais ${batchSize}`}
+                            <button className="btn btn-secondary" onClick={handleLoadMore} disabled={activeFetching}>
+                                {activeFetching ? 'Carregando…' : `Carregar mais ${batchSize}`}
                             </button>
                             <span className="load-more-hint">Mais linhas disponíveis no resultado.</span>
                         </div>
