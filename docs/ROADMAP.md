@@ -45,11 +45,13 @@ Outside the next batch, but recorded because the two analyses diverged on it (no
 - **UI translation to English (i18n)**: the app's interface (buttons, labels, messages) is currently Brazilian Portuguese throughout. As the project goes open source, this should move to English (or a language switcher) in a dedicated phase — needs a full string inventory first; not a small change. Public docs (this roadmap, `README.md`, `ARCHITECTURE.md`, ADRs) are already in English as of 2026-09-15; `CLAUDE.md`/`STATE.md` stay in Portuguese (internal working notes).
 
 ## Phase 4+ — Future explorations (not committed)
-- Visual query builder (Strategy per SQL dialect) — both Phase 3 analyses agree: irrelevant for people who already write SQL, only enters real planning once Phase 3 is stable and demand is validated.
 - Semantic search over query history (`sqlite-vec`, never an external vector service) — only with real validated demand.
-- Syncing saved connections across devices (would reopen the Turso evaluation) — only with real validated demand.
 - **SSH tunnel built into the connection flow** (`crypto/ssh`) — the project will be open source regardless (that's a given, not a condition), but that alone doesn't make the feature urgent: the first user is the maintainer, who already has a VPN covering access to databases behind a firewall. Stays queued, deprioritized until real demand appears (the maintainer's own, or another project user's).
-- DuckDB (ADR 0002) — native per-OS CI is a large effort; only enters real planning if a genuine analytical use case shows up, not as a "DBeaver replacement".
+- DuckDB (ADR 0002) — niche embedded-analytics engine (Parquet/CSV local processing, popular in Python/data-eng pipelines), not a mainstream transactional database — a genuinely more-used dialect (see MySQL above) should come first if a third dialect is ever justified by real demand. Also carries real cost: native per-OS CI, no mature pure-Go driver.
+
+**Deliberately dropped from consideration (2026-09-15, maintainer's call):**
+- **Visual query builder** — never something the maintainer asked for; it was an item the two Phase 3 analyses (Cursor Agent, OpenCode) considered and rejected on their own. What the maintainer actually wants — table/column suggestions while writing `FROM`/`JOIN`/`ON`/`WHERE` — is plain contextual autocomplete, already shipped (schema/table/column suggestions with dot-narrowing, plus table-alias resolution through JOINs). No low-code UI is being built for this.
+- **Syncing saved connections across devices** — not something comparable tools do either (DBeaver's free/Community edition doesn't sync connections to the cloud; that's paywalled in enterprise tooling like DataGrip's JetBrains Account or DBeaver Team Edition). Not a real gap versus what people already use.
 
 ## Out of scope (an active decision, not an oversight)
 - GPU acceleration in the data pipeline — no identified hot path.
