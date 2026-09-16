@@ -7,6 +7,33 @@ Cliente SQL desktop leve e nativo (Go/Wails + Webview). Estas regras são **espe
 - Leia `STATE.md` no início de qualquer sessão — ele traz o checkpoint da tarefa em andamento.
 - Tarefa multi-etapa ou sessão longa: carregue a skill `context-guard` e mantenha `STATE.md` atualizado (regra global, reforçada aqui porque este projeto terá várias fases).
 
+## Idioma (política do projeto — sobrescreve a regra global de PT-BR)
+Decisão do usuário (2026-09-16), motivo explícito: mais chance de o projeto
+ser visto/descoberto em inglês do que em português, sendo open source.
+Isso substitui, só neste projeto, a regra global de "comentários e commits
+em PT-BR" — a regra global segue valendo em outros projetos.
+
+- **Comentários no código Go** (`.go`, incluindo `app.go`/`internal/**`):
+  **inglês**, a partir de agora. Comentários já existentes em PT-BR migram
+  numa leva dedicada futura (não é retrofit obrigatório imediato); todo
+  comentário NOVO a partir de 2026-09-16 já nasce em inglês.
+- **Mensagens de commit**: inglês, a partir de agora (histórico do git é
+  público e pesquisável).
+- **Conteúdo voltado ao GitHub** (release notes, README, issues, PRs,
+  CONTRIBUTING, ADRs): inglês — já era a prática desde 2026-09-15/16 (ver
+  `docs/adr/0006-i18n.md`), aqui só formalizado como política do projeto.
+- **Interface do app (frontend)**: **bilíngue** (inglês + PT-BR), nunca só
+  inglês — o mantenedor continua usando em português no dia a dia. Ver
+  plano em `docs/adr/0006-i18n.md` (i18next/react-i18next, seletor de
+  idioma, detecção por locale do SO) — aceito, ainda não implementado.
+- **O que continua em PT-BR, sem mudança**: `STATE.md` e `CLAUDE.md` (notas
+  de trabalho internas, nunca voltadas a quem lê o repo por fora) — mesma
+  lógica de sempre, isso não muda com a política acima. Comentários no
+  código TS/TSX do frontend não foram decididos ainda nesta conversa —
+  tratar como PT-BR até decisão explícita em contrário (mesma convenção
+  global), já que o pedido do usuário foi especificamente sobre "docs go"
+  (comentários Go) e conteúdo git-facing, não sobre comentários TS/TSX.
+
 ## Decisões técnicas fixas (não reabrir sem ADR novo)
 1. **Backend: Go + Wails v2/v3.** Frontend: Webview (React + Monaco Editor). Ver `docs/adr/0001-stack.md`.
 2. **Evitar CGO onde possível — não é regra absoluta.** Drivers puro Go (`pgx`, `clickhouse-go`, `go-sql-driver/mysql`, `modernc.org/sqlite`) são obrigatórios quando existir opção madura. **Exceção documentada: DuckDB** (`go-duckdb`/`duckdb-go` exigem CGO — não há driver puro Go maduro). Builds de release com DuckDB rodam em runners nativos por OS (GitHub Actions macOS/Linux/Windows), não cross-compile forçado. Ver `docs/adr/0002-cgo-policy.md`.

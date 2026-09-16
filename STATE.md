@@ -687,6 +687,25 @@ estava em andamento: tradução dos relatórios internos e o plano técnico.
   foi tocado, nenhuma string de UI foi trocada, nenhuma dependência nova
   foi instalada ainda. É trabalho pra uma leva dedicada futura.
 
+## ✅ Política de idioma do projeto definida (2026-09-16)
+Usuário formalizou (motivo explícito: mais chance de ser visto/descoberto
+em inglês do que em português, sendo open source):
+- Comentários no código Go: inglês a partir de agora (existentes migram
+  numa leva futura, não é retrofit imediato).
+- Mensagens de commit: inglês a partir de agora.
+- Conteúdo voltado ao GitHub (release notes, README, ADRs, issues, PRs):
+  inglês — já estava assim desde 2026-09-15/16, só formalizado.
+- Interface do app: **bilíngue** (inglês + PT-BR), nunca só inglês — plano
+  já aceito em `docs/adr/0006-i18n.md`, ainda não implementado.
+- Ficam como estavam: `STATE.md`/`CLAUDE.md` em PT-BR (notas internas);
+  comentários TS/TSX do frontend não decididos ainda, tratar como PT-BR
+  até decisão explícita.
+
+Registrado em `CLAUDE.md` (seção "Idioma", nova) e `docs/adr/0006-i18n.md`
+(corrigida contradição — dizia que comentários ficariam em português).
+**A partir deste commit, meus próprios commits neste projeto passam a ser
+em inglês.**
+
 ## Última atualização
 2026-09-15 (fim de sessão) — Autocomplete completo (v1+v2), uppercase automático, pretty-print SQL, copiar especial no grid e **edição inline de células** (item 7, concluído nesta sessão com 4 bugs reais de causa raiz corrigidos — ver seção "Edição inline de células" acima), todos implementados via delegação ao OpenCode + revisão/depuração minha antes de aceitar.
 
