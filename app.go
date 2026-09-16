@@ -453,6 +453,26 @@ func (a *App) UpdateCell(tabID string, schema string, table string, pkColumns []
 	return s.Driver.UpdateCell(s.Ctx, schema, table, pkColumns, pkValues, column, oldValue, newValue)
 }
 
+// InsertRow insere uma linha nova na conexão da aba tabId. Resolve a sessão
+// pelo tabID igual a UpdateCell.
+func (a *App) InsertRow(tabID string, schema string, table string, columns []string, values []any) error {
+	s, err := a.sessions.Get(tabID)
+	if err != nil {
+		return err
+	}
+	return s.Driver.InsertRow(s.Ctx, schema, table, columns, values)
+}
+
+// DeleteRow apaga uma linha (por PK real) na conexão da aba tabId. Resolve
+// a sessão pelo tabID igual a UpdateCell.
+func (a *App) DeleteRow(tabID string, schema string, table string, pkColumns []string, pkValues []any) (int64, error) {
+	s, err := a.sessions.Get(tabID)
+	if err != nil {
+		return 0, err
+	}
+	return s.Driver.DeleteRow(s.Ctx, schema, table, pkColumns, pkValues)
+}
+
 // GetTableDDL retorna o DDL de criação da tabela na conexão da aba tabId.
 // Resolve a sessão pelo tabID igual a IntrospectTable.
 func (a *App) GetTableDDL(tabID string, schema string, table string) (string, error) {

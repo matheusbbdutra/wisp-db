@@ -177,6 +177,18 @@ type DatabaseDriver interface {
 	// o usuário em vez de assumir sucesso.
 	UpdateCell(ctx context.Context, schema, table string, pkColumns []string, pkValues []any, column string, oldValue any, newValue any) (rowsAffected int64, err error)
 
+	// InsertRow insere uma linha nova, sempre com lista explícita de colunas
+	// (nunca posicional) — parametrizado, mesmo padrão de segurança do
+	// UpdateCell. columns/values devem estar na mesma ordem.
+	InsertRow(ctx context.Context, schema, table string, columns []string, values []any) error
+
+	// DeleteRow apaga a linha identificada pela PK real (nunca por todas as
+	// colunas visíveis). Retorna rowsAffected — 0 significa que a linha já
+	// não existia mais (outro processo apagou antes), não erro; o caller
+	// deve avisar o usuário em vez de assumir sucesso (mesmo padrão de
+	// UpdateCell/checagem otimista).
+	DeleteRow(ctx context.Context, schema, table string, pkColumns []string, pkValues []any) (rowsAffected int64, err error)
+
 	// TableDDL retorna o DDL de criação da tabela.
 	TableDDL(ctx context.Context, schema, table string) (string, error)
 	// ListTriggers lista triggers de uma tabela, com DDL completo.

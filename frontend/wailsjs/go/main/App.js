@@ -18,6 +18,10 @@ export function ConnectSaved(arg1, arg2) {
   return window['go']['main']['App']['ConnectSaved'](arg1, arg2);
 }
 
+export function DeleteRow(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['DeleteRow'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function DeleteSavedConnection(arg1) {
   return window['go']['main']['App']['DeleteSavedConnection'](arg1);
 }
@@ -40,6 +44,10 @@ export function GetQueryHistory(arg1) {
 
 export function GetTableDDL(arg1, arg2, arg3) {
   return window['go']['main']['App']['GetTableDDL'](arg1, arg2, arg3);
+}
+
+export function InsertRow(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['InsertRow'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function IntrospectSchemaTables(arg1, arg2) {

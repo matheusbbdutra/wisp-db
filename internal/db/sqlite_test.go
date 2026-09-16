@@ -62,6 +62,79 @@ func TestBuildUpdateCellQueryErros(t *testing.T) {
 	}
 }
 
+func TestBuildInsertRowQuery(t *testing.T) {
+	query, args, err := buildInsertRowQuery("?", "", "customers", []string{"name", "email"}, []any{"Ana", "ana@example.com"})
+	if err != nil {
+		t.Fatalf("erro inesperado: %v", err)
+	}
+	if !strings.Contains(query, `INSERT INTO "customers" ("name", "email") VALUES (?, ?)`) {
+		t.Fatalf("query inesperada: %s", query)
+	}
+	if len(args) != 2 || args[0] != "Ana" || args[1] != "ana@example.com" {
+		t.Fatalf("args incorretos: %v", args)
+	}
+}
+
+func TestBuildInsertRowQueryPostgresPlaceholders(t *testing.T) {
+	query, args, err := buildInsertRowQuery("$", "public", "customers", []string{"name"}, []any{"Ana"})
+	if err != nil {
+		t.Fatalf("erro inesperado: %v", err)
+	}
+	if !strings.Contains(query, `INSERT INTO "public"."customers" ("name") VALUES ($1)`) {
+		t.Fatalf("query inesperada: %s", query)
+	}
+	if len(args) != 1 || args[0] != "Ana" {
+		t.Fatalf("args incorretos: %v", args)
+	}
+}
+
+func TestBuildInsertRowQueryErros(t *testing.T) {
+	if _, _, err := buildInsertRowQuery("?", "", "t", nil, nil); err == nil {
+		t.Fatal("esperava erro com columns vazio")
+	}
+	if _, _, err := buildInsertRowQuery("?", "", "t", []string{"a", "b"}, []any{1}); err == nil {
+		t.Fatal("esperava erro com columns/values divergentes")
+	}
+	if _, _, err := buildInsertRowQuery("?", "", "", []string{"a"}, []any{1}); err == nil {
+		t.Fatal("esperava erro com tabela vazia")
+	}
+}
+
+func TestBuildDeleteRowQuery(t *testing.T) {
+	query, args, err := buildDeleteRowQuery("?", "", "customers", []string{"id"}, []any{42})
+	if err != nil {
+		t.Fatalf("erro inesperado: %v", err)
+	}
+	if !strings.Contains(query, `DELETE FROM "customers" WHERE "id" = ?`) {
+		t.Fatalf("query inesperada: %s", query)
+	}
+	if len(args) != 1 || args[0] != 42 {
+		t.Fatalf("args incorretos: %v", args)
+	}
+}
+
+func TestBuildDeleteRowQueryPKComposta(t *testing.T) {
+	query, args, err := buildDeleteRowQuery("$", "", "order_items", []string{"order_id", "item_seq"}, []any{1, 2})
+	if err != nil {
+		t.Fatalf("erro inesperado: %v", err)
+	}
+	if !strings.Contains(query, `DELETE FROM "order_items" WHERE "order_id" = $1 AND "item_seq" = $2`) {
+		t.Fatalf("query inesperada: %s", query)
+	}
+	if len(args) != 2 || args[0] != 1 || args[1] != 2 {
+		t.Fatalf("args incorretos: %v", args)
+	}
+}
+
+func TestBuildDeleteRowQueryErros(t *testing.T) {
+	if _, _, err := buildDeleteRowQuery("?", "", "t", nil, nil); err == nil {
+		t.Fatal("esperava erro com pkColumns vazio")
+	}
+	if _, _, err := buildDeleteRowQuery("?", "", "t", []string{"a", "b"}, []any{1}); err == nil {
+		t.Fatal("esperava erro com pkColumns/pkValues divergentes")
+	}
+}
+
 func TestQuoteIdent(t *testing.T) {
 	if got := quoteIdent(`a"b`); got != `"a""b"` {
 		t.Fatalf("escape incorreto: %s", got)
@@ -164,6 +237,50 @@ func TestSQLiteUpdateCell(t *testing.T) {
 	}
 	if affected != 0 {
 		t.Fatalf("rowsAffected esperado 0 (oldValue não bate mais), obtido %d", affected)
+	}
+}
+
+func TestSQLiteInsertAndDeleteRow(t *testing.T) {
+	ctx := context.Background()
+	d := newTempSQLiteDriver(t)
+
+	if _, err := d.Execute(ctx, `CREATE TABLE customers (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, email TEXT)`); err != nil {
+		t.Fatalf("criando tabela: %v", err)
+	}
+
+	// INSERT com coluna omitida (id fica de fora — AUTOINCREMENT preenche).
+	if err := d.InsertRow(ctx, "", "customers", []string{"name", "email"}, []any{"Ana", "ana@example.com"}); err != nil {
+		t.Fatalf("InsertRow: %v", err)
+	}
+	result, err := d.Execute(ctx, `SELECT id, name, email FROM customers`)
+	if err != nil {
+		t.Fatalf("lendo linha inserida: %v", err)
+	}
+	if len(result.Rows) != 1 {
+		t.Fatalf("esperava 1 linha, obtido %d", len(result.Rows))
+	}
+	row := result.Rows[0]
+	if row[1] != "Ana" || row[2] != "ana@example.com" {
+		t.Fatalf("linha inserida incorreta: %v", row)
+	}
+	id := row[0]
+
+	// DELETE pela PK real.
+	affected, err := d.DeleteRow(ctx, "", "customers", []string{"id"}, []any{id})
+	if err != nil {
+		t.Fatalf("DeleteRow: %v", err)
+	}
+	if affected != 1 {
+		t.Fatalf("rowsAffected esperado 1, obtido %d", affected)
+	}
+
+	// Segunda tentativa de apagar a mesma linha: já não existe mais, 0 linhas.
+	affected, err = d.DeleteRow(ctx, "", "customers", []string{"id"}, []any{id})
+	if err != nil {
+		t.Fatalf("DeleteRow (linha já apagada): %v", err)
+	}
+	if affected != 0 {
+		t.Fatalf("rowsAffected esperado 0 (linha já apagada), obtido %d", affected)
 	}
 }
 

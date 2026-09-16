@@ -503,6 +503,44 @@ e subir um `wails dev` novo. Se a janela nativa parecer "travada" sem
 refletir mudanças, checar se `lsof -i :5173` (ou a porta do Vite) tem
 processo vivo antes de assumir que é bug de código.
 
+## ✅ INSERT/DELETE no grid (2026-09-15)
+Item 4 do Phase 3 — fecha o ciclo da edição inline (ADR 0004). Mesmo
+padrão de segurança do `UpdateCell`: sempre parametrizado, só aparece
+quando `editContext` existe (PK real detectada via introspecção — views e
+tabelas sem PK continuam automaticamente read-only, mesmo gating de
+sempre).
+
+**Backend**: `InsertRow`/`DeleteRow` novos na interface `DatabaseDriver`
+(`internal/db/driver.go`), implementados nos dois dialetos via builders
+compartilhados `buildInsertRowQuery`/`buildDeleteRowQuery`
+(`internal/db/sqlite.go`, mesmo arquivo/padrão do `buildUpdateCellQuery`
+já existente — INSERT sempre com lista explícita de colunas, nunca
+posicional; DELETE sempre por PK real). Bindings novos em `app.go`. Testes
+novos: unitários dos 2 builders (`internal/db/sqlite_test.go`) + um teste
+de integração contra SQLite real (`TestSQLiteInsertAndDeleteRow`).
+
+**Frontend**: botão "+ Nova linha" na toolbar do `ResultGrid.tsx` abre um
+formulário com um campo de texto por coluna não-gerada (PK inclusa —
+usuário pode digitar uma PK natural; campo em branco **omite** a coluna
+do INSERT inteiro, deixando o banco aplicar `DEFAULT`/auto-incremento em
+vez de forçar `NULL`). "Excluir linha…" no menu de contexto da linha
+mostra o `DELETE` parametrizado exato antes de confirmar, mesmo padrão
+visual do preview de UPDATE já existente.
+
+**Verificado contra Postgres real** via Claude in Chrome, ponta a ponta:
+inseri uma linha deixando `id`/`profile`/`updated_at` em branco → grid
+mostrou `id: NULL` (limitação documentada — o cliente não busca de volta
+os defaults gerados pelo servidor até a query rodar de novo) → rodei a
+query de novo e vi o `SERIAL` real (`4`) → apaguei essa mesma linha →
+confirmei sumida no grid E via `psql` direto no banco.
+
+`go build`/`go vet`/`go test ./...`/`tsc --noEmit`/`npm run build`
+limpos. Nada commitado ainda desta feature.
+
+**Restam do Phase 3**: verificador de atualização (GitHub Releases API,
+só aviso). Fora da fila ativa: polish visual restante das 3 análises de
+UX (tabId exposto, hit-area dos handles, `:focus-visible`, etc.).
+
 ## Última atualização
 2026-09-15 (fim de sessão) — Autocomplete completo (v1+v2), uppercase automático, pretty-print SQL, copiar especial no grid e **edição inline de células** (item 7, concluído nesta sessão com 4 bugs reais de causa raiz corrigidos — ver seção "Edição inline de células" acima), todos implementados via delegação ao OpenCode + revisão/depuração minha antes de aceitar.
 

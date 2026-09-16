@@ -11,7 +11,7 @@ import DataEditor, {
     Theme,
 } from '@glideapps/glide-data-grid';
 import '@glideapps/glide-data-grid/dist/index.css';
-import {UpdateCell} from '../lib/tabApi';
+import {UpdateCell, InsertRow, DeleteRow} from '../lib/tabApi';
 import {
     copyToClipboard,
     displayValue,
@@ -23,6 +23,7 @@ import {
 } from '../lib/gridCopyFormats';
 import CellValueViewer from './CellValueViewer';
 import {useDragResize} from '../lib/useDragResize';
+import type {db} from '../../wailsjs/go/models';
 
 // Contexto de edição inline (ADR 0004): só existe quando a query é um
 // SELECT simples de tabela única com PK real detectada no catálogo.
@@ -34,6 +35,12 @@ export interface EditContext {
     table: string;
     pkColumns: string[];
     editableColumns: string[];
+    // Colunas reais da tabela (todas, incluindo PK/geradas) — usado só pelo
+    // formulário de "Nova linha" (INSERT), que precisa saber tipo e se a
+    // coluna é gerada pra decidir quais campos oferecer e como converter o
+    // texto digitado (mesmo espírito de coerceEditedValue, mas sem um valor
+    // antigo pra inferir o tipo).
+    allColumns: db.Column[];
 }
 
 interface Props {
@@ -43,6 +50,14 @@ interface Props {
     editContext?: EditContext | null;
     readOnlyNotice?: string | null;
     onCellSaved?: (rowIndex: number, colIndex: number, newValue: any) => void;
+    // rowIndex é o índice ORIGINAL em `rows` (já traduzido pelo ResultGrid,
+    // ver toOriginalRow) — quem recebe não precisa se preocupar com filtro.
+    onRowDeleted?: (rowIndex: number) => void;
+    // row já vem na mesma ordem de `columns` (colunas ausentes do INSERT
+    // aparecem como null — pode não bater com o valor real gerado pelo
+    // banco, ex. DEFAULT/SERIAL; um refresh manual do usuário mostraria o
+    // valor real. Aceito como limitação de v1, documentado no formulário).
+    onRowInserted?: (row: any[]) => void;
     onStatus?: (msg: string) => void;
     onCopied?: () => void;
 }
@@ -88,6 +103,16 @@ function buildUpdatePreview(schema: string, table: string, pkColumns: string[], 
     return `UPDATE ${qualified} SET "${column}" = ${formatPreviewValue(newValue)} WHERE ${where.join(' AND ')}`;
 }
 
+// Monta o preview legível do DELETE, mesmo espírito de buildUpdatePreview.
+function buildDeletePreview(schema: string, table: string, pkColumns: string[], pkValues: any[]): string {
+    const qualified = schema && schema !== 'main' ? `"${schema}"."${table}"` : `"${table}"`;
+    const where = pkColumns.map((pk, i) => {
+        const v = pkValues[i];
+        return v === null || v === undefined ? `"${pk}" IS NULL` : `"${pk}" = ${formatPreviewValue(v)}`;
+    });
+    return `DELETE FROM ${qualified} WHERE ${where.join(' AND ')}`;
+}
+
 // Converte o texto editado no overlay pro tipo do valor original, pra
 // manter a matriz de linhas tipada (número continua número no grid).
 function coerceEditedValue(oldValue: any, text: string): any {
@@ -98,6 +123,24 @@ function coerceEditedValue(oldValue: any, text: string): any {
     if (typeof oldValue === 'boolean') {
         if (text === 'true' || text === '1') return true;
         if (text === 'false' || text === '0') return false;
+    }
+    return text;
+}
+
+// Converte o texto digitado no formulário de "Nova linha" pro tipo Go
+// esperado, a partir do nome do tipo da coluna (não tem um valor antigo
+// pra inferir o tipo, diferente de coerceEditedValue) — heurística simples
+// por substring, mesmo espírito do resto do projeto (sem parser SQL).
+function coerceInsertValue(columnType: string, text: string): any {
+    const t = columnType.toLowerCase();
+    if (/bool/.test(t)) {
+        if (text === 'true' || text === '1') return true;
+        if (text === 'false' || text === '0') return false;
+        return text;
+    }
+    if (/int|numeric|real|double|float|decimal|serial/.test(t)) {
+        const n = Number(text);
+        return Number.isNaN(n) ? text : n;
     }
     return text;
 }
@@ -122,12 +165,22 @@ function isCellInRange(col: number, row: number, range: {x: number; y: number; w
 // Renderização em canvas de alto desempenho, com suporte a milhares de linhas sem travar,
 // tema escuro consistente com o Wisp, colunas redimensionáveis, índice de linha nativo
 // e destaque visual âmbar para valores NULL.
-export default function ResultGrid({columns, rows, tabId, editContext, readOnlyNotice, onCellSaved, onStatus, onCopied}: Props) {
+export default function ResultGrid({columns, rows, tabId, editContext, readOnlyNotice, onCellSaved, onRowDeleted, onRowInserted, onStatus, onCopied}: Props) {
     const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
     const [gridSelection, setGridSelection] = useState<GridSelection | undefined>(undefined);
     const [menu, setMenu] = useState<MenuState | null>(null);
     const [pendingEdit, setPendingEdit] = useState<PendingEdit | null>(null);
     const [savingEdit, setSavingEdit] = useState(false);
+    // Exclusão de linha (DELETE por PK real) — mesmo padrão de confirmação
+    // do UpdateCell (preview + confirmar), nunca silencioso.
+    const [pendingDelete, setPendingDelete] = useState<{row: number} | null>(null);
+    const [savingDelete, setSavingDelete] = useState(false);
+    // Formulário de "Nova linha" (INSERT) — um campo de texto por coluna
+    // não-gerada; campo vazio = coluna omitida do INSERT (deixa o banco
+    // aplicar DEFAULT/SERIAL em vez de forçar NULL).
+    const [insertForm, setInsertForm] = useState<Record<string, string> | null>(null);
+    const [savingInsert, setSavingInsert] = useState(false);
+    const [insertError, setInsertError] = useState<string | null>(null);
     const lastMousePos = useRef({x: 0, y: 0});
     const menuRef = useRef<HTMLDivElement | null>(null);
     const gridRef = useRef<DataEditorRef | null>(null);
@@ -443,6 +496,92 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
         }
     }, [pendingEdit, editContext, savingEdit, rows, pkIndexes, tabId, onCellSaved, onStatus]);
 
+    const cancelPendingDelete = useCallback(() => {
+        if (!savingDelete) setPendingDelete(null);
+    }, [savingDelete]);
+
+    const confirmPendingDelete = useCallback(async () => {
+        if (!pendingDelete || !editContext || savingDelete) return;
+        setSavingDelete(true);
+        try {
+            const row = rows[pendingDelete.row] ?? [];
+            const pkValues = pkIndexes.map(i => row[i]);
+            const affected = await DeleteRow(tabId, editContext.schema, editContext.table, editContext.pkColumns, pkValues);
+            if (affected === 0) {
+                // Mesma checagem otimista do UpdateCell: a linha já não
+                // existia mais (outro processo apagou antes) — avisa em vez
+                // de assumir sucesso.
+                onStatus?.(`aviso: a linha já não existia mais — nada apagado (0 linhas afetadas)`);
+            } else {
+                onRowDeleted?.(pendingDelete.row);
+                onStatus?.(`ok — linha apagada (${affected} linha(s))`);
+            }
+            setPendingDelete(null);
+        } catch (err) {
+            onStatus?.(`erro ao apagar linha: ${err}`);
+        } finally {
+            setSavingDelete(false);
+        }
+    }, [pendingDelete, editContext, savingDelete, rows, pkIndexes, tabId, onRowDeleted, onStatus]);
+
+    // Abre o formulário de nova linha com um campo vazio por coluna
+    // não-gerada — PK inclusa (o usuário pode precisar informar uma PK
+    // natural; PKs autogeradas como SERIAL o usuário simplesmente deixa em
+    // branco, que omite a coluna do INSERT e deixa o banco preencher).
+    const openInsertForm = useCallback(() => {
+        if (!editContext) return;
+        const fields: Record<string, string> = {};
+        for (const col of editContext.allColumns) {
+            if (!col.IsGenerated) fields[col.Name] = '';
+        }
+        setInsertForm(fields);
+        setInsertError(null);
+    }, [editContext]);
+
+    const cancelInsertForm = useCallback(() => {
+        if (!savingInsert) {
+            setInsertForm(null);
+            setInsertError(null);
+        }
+    }, [savingInsert]);
+
+    const confirmInsert = useCallback(async () => {
+        if (!insertForm || !editContext || savingInsert) return;
+        const columnByName = new Map(editContext.allColumns.map(c => [c.Name, c]));
+        const insertColumns: string[] = [];
+        const insertValues: any[] = [];
+        for (const [name, text] of Object.entries(insertForm)) {
+            if (text.trim() === '') continue; // omitido — deixa o banco aplicar DEFAULT/SERIAL
+            const col = columnByName.get(name);
+            insertColumns.push(name);
+            insertValues.push(coerceInsertValue(col?.Type ?? '', text));
+        }
+        if (insertColumns.length === 0) {
+            setInsertError('Preencha ao menos uma coluna.');
+            return;
+        }
+        setSavingInsert(true);
+        setInsertError(null);
+        try {
+            await InsertRow(tabId, editContext.schema, editContext.table, insertColumns, insertValues);
+            // Monta a linha na mesma ordem de `columns` pra exibir no grid
+            // sem esperar um refresh — colunas não enviadas (omitidas ou
+            // fora do resultado atual) aparecem como null; se o banco tiver
+            // aplicado um DEFAULT/SERIAL, o valor exibido aqui pode divergir
+            // do real até o usuário rodar a query de novo (limitação aceita
+            // de v1, documentada no formulário).
+            const valueByName = new Map(insertColumns.map((name, i) => [name, insertValues[i]]));
+            const row = columns.map(name => (valueByName.has(name) ? valueByName.get(name) : null));
+            onRowInserted?.(row);
+            onStatus?.('ok — linha inserida');
+            setInsertForm(null);
+        } catch (err) {
+            setInsertError(String(err));
+        } finally {
+            setSavingInsert(false);
+        }
+    }, [insertForm, editContext, savingInsert, tabId, columns, onRowInserted, onStatus]);
+
     // Captura a posição do mouse na fase de captura (roda antes do handler
     // interno do grid), porque CellClickedEventArgs só traz coordenadas
     // relativas à célula (localEventX/localEventY), não clientX/clientY.
@@ -527,7 +666,7 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
     const closeMenu = useCallback(() => setMenu(null), []);
 
     useEffect(() => {
-        if (!menu && !pendingEdit) {
+        if (!menu && !pendingEdit && !pendingDelete && !insertForm) {
             return;
         }
         const onPointerDown = (e: MouseEvent) => {
@@ -539,6 +678,8 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
             if (e.key === 'Escape') {
                 setMenu(null);
                 cancelPendingEdit();
+                cancelPendingDelete();
+                cancelInsertForm();
             }
         };
         document.addEventListener('mousedown', onPointerDown);
@@ -547,7 +688,7 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
             document.removeEventListener('mousedown', onPointerDown);
             document.removeEventListener('keydown', onKeyDown);
         };
-    }, [menu, pendingEdit, cancelPendingEdit]);
+    }, [menu, pendingEdit, pendingDelete, insertForm, cancelPendingEdit, cancelPendingDelete, cancelInsertForm]);
 
     const copyAndClose = useCallback(async (text: string) => {
         const ok = await copyToClipboard(text);
@@ -637,6 +778,11 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
                 >
                     Valor
                 </button>
+                {editContext && (
+                    <button className="btn btn-secondary" onClick={openInsertForm} title="Inserir uma linha nova nesta tabela">
+                        + Nova linha
+                    </button>
+                )}
             </div>
             {readOnlyNotice && (
                 <div className="result-readonly-notice" title={readOnlyNotice}>
@@ -721,6 +867,17 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
                                 Copiar linha
                             </button>
                         )}
+                        {!target && editContext && rowHasPkValues(menu.row) && (
+                            <button
+                                className="grid-context-menu-item grid-context-menu-item-danger"
+                                onClick={() => {
+                                    setPendingDelete({row: menu.row});
+                                    setMenu(null);
+                                }}
+                            >
+                                Excluir linha…
+                            </button>
+                        )}
                         {target && (
                             <button className="grid-context-menu-item" onClick={() => handleCopySelection(target)}>
                                 Copiar seleção
@@ -761,6 +918,52 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
                                     {savingEdit ? 'Salvando…' : 'Confirmar'}
                                 </button>
                                 <button className="btn btn-secondary" onClick={cancelPendingEdit} disabled={savingEdit}>
+                                    Cancelar
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+                {pendingDelete && editContext && (
+                    <div className="grid-edit-overlay" onMouseDown={e => { if (e.target === e.currentTarget) cancelPendingDelete(); }}>
+                        <div className="grid-edit-popover" role="dialog" aria-label="Confirmar exclusão">
+                            <div className="grid-context-menu-group-label">Confirmar exclusão</div>
+                            <code className="grid-edit-preview">
+                                {buildDeletePreview(editContext.schema, editContext.table, editContext.pkColumns, pkIndexes.map(i => (rows[pendingDelete.row] ?? [])[i]))}
+                            </code>
+                            <div className="grid-edit-actions">
+                                <button className="btn btn-danger" onClick={confirmPendingDelete} disabled={savingDelete}>
+                                    {savingDelete ? 'Apagando…' : 'Excluir'}
+                                </button>
+                                <button className="btn btn-secondary" onClick={cancelPendingDelete} disabled={savingDelete}>
+                                    Cancelar
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+                {insertForm && editContext && (
+                    <div className="grid-edit-overlay" onMouseDown={e => { if (e.target === e.currentTarget) cancelInsertForm(); }}>
+                        <div className="grid-edit-popover insert-form-popover" role="dialog" aria-label="Nova linha">
+                            <div className="grid-context-menu-group-label">Nova linha em {editContext.schema}.{editContext.table}</div>
+                            <div className="insert-form-hint">Deixe em branco pra deixar o banco preencher (DEFAULT/auto-incremento).</div>
+                            {Object.keys(insertForm).map(name => (
+                                <div className="grid-edit-field" key={name}>
+                                    <span className="grid-edit-label">{name}</span>
+                                    <input
+                                        className="insert-form-input"
+                                        value={insertForm[name]}
+                                        onChange={e => setInsertForm(prev => (prev ? {...prev, [name]: e.target.value} : prev))}
+                                        disabled={savingInsert}
+                                    />
+                                </div>
+                            ))}
+                            {insertError && <div className="insert-form-error">{insertError}</div>}
+                            <div className="grid-edit-actions">
+                                <button className="btn btn-success" onClick={confirmInsert} disabled={savingInsert}>
+                                    {savingInsert ? 'Inserindo…' : 'Inserir'}
+                                </button>
+                                <button className="btn btn-secondary" onClick={cancelInsertForm} disabled={savingInsert}>
                                     Cancelar
                                 </button>
                             </div>

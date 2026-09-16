@@ -264,6 +264,35 @@ func (d *SQLiteDriver) UpdateCell(ctx context.Context, schema, table string, pkC
 	return affected, nil
 }
 
+// InsertRow executa um INSERT parametrizado com lista explícita de colunas.
+func (d *SQLiteDriver) InsertRow(ctx context.Context, schema, table string, columns []string, values []any) error {
+	query, args, err := buildInsertRowQuery("?", schema, table, columns, values)
+	if err != nil {
+		return err
+	}
+	if _, err := d.conn.ExecContext(ctx, query, args...); err != nil {
+		return fmt.Errorf("inserindo linha em %q: %w", table, err)
+	}
+	return nil
+}
+
+// DeleteRow executa um DELETE parametrizado por PK real.
+func (d *SQLiteDriver) DeleteRow(ctx context.Context, schema, table string, pkColumns []string, pkValues []any) (int64, error) {
+	query, args, err := buildDeleteRowQuery("?", schema, table, pkColumns, pkValues)
+	if err != nil {
+		return 0, err
+	}
+	res, err := d.conn.ExecContext(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("apagando linha de %q: %w", table, err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("lendo linhas afetadas: %w", err)
+	}
+	return affected, nil
+}
+
 // TableDDL retorna o DDL original guardado em sqlite_master.sql — literal,
 // sem reconstrução (o SQLite já persiste o CREATE TABLE verbatim).
 func (d *SQLiteDriver) TableDDL(ctx context.Context, schema, table string) (string, error) {
@@ -540,6 +569,101 @@ func buildUpdateCellQuery(placeholder, schema, table string, pkColumns []string,
 
 	query := fmt.Sprintf("UPDATE %s SET %s = %s WHERE %s",
 		qualified, quoteIdent(column), setPh, strings.Join(where, " AND "))
+	return query, args, nil
+}
+
+// qualifyTableName monta o nome de tabela qualificado por schema, exceto
+// pro schema implícito "main" do SQLite (mesma regra usada em
+// buildUpdateCellQuery) — evitar duplicar essa condição em cada builder.
+func qualifyTableName(schema, table string) string {
+	qualified := quoteIdent(table)
+	if schema != "" && schema != "main" {
+		qualified = quoteIdent(schema) + "." + qualified
+	}
+	return qualified
+}
+
+// buildInsertRowQuery monta o INSERT parametrizado compartilhado pelos
+// dialetos — sempre com a lista explícita de colunas (nunca INSERT INTO
+// tabela VALUES (...) sem nomear, que quebra silenciosamente se a ordem
+// física das colunas mudar). columns/values devem vir na mesma ordem
+// (ConsoleTab monta os dois a partir do editContext/linha nova do grid).
+func buildInsertRowQuery(placeholder, schema, table string, columns []string, values []any) (string, []any, error) {
+	if table == "" {
+		return "", nil, fmt.Errorf("tabela vazia")
+	}
+	if len(columns) == 0 {
+		return "", nil, fmt.Errorf("nenhuma coluna pra inserir em %q", table)
+	}
+	if len(columns) != len(values) {
+		return "", nil, fmt.Errorf("columns (%d) e values (%d) divergem", len(columns), len(values))
+	}
+
+	next := 1
+	ph := func() string {
+		if placeholder == "?" {
+			return "?"
+		}
+		s := fmt.Sprintf("$%d", next)
+		next++
+		return s
+	}
+
+	quotedCols := make([]string, len(columns))
+	placeholders := make([]string, len(columns))
+	for i, col := range columns {
+		if col == "" {
+			return "", nil, fmt.Errorf("nome de coluna vazio")
+		}
+		quotedCols[i] = quoteIdent(col)
+		placeholders[i] = ph()
+	}
+
+	query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
+		qualifyTableName(schema, table), strings.Join(quotedCols, ", "), strings.Join(placeholders, ", "))
+	return query, values, nil
+}
+
+// buildDeleteRowQuery monta o DELETE parametrizado compartilhado pelos
+// dialetos, sempre por PK real (nunca por todas as colunas visíveis — uma
+// linha com valor NULL numa coluna não-PK não deve entrar no WHERE, só a
+// chave primária identifica a linha de forma inequívoca).
+func buildDeleteRowQuery(placeholder, schema, table string, pkColumns []string, pkValues []any) (string, []any, error) {
+	if table == "" {
+		return "", nil, fmt.Errorf("tabela vazia")
+	}
+	if len(pkColumns) == 0 {
+		return "", nil, fmt.Errorf("sem colunas de chave primária para %q", table)
+	}
+	if len(pkColumns) != len(pkValues) {
+		return "", nil, fmt.Errorf("pkColumns (%d) e pkValues (%d) divergem", len(pkColumns), len(pkValues))
+	}
+
+	next := 1
+	ph := func() string {
+		if placeholder == "?" {
+			return "?"
+		}
+		s := fmt.Sprintf("$%d", next)
+		next++
+		return s
+	}
+
+	var where []string
+	var args []any
+	for i, pk := range pkColumns {
+		if pk == "" {
+			return "", nil, fmt.Errorf("nome de coluna de PK vazio")
+		}
+		if pkValues[i] == nil {
+			where = append(where, quoteIdent(pk)+" IS NULL")
+			continue
+		}
+		where = append(where, quoteIdent(pk)+" = "+ph())
+		args = append(args, pkValues[i])
+	}
+
+	query := fmt.Sprintf("DELETE FROM %s WHERE %s", qualifyTableName(schema, table), strings.Join(where, " AND "))
 	return query, args, nil
 }
 

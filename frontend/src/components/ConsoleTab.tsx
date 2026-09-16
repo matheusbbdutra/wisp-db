@@ -363,7 +363,7 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
             updateResultTab(id, t => ({...t, editContext: null, readOnlyNotice: `Nenhuma coluna editável em ${schema}.${ref.table} (só expressões ou colunas geradas) — grade somente leitura.`}));
             return;
         }
-        updateResultTab(id, t => ({...t, editContext: {schema, table: ref.table, pkColumns, editableColumns}, readOnlyNotice: null}));
+        updateResultTab(id, t => ({...t, editContext: {schema, table: ref.table, pkColumns, editableColumns, allColumns: cols}, readOnlyNotice: null}));
     }
 
     async function fetchBatchFor(id: string, currentRows: any[][], replace: boolean) {
@@ -500,6 +500,16 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
             ...t,
             rows: t.rows.map((r, i) => (i === rowIndex ? r.map((v, j) => (j === colIndex ? newValue : v)) : r)),
         }));
+    }
+
+    function handleRowDeleted(rowIndex: number) {
+        if (!activeResultId) return;
+        updateResultTab(activeResultId, t => ({...t, rows: t.rows.filter((_, i) => i !== rowIndex)}));
+    }
+
+    function handleRowInserted(row: any[]) {
+        if (!activeResultId) return;
+        updateResultTab(activeResultId, t => ({...t, rows: [...t.rows, row]}));
     }
 
     async function handleCancel() {
@@ -927,6 +937,8 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                         editContext={activeResult?.editContext ?? null}
                         readOnlyNotice={activeResult?.readOnlyNotice ?? null}
                         onCellSaved={handleCellSaved}
+                        onRowDeleted={handleRowDeleted}
+                        onRowInserted={handleRowInserted}
                         onStatus={setStatus}
                     />
                     {activeResult?.hasMore && (

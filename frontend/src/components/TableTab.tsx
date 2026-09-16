@@ -149,7 +149,7 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
             setReadOnlyNotice(`Nenhuma coluna editável em ${schema}.${table} (só expressões ou colunas geradas) — grade somente leitura.`);
             return;
         }
-        setEditContext({schema, table, pkColumns, editableColumns});
+        setEditContext({schema, table, pkColumns, editableColumns, allColumns: cols});
         setReadOnlyNotice(null);
     }
 
@@ -192,6 +192,14 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
 
     function handleCellSaved(rowIndex: number, colIndex: number, newValue: any) {
         setRows(prev => prev.map((r, i) => (i === rowIndex ? r.map((v, j) => (j === colIndex ? newValue : v)) : r)));
+    }
+
+    function handleRowDeleted(rowIndex: number) {
+        setRows(prev => prev.filter((_, i) => i !== rowIndex));
+    }
+
+    function handleRowInserted(row: any[]) {
+        setRows(prev => [...prev, row]);
     }
 
     // Troca de sub-aba com lazy-load: só busca na primeira ativação.
@@ -274,6 +282,8 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
                                 editContext={editContext}
                                 readOnlyNotice={readOnlyNotice}
                                 onCellSaved={handleCellSaved}
+                                onRowDeleted={handleRowDeleted}
+                                onRowInserted={handleRowInserted}
                                 onStatus={setStatus}
                             />
                             {hasMore && (

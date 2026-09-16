@@ -81,6 +81,14 @@ export function UpdateCell(
     return withQueue(tabId, () => App.UpdateCell(tabId, schema, table, pkColumns, pkValues, column, oldValue, newValue));
 }
 
+export function InsertRow(tabId: string, schema: string, table: string, columns: string[], values: any[]): Promise<void> {
+    return withQueue(tabId, () => App.InsertRow(tabId, schema, table, columns, values));
+}
+
+export function DeleteRow(tabId: string, schema: string, table: string, pkColumns: string[], pkValues: any[]): Promise<number> {
+    return withQueue(tabId, () => App.DeleteRow(tabId, schema, table, pkColumns, pkValues));
+}
+
 export function GetTableDDL(tabId: string, schema: string, table: string): Promise<string> {
     return withQueue(tabId, () => App.GetTableDDL(tabId, schema, table));
 }

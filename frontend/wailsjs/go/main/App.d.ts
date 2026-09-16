@@ -12,6 +12,8 @@ export function Connect(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function ConnectSaved(arg1:string,arg2:string):Promise<void>;
 
+export function DeleteRow(arg1:string,arg2:string,arg3:string,arg4:Array<string>,arg5:Array<any>):Promise<number>;
+
 export function DeleteSavedConnection(arg1:string):Promise<void>;
 
 export function DeleteScript(arg1:string):Promise<void>;
@@ -23,6 +25,8 @@ export function FetchRows(arg1:string,arg2:number):Promise<main.FetchBatch>;
 export function GetQueryHistory(arg1:number):Promise<Array<store.QueryHistoryEntry>>;
 
 export function GetTableDDL(arg1:string,arg2:string,arg3:string):Promise<string>;
+
+export function InsertRow(arg1:string,arg2:string,arg3:string,arg4:Array<string>,arg5:Array<any>):Promise<void>;
 
 export function IntrospectSchemaTables(arg1:string,arg2:string):Promise<Array<db.Table>>;
 

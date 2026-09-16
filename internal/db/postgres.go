@@ -346,6 +346,41 @@ func (d *PostgresDriver) UpdateCell(ctx context.Context, schema, table string, p
 	return tag.RowsAffected(), nil
 }
 
+// InsertRow executa um INSERT parametrizado com lista explícita de colunas.
+func (d *PostgresDriver) InsertRow(ctx context.Context, schema, table string, columns []string, values []any) error {
+	if schema == "" || schema == "main" {
+		schema = "public"
+	}
+	query, args, err := buildInsertRowQuery("$", schema, table, columns, values)
+	if err != nil {
+		return err
+	}
+	// Ver comentário em Execute sobre "conn busy" com cursor de streaming aberto.
+	d.closePendingCursor(ctx)
+	if _, err := d.conn.Exec(ctx, query, args...); err != nil {
+		return fmt.Errorf("inserindo linha em %s.%s: %w", schema, table, err)
+	}
+	return nil
+}
+
+// DeleteRow executa um DELETE parametrizado por PK real.
+func (d *PostgresDriver) DeleteRow(ctx context.Context, schema, table string, pkColumns []string, pkValues []any) (int64, error) {
+	if schema == "" || schema == "main" {
+		schema = "public"
+	}
+	query, args, err := buildDeleteRowQuery("$", schema, table, pkColumns, pkValues)
+	if err != nil {
+		return 0, err
+	}
+	// Ver comentário em Execute sobre "conn busy" com cursor de streaming aberto.
+	d.closePendingCursor(ctx)
+	tag, err := d.conn.Exec(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("apagando linha de %s.%s: %w", schema, table, err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 // TableDDL reconstrói o CREATE TABLE a partir do catálogo, pois o Postgres
 // NÃO tem "SHOW CREATE TABLE" nativo: colunas via information_schema.columns
 // (ordenadas por ordinal_position) + constraints via pg_get_constraintdef(oid)
