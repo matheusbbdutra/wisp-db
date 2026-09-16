@@ -1,5 +1,64 @@
 # STATE — Wisp
 
+## ✅ Checkpoint de delegação em massa (2026-09-16): i18n + comentários Go + polish visual
+Sessão inteiramente delegada (Cursor > Codex, na ordem preferida pelo
+usuário a partir de agora), com meu papel restrito a desenhar o contrato
+técnico, disparar via `delegate-run`, e **verificar eu mesmo** (nunca só
+aceitar o relato do agente) antes de aceitar cada rodada.
+
+**1. i18n da UI concluída** (todos os componentes React, `docs/adr/0006-i18n.md`):
+- Infra própria (não delegada): `frontend/src/i18n/index.ts` (i18next +
+  react-i18next, detecção por `navigator.language`, override em
+  localStorage), `frontend/src/i18n/locales/{en,pt-BR}.json`,
+  `LanguageSwitcher.tsx` (seletor na tab bar), `Sidebar.tsx` migrado como
+  componente de referência de estilo pra delegação.
+- **Batch1** (Cursor, `20260916T120442-i18n-batch1`): ConnectionBar,
+  ConnectionModal, QueryHistory, CellValueViewer.
+- **Batch2** (Cursor, `20260916T121303-i18n-batch2`): ScriptsPanel,
+  UpdateChecker, RoutineTab, SchemaTab.
+- **Batch3** (Cursor, `20260916T121850-i18n-batch3`): App, ConsoleTab,
+  ResultGrid, SqlEditor, TableTab.
+- Verificado por mim: nenhuma string PT-BR visível remanescente (grep em
+  todo `frontend/src`), `tsc --noEmit` e `npm run build` limpos após cada
+  rodada e no final.
+
+**2. Comentários Go migrados para inglês** (Codex, `20260916T120756-go-comments-en`,
+política em `CLAUDE.md`/`docs/adr/0006-i18n.md`): os 10 arquivos com
+comentário PT-BR (`app.go`, `internal/db/{driver,factory,postgres,sqlite}.go`,
+`internal/schemacache/cache.go`, `internal/session/manager.go`,
+`internal/store/store.go`, `internal/vault/vault.go`, `version.go`) —
+significado técnico preservado (causas raiz, invariantes, referências a
+memórias/ADRs mantidas literais). Verificado por mim: `go build ./...` e
+`go vet ./...` limpos; só restam 2 ocorrências de "PT-BR" que são
+referências literais a seções do `CLAUDE.md` dentro de comentário já em
+inglês (correto, não é resíduo).
+
+**3. Polish visual** (Codex, `20260916T122129-ui-polish`, lista das 3
+análises de UX anteriores): removido o `tabId` cru visível na toolbar do
+Console (`ConsoleTab.tsx`), hit-area maior nos resize-handles, `:focus-visible`
+global, `.table-subbar` virou segmented control, scrollbars customizadas
+(`--scrollbar-thumb*`), contraste de `--text-muted` ajustado (`#71717a` →
+`#93939e`), empty states unificados.
+
+**Risco real identificado e verificado nesta sessão**: batch3 (i18n) e
+ui-polish rodaram **concorrentemente** (ambos tocando `ConsoleTab.tsx` e
+`ResultGrid.tsx`, meu erro de sequenciamento — deveria ter serializado por
+arquivo). Conferi manualmente depois: a remoção do `tabId` visível (polish)
+sobreviveu ao lado das chaves `t(...)` novas (i18n) — sem sobrescrita real
+neste caso, mas foi sorte de timing, não garantia. **Lição pra próxima
+delegação em paralelo**: nunca disparar dois alvos que tocam o mesmo
+arquivo ao mesmo tempo; serializar ou dividir por arquivo/diretório sem
+overlap.
+
+**Nada commitado ainda** — `git status` mostra 30 arquivos modificados +
+`frontend/src/i18n/` e `LanguageSwitcher.tsx` novos. Pendente: usuário
+revisar/testar na janela nativa antes de commitar (idioma/troca EN↔PT-BR,
+visual do polish) — não fiz teste end-to-end via Claude in Chrome nesta
+rodada, só verificação estática (tsc/build/go build/go vet + grep).
+
+**Autocomplete de alias**: usuário ainda não testou (respondeu "ainda não"
+nesta sessão) — segue pendente, sem achado novo.
+
 ## ✅ Revisão de código pelo Codex (2026-09-15) + 3 bugs reais corrigidos
 Primeira tentativa (`20260915T233639-wisp-code-review-ui-codex`) falhou: o
 sandbox do Codex bloqueia aprovação de tool call, então `memory` MCP nunca
@@ -720,12 +779,11 @@ de aceitar) em vez de fazer tudo eu mesmo linha a linha quando o trabalho
 for grande/mecânico.
 
 **Pendências reais em aberto**:
-1. **i18n da UI** — plano aceito (`docs/adr/0006-i18n.md`: i18next +
-   react-i18next, seletor de idioma, detecção por locale do SO), **não
-   implementado**. Envolve ~13 componentes React com strings PT-BR
-   embutidas — candidato natural pra quebrar em lotes delegados (eu
-   desenho o schema de chaves + conecto 1-2 componentes de referência,
-   delego o resto em lotes revisados).
+1. **i18n da UI** — infra + Sidebar + LanguageSwitcher + batch1
+   (ConnectionBar/Modal, QueryHistory, CellValueViewer) feitos.
+   Restam outros componentes com literais PT — continuar em lotes
+   delegados no mesmo padrão (`useTranslation` / chaves flat por
+   namespace / en+pt-BR). Ver topo deste `STATE.md`.
 2. **Comentários Go em inglês** — política definida (`CLAUDE.md`,
    "Idioma"), comentários novos já nascem em inglês; comentários
    existentes em PT-BR (a maioria do código atual) ainda não migrados —
@@ -900,3 +958,23 @@ grid** (escopo `ResultGrid`, não workspace — evita colidir com
 Histórico/Scripts); sidebar **colapsar=esconder** só no Console (TableTab/
 SchemaTab não têm Sidebar); polish P1 de tokens/`--accent-color`/toolbar.
 Aguardando síntese do Claude Code + decisão do usuário antes de implementar.
+
+
+## Polish visual — delegate-20260916T122129-ui-polish (2026-09-16)
+
+Sete ajustes implementados: remoção do ID interno da toolbar, handles com
+hit-area de 12px e linha de 4px, foco global, sub-abas segmentadas,
+scrollbars por tokens (WebKit/Firefox), texto muted mais legível e padrão
+CSS compartilhado de estados vazios (sidebar/grid/metadados/visor).
+O código atual só define tema dark; não foi introduzido um tema novo.
+Alterações preexistentes e textos/i18n preservados. Validação concluída:
+`npx tsc --noEmit`, `npm run build` e `git diff --check` passaram.
+Contraste calculado de --text-muted sobre todos os tokens --bg-*: 4,95–6,15:1.
+Sem validação visual na aplicação aberta. Build com avisos de anotações
+PURE do Glide e bundle acima de 500 kB; sem erros.
+A primeira chamada de npx foi iniciada na raiz por engano e interrompida;
+a validação foi executada novamente no diretório frontend correto.
+Regras ativas: não ler .env, não criar commit, manter escopo visual mínimo.
+
+Persistência no memory-mcp bloqueada pela política de aprovação `never`;
+checkpoint preservado neste STATE.md.
