@@ -39,7 +39,7 @@ interface ResultTabState {
     id: string;
     queryText: string;
     label: string;
-    status: 'queued' | 'running' | 'done' | 'error';
+    status: 'queued' | 'running' | 'done' | 'error' | 'cancelled';
     columns: string[];
     rows: any[][];
     hasMore: boolean;
@@ -184,6 +184,11 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
     // App.tsx ao abrir uma aba de tabela, que reconecta com ConnectSaved
     // (conexão própria por aba, nunca reusa a sessão do console).
     const [connectionId, setConnectionId] = useState<string | null>(null);
+    const catalogCancelledRef = useRef(false);
+    const catalogLoadingRef = useRef(false);
+    const catalogConnectionRef = useRef<{id: string; name?: string; driver?: string} | null>(null);
+    const pendingQueryCountRef = useRef(0);
+    const cancelledQueryIdsRef = useRef(new Set<string>());
     const [showSaveForm, setShowSaveForm] = useState(false);
     const [saveNameInput, setSaveNameInput] = useState('');
     const [savingScript, setSavingScript] = useState(false);
@@ -221,11 +226,57 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
         setResultTabs(prev => prev.map(tab => (tab.id === id ? updater(tab) : tab)));
     }
 
+    async function loadCatalog(connectionId: string, connName?: string) {
+        if (catalogLoadingRef.current) return;
+        catalogLoadingRef.current = true;
+        catalogCancelledRef.current = false;
+        // Let a query submitted immediately after connecting enter the queue first.
+        await new Promise(resolve => window.setTimeout(resolve, 150));
+        if (catalogCancelledRef.current || pendingQueryCountRef.current > 0) {
+            catalogLoadingRef.current = false;
+            return;
+        }
+        try {
+            setStatus(prev => t('consoleTab.loadingCatalog', {status: prev}));
+            await withQueue(`${tabId}:query`, async () => {
+                if (catalogCancelledRef.current || pendingQueryCountRef.current > 0) return;
+                const schemas = await ListSchemas(tabId);
+                const detailed: db.Table[] = [];
+                for (const schema of schemas ?? []) {
+                    if (catalogCancelledRef.current || pendingQueryCountRef.current > 0) return;
+                    try {
+                        const tables = await IntrospectSchemaTables(tabId, schema);
+                        detailed.push(...(tables ?? []));
+                    } catch (schemaErr) {
+                        console.error(`erro ao introspectar schema ${schema} para autocomplete:`, schemaErr);
+                    }
+                    setCatalog([...detailed]);
+                }
+            });
+            if (!catalogCancelledRef.current && catalogConnectionRef.current?.id === connectionId) {
+                setStatus(connName ? t('consoleTab.connectedNamed', {name: connName}) : t('consoleTab.connected'));
+            }
+        } catch (err) {
+            if (!catalogCancelledRef.current) {
+                console.error('erro ao carregar catálogo para autocomplete:', err);
+                setCatalog([]);
+                setStatus(connName ? t('consoleTab.connectedNamed', {name: connName}) : t('consoleTab.connected'));
+            }
+        } finally {
+            catalogLoadingRef.current = false;
+            if (catalogCancelledRef.current && pendingQueryCountRef.current === 0 && catalogConnectionRef.current?.id === connectionId) {
+                window.setTimeout(() => void loadCatalog(connectionId, connName), 0);
+            }
+        }
+    }
+
     async function handleConnected(connectionId: string, connName?: string, activeDriver?: string) {
         setConnected(true);
         onConnectedChange(true);
         setConnectionId(connectionId);
         setDriver(activeDriver);
+        catalogConnectionRef.current = {id: connectionId, name: connName, driver: activeDriver};
+        catalogCancelledRef.current = false;
         setStatus(connName ? t('consoleTab.connectedNamed', {name: connName}) : t('consoleTab.connected'));
         // Catálogo completo pro autocomplete (ListSchemas + uma query batched
         // por schema via IntrospectSchemaTables — nunca mais um IntrospectTable
@@ -242,42 +293,9 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
         // handleRun/handleLoadMore: sem isso, uma chamada deste loop pode
         // entrar bem no meio de um RunQuery+FetchRows já em andamento e
         // quebrar o cursor de streaming aberto — "conn busy" real, mesma
-        // causa raiz corrigida em TableTab.tsx. Efeito colateral aceito: uma
-        // query nova espera o catálogo terminar de carregar — mas agora é
-        // UMA query por schema (era uma por TABELA, N+1 real que travava a
-        // fila por muito tempo em bases com centenas de tabelas — bug real
-        // relatado pelo usuário, ver IntrospectSchema em internal/db).
-        try {
-          // Feedback visual da pendência documentada acima: sem isso, uma
-          // query digitada logo após conectar fica "na fila" sem explicação
-          // — o usuário não tem como saber que está atrás do carregamento
-          // do catálogo, não de outra query dele mesmo.
-          setStatus(prev => t('consoleTab.loadingCatalog', {status: prev}));
-          await withQueue(`${tabId}:query`, async () => {
-            const schemas = await ListSchemas(tabId);
-            const detailed: db.Table[] = [];
-            for (const schema of schemas ?? []) {
-                try {
-                    const tables = await IntrospectSchemaTables(tabId, schema);
-                    detailed.push(...(tables ?? []));
-                } catch (schemaErr) {
-                    console.error(`erro ao introspectar schema ${schema} para autocomplete:`, schemaErr);
-                }
-                // Grava incrementalmente por schema — schemas já processados
-                // ficam disponíveis pro autocomplete/sidebar sem esperar os
-                // demais terminarem.
-                setCatalog([...detailed]);
-            }
-          });
-          setStatus(connName ? t('consoleTab.connectedNamed', {name: connName}) : t('consoleTab.connected'));
-        } catch (err) {
-            // Não falha a conexão por causa do catálogo de autocomplete, mas
-            // não engole o erro — autocomplete sem dados fica silencioso pro
-            // usuário, então pelo menos loga pra investigação futura.
-            console.error('erro ao carregar catálogo para autocomplete:', err);
-            setCatalog([]);
-            setStatus(connName ? t('consoleTab.connectedNamed', {name: connName}) : t('consoleTab.connected'));
-        }
+        // causa raiz corrigida em TableTab.tsx. O carregamento é interrompível
+        // e retomado quando consultas de primeiro plano terminam.
+        void loadCatalog(connectionId, connName);
     }
 
     function handleError(err: string) {
@@ -285,6 +303,8 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
     }
 
     async function handleDisconnect() {
+        catalogCancelledRef.current = true;
+        catalogConnectionRef.current = null;
         await Disconnect(tabId);
         setConnected(false);
         onConnectedChange(false);
@@ -402,6 +422,8 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
             return;
         }
         const text = textOverride ?? query;
+        pendingQueryCountRef.current += 1;
+        catalogCancelledRef.current = true;
         const reusable = !forceNewTab && activeResult && activeResult.status !== 'running' && activeResult.status !== 'queued'
             ? activeResult
             : null;
@@ -452,6 +474,10 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
         await withQueue(`${tabId}:query`, async () => {
             updateResultTab(id, tab => ({...tab, status: 'running'}));
             try {
+                if (cancelledQueryIdsRef.current.has(id)) {
+                    updateResultTab(id, tab => ({...tab, status: 'cancelled'}));
+                    return;
+                }
                 const meta = await RunQuery(tabId, text);
                 const resultColumns = meta.Columns ?? [];
                 updateResultTab(id, tab => ({...tab, columns: resultColumns, durationMs: meta.DurationMs}));
@@ -469,6 +495,10 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                 updateResultTab(id, tab => ({...tab, status: 'error', errorMsg: String(err)}));
                 setStatus(t('consoleTab.errorRun', {error: err}));
             } finally {
+                pendingQueryCountRef.current = Math.max(0, pendingQueryCountRef.current - 1);
+                if (pendingQueryCountRef.current === 0 && catalogConnectionRef.current && !catalogLoadingRef.current) {
+                    window.setTimeout(() => void loadCatalog(catalogConnectionRef.current!.id, catalogConnectionRef.current!.name), 0);
+                }
                 setHistoryToken(n => n + 1);
             }
         });
@@ -516,6 +546,12 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
     }
 
     async function handleCancel() {
+        const active = resultTabs.find(tab => tab.id === activeResultId);
+        if (active?.status === 'queued') {
+            cancelledQueryIdsRef.current.add(active.id);
+            updateResultTab(active.id, tab => ({...tab, status: 'cancelled'}));
+            return;
+        }
         await CancelQuery(tabId);
     }
 
@@ -913,6 +949,7 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                                     <span className="result-tab-label">{resultTab.label}</span>
                                     {resultTab.status === 'queued' && <span className="result-tab-hint">{t('consoleTab.queued')}</span>}
                                     {resultTab.status === 'running' && <span className="result-tab-hint">{t('consoleTab.running')}</span>}
+                                    {resultTab.status === 'cancelled' && <span className="result-tab-hint">{t('consoleTab.cancelled')}</span>}
                                     <span
                                         className="result-tab-close"
                                         onClick={e => {

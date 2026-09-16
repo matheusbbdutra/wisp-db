@@ -33,6 +33,16 @@ túnel SSH e DuckDB. O autocomplete de aliases ainda merece confirmação em
 queries reais do usuário; os demais itens da Fase 3 estão concluídos no
 `docs/ROADMAP.md`.
 
+**Bug identificado após a beta5 (correção local em andamento):** ao conectar,
+o pré-carregamento do catálogo de autocomplete ocupava `${tabId}:query` até
+terminar. Uma consulta iniciada nesse intervalo aparecia como `queued`; o
+botão Cancelar chamava apenas `CancelQuery`, que não remove uma tarefa ainda
+não iniciada da fila. A correção torna o catálogo trabalho de fundo
+interrompível/retomável quando a fila de consultas esvazia e trata o
+cancelamento de consultas `queued` no frontend. Verificação: 27 testes
+frontend, `npm run build` e `git diff --check` passaram; falta confirmação
+manual na janela nativa antes de publicar a próxima beta.
+
 ---
 
 ## ✅ Checkpoint de delegação em massa (2026-09-16): i18n + comentários Go + polish visual
