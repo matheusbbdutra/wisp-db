@@ -12,7 +12,7 @@ import DataEditor, {
     Theme,
 } from '@glideapps/glide-data-grid';
 import '@glideapps/glide-data-grid/dist/index.css';
-import {UpdateCell, InsertRow, DeleteRow} from '../lib/tabApi';
+import {UpdateCell, ExecuteBatch} from '../lib/tabApi';
 import {
     copyToClipboard,
     displayValue,
@@ -23,6 +23,7 @@ import {
     toMarkdownTable,
 } from '../lib/gridCopyFormats';
 import CellValueViewer from './CellValueViewer';
+import PendingChangesReview from './PendingChangesReview';
 import {useDragResize} from '../lib/useDragResize';
 import type {db} from '../../wailsjs/go/models';
 
@@ -36,11 +37,9 @@ export interface EditContext {
     table: string;
     pkColumns: string[];
     editableColumns: string[];
-    // Colunas reais da tabela (todas, incluindo PK/geradas) — usado só pelo
-    // formulário de "Nova linha" (INSERT), que precisa saber tipo e se a
-    // coluna é gerada pra decidir quais campos oferecer e como converter o
-    // texto digitado (mesmo espírito de coerceEditedValue, mas sem um valor
-    // antigo pra inferir o tipo).
+    // Colunas reais da tabela (todas, incluindo PK/geradas) — usado pelas
+    // linhas de rascunho de INSERT (tipo pra coerceInsertValue e quais
+    // campos oferecer; geradas ficam de fora do rascunho).
     allColumns: db.Column[];
 }
 
@@ -74,7 +73,10 @@ interface PendingEdit {
 
 interface DirectEdit {
     col: number;
+    // Índice original em `rows`, ou -1 quando a edição é de linha de
+    // rascunho (aí `draftIndex` aponta em pendingInserts).
     row: number;
+    draftIndex?: number;
     value: string;
     bounds: {x: number; y: number; width: number; height: number};
 }
@@ -112,6 +114,14 @@ function buildDeletePreview(schema: string, table: string, pkColumns: string[], 
         return v === null || v === undefined ? `"${pk}" IS NULL` : `"${pk}" = ${formatPreviewValue(v)}`;
     });
     return `DELETE FROM ${qualified} WHERE ${where.join(' AND ')}`;
+}
+
+// Preview textual do INSERT (só exibição — ExecuteBatch usa bindings).
+function buildInsertPreview(schema: string, table: string, columns: string[], values: any[]): string {
+    const qualified = schema && schema !== 'main' ? `"${schema}"."${table}"` : `"${table}"`;
+    const cols = columns.map(c => `"${c}"`).join(', ');
+    const vals = values.map(v => formatPreviewValue(v)).join(', ');
+    return `INSERT INTO ${qualified} (${cols}) VALUES (${vals})`;
 }
 
 // Converte o texto editado no overlay pro tipo do valor original, pra
@@ -154,8 +164,10 @@ interface MenuState {
     // linha/valor); displayRow (índice visual, pós-filtro) usado só pra
     // checar se o clique caiu dentro da seleção ativa do grid (gridSelection
     // é sempre em espaço visual — ver comentário em toOriginalRow).
+    // draftIndex definido = clique numa linha de rascunho (INSERT pendente).
     row: number;
     displayRow: number;
+    draftIndex?: number;
 }
 
 function isCellInRange(col: number, row: number, range: {x: number; y: number; width: number; height: number}): boolean {
@@ -173,16 +185,13 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
     const [menu, setMenu] = useState<MenuState | null>(null);
     const [pendingEdit, setPendingEdit] = useState<PendingEdit | null>(null);
     const [savingEdit, setSavingEdit] = useState(false);
-    // Exclusão de linha (DELETE por PK real) — mesmo padrão de confirmação
-    // do UpdateCell (preview + confirmar), nunca silencioso.
-    const [pendingDelete, setPendingDelete] = useState<{row: number} | null>(null);
-    const [savingDelete, setSavingDelete] = useState(false);
-    // Formulário de "Nova linha" (INSERT) — um campo de texto por coluna
-    // não-gerada; campo vazio = coluna omitida do INSERT (deixa o banco
-    // aplicar DEFAULT/SERIAL em vez de forçar NULL).
-    const [insertForm, setInsertForm] = useState<Record<string, string> | null>(null);
-    const [savingInsert, setSavingInsert] = useState(false);
-    const [insertError, setInsertError] = useState<string | null>(null);
+    // Staging multi-linha: rascunhos de INSERT (fim do grid) e índices
+    // ORIGINAIS marcados pra DELETE. Nada executa até "Revisar mudanças".
+    const [pendingInserts, setPendingInserts] = useState<Record<string, string>[]>([]);
+    const [pendingDeleteRows, setPendingDeleteRows] = useState<Set<number>>(() => new Set());
+    const [reviewOpen, setReviewOpen] = useState(false);
+    const [executingBatch, setExecutingBatch] = useState(false);
+    const [batchError, setBatchError] = useState<string | null>(null);
     const lastMousePos = useRef({x: 0, y: 0});
     const menuRef = useRef<HTMLDivElement | null>(null);
     const gridRef = useRef<DataEditorRef | null>(null);
@@ -258,6 +267,8 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
     }, [filterText, rows]);
 
     const rowCount = filteredIndices ? filteredIndices.length : rows.length;
+    const displayRowCount = rowCount + pendingInserts.length;
+    const pendingChangeCount = pendingInserts.length + pendingDeleteRows.size;
 
     const toOriginalRow = useCallback((displayRow: number): number => {
         return filteredIndices ? filteredIndices[displayRow] : displayRow;
@@ -276,12 +287,18 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
         const cell = gridSelection?.current?.cell;
         if (!cell) return;
         const displayRow = cell[1];
+        // Linhas de rascunho (displayRow >= rowCount) ficam no fim e não
+        // dependem do mapa de filtro — só invalida se saiu do total.
+        if (displayRow >= displayRowCount) {
+            setGridSelection(undefined);
+            return;
+        }
+        if (displayRow >= rowCount) return;
         const previousRow = previous ? previous[displayRow] : displayRow;
-        // Limpa antes da pintura se uma edição deslocar a linha selecionada no filtro.
-        if (displayRow >= rowCount || previousRow !== toOriginalRow(displayRow)) {
+        if (previousRow !== toOriginalRow(displayRow)) {
             setGridSelection(undefined);
         }
-    }, [filteredIndices, rowCount, gridSelection, toOriginalRow]);
+    }, [filteredIndices, rowCount, displayRowCount, gridSelection, toOriginalRow]);
 
     // Célula ativa do painel dockado: deriva de gridSelection.current.cell
     // (espaço visual, mesma armadilha filtro-vs-real de sempre — traduz via
@@ -292,12 +309,18 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
         const cur = gridSelection?.current?.cell;
         if (!cur) return null;
         const [colIndex, displayRowIndex] = cur;
+        const columnName = columns[colIndex];
+        if (columnName === undefined) return null;
+        if (displayRowIndex >= rowCount) {
+            const draft = pendingInserts[displayRowIndex - rowCount];
+            if (!draft) return null;
+            return {columnName, rawValue: displayValue(draft[columnName] ?? '')};
+        }
         const rowIndex = toOriginalRow(displayRowIndex);
         const row = rows[rowIndex];
-        const columnName = columns[colIndex];
-        if (!row || columnName === undefined) return null;
+        if (!row) return null;
         return {columnName, rawValue: displayValue(row[colIndex])};
-    }, [valuePanelOpen, gridSelection, rows, columns, toOriginalRow]);
+    }, [valuePanelOpen, gridSelection, rows, columns, toOriginalRow, rowCount, pendingInserts]);
 
     const darkTheme: Partial<Theme> = useMemo(() => ({
         accentColor: '#2563eb',
@@ -360,19 +383,43 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
 
     const isCellEditable = useCallback((colIndex: number, rowIndex: number): boolean => {
         if (!editContext) return false;
+        if (pendingDeleteRows.has(rowIndex)) return false;
         const name = columns[colIndex];
         if (!name || !editableSet.has(name)) return false;
         // Condição única da spec: coluna editável + PK da linha conhecida e
         // não-nula. Célula NULL é editável (vira valor via SET; o WHERE usa
         // IS NULL no backend) — string vazia digitada salva '' (não NULL).
         return rowHasPkValues(rowIndex);
-    }, [editContext, columns, editableSet, rowHasPkValues]);
+    }, [editContext, columns, editableSet, rowHasPkValues, pendingDeleteRows]);
 
     const getCellContent = useCallback((cell: Item): GridCell => {
         const [colIndex, displayRowIndex] = cell;
+
+        // Linhas de rascunho (INSERT pendente) ficam SEMPRE no fim, fora do
+        // filtro — displayRowIndex >= rowCount.
+        if (displayRowIndex >= rowCount) {
+            const draftIndex = displayRowIndex - rowCount;
+            const draft = pendingInserts[draftIndex] ?? {};
+            const columnName = columns[colIndex] ?? '';
+            const raw = draft[columnName] ?? '';
+            const str = raw === '' ? '' : String(raw);
+            return {
+                kind: GridCellKind.Text,
+                allowOverlay: false,
+                readonly: false,
+                data: str,
+                displayData: str === '' ? '' : str,
+                themeOverride: {
+                    bgCell: 'rgba(16,185,129,0.14)',
+                },
+            };
+        }
+
         const rowIndex = toOriginalRow(displayRowIndex);
         const row = rows[rowIndex];
         const val = row ? row[colIndex] : null;
+        const markedDelete = pendingDeleteRows.has(rowIndex);
+        const deleteTheme = markedDelete ? {bgCell: 'rgba(239,68,68,0.14)'} : undefined;
 
         if (val === null || val === undefined) {
             const editable = isCellEditable(colIndex, rowIndex);
@@ -393,6 +440,7 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
                 themeOverride: {
                     textDark: '#d97706',
                     baseFontStyle: 'italic 12px ui-monospace, monospace',
+                    ...deleteTheme,
                 },
             };
         }
@@ -405,8 +453,9 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
             readonly: !editable,
             data: str,
             displayData: str,
+            themeOverride: deleteTheme,
         };
-    }, [rows, isCellEditable, toOriginalRow]);
+    }, [rows, isCellEditable, toOriginalRow, rowCount, pendingInserts, pendingDeleteRows, columns]);
 
     // Diff contra o valor atual e abre o popover de preview do UPDATE (ADR
     // 0004: nunca commitar silencioso). O UPDATE real só executa no
@@ -435,9 +484,31 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
     // confiável a cada clique válido (ver comentário do lastClickRef).
     const handleCellClicked = useCallback((cell: Item) => {
         const [colIndex, displayRowIndex] = cell;
-        const rowIndex = toOriginalRow(displayRowIndex);
         const now = Date.now();
         const last = lastClickRef.current;
+
+        // Rascunho de INSERT: sempre editável; commit grava em pendingInserts.
+        if (displayRowIndex >= rowCount) {
+            const draftIndex = displayRowIndex - rowCount;
+            const clickKey = {col: colIndex, row: -(draftIndex + 1), time: now};
+            const isSecondClick = last !== null && last.col === colIndex && last.row === clickKey.row && now - last.time < 500;
+            lastClickRef.current = clickKey;
+            if (!isSecondClick) return;
+            const bounds = gridRef.current?.getBounds(colIndex, displayRowIndex);
+            if (!bounds) return;
+            const columnName = columns[colIndex] ?? '';
+            const draft = pendingInserts[draftIndex] ?? {};
+            setDirectEdit({
+                col: colIndex,
+                row: -1,
+                draftIndex,
+                value: draft[columnName] ?? '',
+                bounds,
+            });
+            return;
+        }
+
+        const rowIndex = toOriginalRow(displayRowIndex);
         const editable = isCellEditable(colIndex, rowIndex);
         const isSecondClick = editable && last !== null && last.col === colIndex && last.row === rowIndex && now - last.time < 500;
         lastClickRef.current = {col: colIndex, row: rowIndex, time: now};
@@ -457,18 +528,32 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
             value: oldValue === null || oldValue === undefined ? '' : String(oldValue),
             bounds,
         });
-    }, [isCellEditable, rows, toOriginalRow]);
+    }, [isCellEditable, rows, toOriginalRow, rowCount, pendingInserts, columns]);
 
     const cancelDirectEdit = useCallback(() => setDirectEdit(null), []);
 
     const commitDirectEdit = useCallback(() => {
         if (!directEdit) return;
+        if (directEdit.draftIndex !== undefined) {
+            const columnName = columns[directEdit.col];
+            const draftIndex = directEdit.draftIndex;
+            const value = directEdit.value;
+            setDirectEdit(null);
+            if (!columnName) return;
+            setPendingInserts(prev => {
+                if (draftIndex < 0 || draftIndex >= prev.length) return prev;
+                const next = [...prev];
+                next[draftIndex] = {...next[draftIndex], [columnName]: value};
+                return next;
+            });
+            return;
+        }
         const row = rows[directEdit.row];
         const oldValue = row[directEdit.col];
         const typed = coerceEditedValue(oldValue, directEdit.value);
         setDirectEdit(null);
         startPendingEdit(directEdit.col, directEdit.row, typed);
-    }, [directEdit, rows, startPendingEdit]);
+    }, [directEdit, rows, startPendingEdit, columns]);
 
     const cancelPendingEdit = useCallback(() => {
         if (!savingEdit) setPendingEdit(null);
@@ -498,91 +583,149 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
         }
     }, [pendingEdit, editContext, savingEdit, rows, pkIndexes, tabId, onCellSaved, onStatus, t]);
 
-    const cancelPendingDelete = useCallback(() => {
-        if (!savingDelete) setPendingDelete(null);
-    }, [savingDelete]);
-
-    const confirmPendingDelete = useCallback(async () => {
-        if (!pendingDelete || !editContext || savingDelete) return;
-        setSavingDelete(true);
-        try {
-            const row = rows[pendingDelete.row] ?? [];
-            const pkValues = pkIndexes.map(i => row[i]);
-            const affected = await DeleteRow(tabId, editContext.schema, editContext.table, editContext.pkColumns, pkValues);
-            if (affected === 0) {
-                // Mesma checagem otimista do UpdateCell: a linha já não
-                // existia mais (outro processo apagou antes) — avisa em vez
-                // de assumir sucesso.
-                onStatus?.(t('resultGrid.warnOptimisticDelete'));
-            } else {
-                onRowDeleted?.(pendingDelete.row);
-                onStatus?.(t('resultGrid.okRowDeleted', {count: affected}));
-            }
-            setPendingDelete(null);
-        } catch (err) {
-            onStatus?.(t('resultGrid.errorDeleteRow', {error: err}));
-        } finally {
-            setSavingDelete(false);
-        }
-    }, [pendingDelete, editContext, savingDelete, rows, pkIndexes, tabId, onRowDeleted, onStatus, t]);
-
-    // Abre o formulário de nova linha com um campo vazio por coluna
-    // não-gerada — PK inclusa (o usuário pode precisar informar uma PK
-    // natural; PKs autogeradas como SERIAL o usuário simplesmente deixa em
-    // branco, que omite a coluna do INSERT e deixa o banco preencher).
-    const openInsertForm = useCallback(() => {
+    // Anexa uma linha em branco no fim do grid (staging de INSERT).
+    const addPendingInsert = useCallback(() => {
         if (!editContext) return;
         const fields: Record<string, string> = {};
         for (const col of editContext.allColumns) {
             if (!col.IsGenerated) fields[col.Name] = '';
         }
-        setInsertForm(fields);
-        setInsertError(null);
+        setPendingInserts(prev => [...prev, fields]);
     }, [editContext]);
 
-    const cancelInsertForm = useCallback(() => {
-        if (!savingInsert) {
-            setInsertForm(null);
-            setInsertError(null);
-        }
-    }, [savingInsert]);
+    const togglePendingDelete = useCallback((rowIndex: number) => {
+        setPendingDeleteRows(prev => {
+            const next = new Set(prev);
+            if (next.has(rowIndex)) next.delete(rowIndex);
+            else next.add(rowIndex);
+            return next;
+        });
+    }, []);
 
-    const confirmInsert = useCallback(async () => {
-        if (!insertForm || !editContext || savingInsert) return;
+    const discardPendingChanges = useCallback(() => {
+        setPendingInserts([]);
+        setPendingDeleteRows(new Set());
+        setBatchError(null);
+        setReviewOpen(false);
+        setDirectEdit(null);
+    }, []);
+
+    const openReview = useCallback(() => {
+        setBatchError(null);
+        setReviewOpen(true);
+    }, []);
+
+    const closeReview = useCallback(() => {
+        if (!executingBatch) setReviewOpen(false);
+    }, [executingBatch]);
+
+    // Monta os BatchOp + previews a partir do staging atual. Campo vazio no
+    // rascunho = coluna omitida (DEFAULT/SERIAL), igual ao confirmInsert antigo.
+    // strict=true (execução): rascunho totalmente vazio vira erro; false
+    // (preview): só omite aquele INSERT do script.
+    const buildBatchFromPending = useCallback((strict: boolean): {ops: db.BatchOp[]; statements: string[]; error: string | null} => {
+        if (!editContext) return {ops: [], statements: [], error: null};
         const columnByName = new Map(editContext.allColumns.map(c => [c.Name, c]));
-        const insertColumns: string[] = [];
-        const insertValues: any[] = [];
-        for (const [name, text] of Object.entries(insertForm)) {
-            if (text.trim() === '') continue; // omitido — deixa o banco aplicar DEFAULT/SERIAL
-            const col = columnByName.get(name);
-            insertColumns.push(name);
-            insertValues.push(coerceInsertValue(col?.Type ?? '', text));
+        const ops: db.BatchOp[] = [];
+        const statements: string[] = [];
+
+        for (const draft of pendingInserts) {
+            const insertColumns: string[] = [];
+            const insertValues: any[] = [];
+            for (const [name, text] of Object.entries(draft)) {
+                if (text.trim() === '') continue;
+                const col = columnByName.get(name);
+                insertColumns.push(name);
+                insertValues.push(coerceInsertValue(col?.Type ?? '', text));
+            }
+            if (insertColumns.length === 0) {
+                if (strict) {
+                    return {ops: [], statements: [], error: t('resultGrid.fillOneColumn')};
+                }
+                continue;
+            }
+            ops.push({
+                Kind: 'insert',
+                Schema: editContext.schema,
+                Table: editContext.table,
+                Columns: insertColumns,
+                Values: insertValues,
+                PKColumns: [],
+                PKValues: [],
+            } as db.BatchOp);
+            statements.push(buildInsertPreview(editContext.schema, editContext.table, insertColumns, insertValues));
         }
-        if (insertColumns.length === 0) {
-            setInsertError(t('resultGrid.fillOneColumn'));
+
+        const deleteIndexes = Array.from(pendingDeleteRows).sort((a, b) => a - b);
+        for (const rowIndex of deleteIndexes) {
+            const row = rows[rowIndex] ?? [];
+            const pkValues = pkIndexes.map(i => row[i]);
+            ops.push({
+                Kind: 'delete',
+                Schema: editContext.schema,
+                Table: editContext.table,
+                Columns: [],
+                Values: [],
+                PKColumns: editContext.pkColumns,
+                PKValues: pkValues,
+            } as db.BatchOp);
+            statements.push(buildDeletePreview(editContext.schema, editContext.table, editContext.pkColumns, pkValues));
+        }
+
+        return {ops, statements, error: null};
+    }, [editContext, pendingInserts, pendingDeleteRows, rows, pkIndexes, t]);
+
+    const reviewStatements = useMemo(() => {
+        if (!reviewOpen) return [];
+        return buildBatchFromPending(false).statements;
+    }, [reviewOpen, buildBatchFromPending]);
+
+    const executePendingBatch = useCallback(async () => {
+        if (!editContext || executingBatch) return;
+        const built = buildBatchFromPending(true);
+        if (built.error) {
+            setBatchError(built.error);
             return;
         }
-        setSavingInsert(true);
-        setInsertError(null);
+        if (built.ops.length === 0) return;
+        setExecutingBatch(true);
+        setBatchError(null);
         try {
-            await InsertRow(tabId, editContext.schema, editContext.table, insertColumns, insertValues);
-            // Monta a linha na mesma ordem de `columns` pra exibir no grid
-            // sem esperar um refresh — colunas não enviadas (omitidas ou
-            // fora do resultado atual) aparecem como null; se o banco tiver
-            // aplicado um DEFAULT/SERIAL, o valor exibido aqui pode divergir
-            // do real até o usuário rodar a query de novo (limitação aceita
-            // de v1, documentada no formulário).
-            const valueByName = new Map(insertColumns.map((name, i) => [name, insertValues[i]]));
-            const row = columns.map(name => (valueByName.has(name) ? valueByName.get(name) : null));
-            onRowInserted?.(row);
-            onStatus?.(t('resultGrid.okRowInserted'));
-            setInsertForm(null);
+            await ExecuteBatch(tabId, built.ops);
+            // Deletes primeiro, índices ORIGINAIS em ordem decrescente —
+            // onRowDeleted do pai faz filter por índice a cada chamada.
+            const deleteIndexes = Array.from(pendingDeleteRows).sort((a, b) => b - a);
+            for (const rowIndex of deleteIndexes) {
+                onRowDeleted?.(rowIndex);
+            }
+            // Inserts na ordem dos rascunhos, linha montada como no
+            // confirmInsert antigo (colunas do resultado; ausente = null).
+            const columnByName = new Map(editContext.allColumns.map(c => [c.Name, c]));
+            for (const draft of pendingInserts) {
+                const insertColumns: string[] = [];
+                const insertValues: any[] = [];
+                for (const [name, text] of Object.entries(draft)) {
+                    if (text.trim() === '') continue;
+                    const col = columnByName.get(name);
+                    insertColumns.push(name);
+                    insertValues.push(coerceInsertValue(col?.Type ?? '', text));
+                }
+                const valueByName = new Map(insertColumns.map((name, i) => [name, insertValues[i]]));
+                const row = columns.map(name => (valueByName.has(name) ? valueByName.get(name) : null));
+                onRowInserted?.(row);
+            }
+            const insertCount = pendingInserts.length;
+            const deleteCount = pendingDeleteRows.size;
+            setPendingInserts([]);
+            setPendingDeleteRows(new Set());
+            setReviewOpen(false);
+            onStatus?.(t('resultGrid.okBatchApplied', {inserts: insertCount, deletes: deleteCount}));
         } catch (err) {
-            setInsertError(String(err));
+            setBatchError(t('resultGrid.errorBatch', {error: err}));
         } finally {
-            setSavingInsert(false);
+            setExecutingBatch(false);
         }
-    }, [insertForm, editContext, savingInsert, tabId, columns, onRowInserted, onStatus, t]);
+    }, [editContext, executingBatch, buildBatchFromPending, tabId, pendingDeleteRows, pendingInserts, onRowDeleted, onRowInserted, columns, onStatus, t]);
 
     // Captura a posição do mouse na fase de captura (roda antes do handler
     // interno do grid), porque CellClickedEventArgs só traz coordenadas
@@ -602,8 +745,19 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
         if (displayRow < 0 || col < 0) {
             return;
         }
+        if (displayRow >= rowCount) {
+            setMenu({
+                x: lastMousePos.current.x,
+                y: lastMousePos.current.y,
+                col,
+                row: -1,
+                displayRow,
+                draftIndex: displayRow - rowCount,
+            });
+            return;
+        }
         setMenu({x: lastMousePos.current.x, y: lastMousePos.current.y, col, row: toOriginalRow(displayRow), displayRow});
-    }, [toOriginalRow]);
+    }, [toOriginalRow, rowCount]);
 
     // Linhas marcadas via rowMarkers ("number") como matriz completa.
     // selected.toArray() vem em espaço VISUAL (posição na grade renderizada,
@@ -668,7 +822,7 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
     const closeMenu = useCallback(() => setMenu(null), []);
 
     useEffect(() => {
-        if (!menu && !pendingEdit && !pendingDelete && !insertForm) {
+        if (!menu && !pendingEdit) {
             return;
         }
         const onPointerDown = (e: MouseEvent) => {
@@ -680,8 +834,6 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
             if (e.key === 'Escape') {
                 setMenu(null);
                 cancelPendingEdit();
-                cancelPendingDelete();
-                cancelInsertForm();
             }
         };
         document.addEventListener('mousedown', onPointerDown);
@@ -690,7 +842,7 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
             document.removeEventListener('mousedown', onPointerDown);
             document.removeEventListener('keydown', onKeyDown);
         };
-    }, [menu, pendingEdit, pendingDelete, insertForm, cancelPendingEdit, cancelPendingDelete, cancelInsertForm]);
+    }, [menu, pendingEdit, cancelPendingEdit]);
 
     const copyAndClose = useCallback(async (text: string) => {
         const ok = await copyToClipboard(text);
@@ -702,9 +854,14 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
         setMenu(null);
     }, [onCopied]);
 
-    const handleCopyCell = useCallback((col: number, row: number) => {
+    const handleCopyCell = useCallback((col: number, row: number, draftIndex?: number) => {
+        if (draftIndex !== undefined) {
+            const columnName = columns[col] ?? '';
+            void copyAndClose(displayValue(pendingInserts[draftIndex]?.[columnName] ?? ''));
+            return;
+        }
         void copyAndClose(displayValue((rows[row] ?? [])[col]));
-    }, [rows, copyAndClose]);
+    }, [rows, columns, pendingInserts, copyAndClose]);
 
     const handleCopyRow = useCallback((row: number) => {
         void copyAndClose(rowToTsv(rows[row] ?? []));
@@ -780,9 +937,19 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
                     {t('resultGrid.value')}
                 </button>
                 {editContext && (
-                    <button className="btn btn-secondary" onClick={openInsertForm} title={t('resultGrid.insertRowTitle')}>
+                    <button className="btn btn-secondary" onClick={addPendingInsert} title={t('resultGrid.insertRowTitle')}>
                         {t('resultGrid.insertRow')}
                     </button>
+                )}
+                {editContext && pendingChangeCount > 0 && (
+                    <>
+                        <button className="btn btn-secondary" onClick={openReview}>
+                            {t('resultGrid.reviewChanges', {count: pendingChangeCount})}
+                        </button>
+                        <button className="btn btn-secondary" onClick={discardPendingChanges} title={t('resultGrid.discardChanges')}>
+                            {t('resultGrid.discardChanges')}
+                        </button>
+                    </>
                 )}
             </div>
             {readOnlyNotice && (
@@ -802,7 +969,7 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
                     width="100%"
                     height="100%"
                     columns={gridColumns}
-                    rows={rowCount}
+                    rows={displayRowCount}
                     getCellContent={getCellContent}
                     onCellClicked={handleCellClicked}
                     onPaste={false}
@@ -842,7 +1009,7 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
                 )}
                 {menu && (
                     <div ref={menuRef} className="grid-context-menu" style={menuStyle} role="menu">
-                        <button className="grid-context-menu-item" onClick={() => handleCopyCell(menu.col, menu.row)}>
+                        <button className="grid-context-menu-item" onClick={() => handleCopyCell(menu.col, menu.row, menu.draftIndex)}>
                             {t('resultGrid.copyCell')}
                         </button>
                         <button
@@ -863,20 +1030,32 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
                         >
                             {t('resultGrid.viewValue')}
                         </button>
-                        {!target && (
+                        {menu.draftIndex === undefined && !target && (
                             <button className="grid-context-menu-item" onClick={() => handleCopyRow(menu.row)}>
                                 {t('resultGrid.copyRow')}
                             </button>
                         )}
-                        {!target && editContext && rowHasPkValues(menu.row) && (
+                        {menu.draftIndex !== undefined && (
                             <button
                                 className="grid-context-menu-item grid-context-menu-item-danger"
                                 onClick={() => {
-                                    setPendingDelete({row: menu.row});
+                                    const idx = menu.draftIndex!;
+                                    setPendingInserts(prev => prev.filter((_, i) => i !== idx));
                                     setMenu(null);
                                 }}
                             >
-                                {t('resultGrid.deleteRow')}
+                                {t('resultGrid.removeDraftRow')}
+                            </button>
+                        )}
+                        {menu.draftIndex === undefined && !target && editContext && rowHasPkValues(menu.row) && (
+                            <button
+                                className="grid-context-menu-item grid-context-menu-item-danger"
+                                onClick={() => {
+                                    togglePendingDelete(menu.row);
+                                    setMenu(null);
+                                }}
+                            >
+                                {pendingDeleteRows.has(menu.row) ? t('resultGrid.unmarkDelete') : t('resultGrid.deleteRow')}
                             </button>
                         )}
                         {target && (
@@ -925,51 +1104,20 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
                         </div>
                     </div>
                 )}
-                {pendingDelete && editContext && (
-                    <div className="grid-edit-overlay" onMouseDown={e => { if (e.target === e.currentTarget) cancelPendingDelete(); }}>
-                        <div className="grid-edit-popover" role="dialog" aria-label={t('resultGrid.confirmDeleteAria')}>
-                            <div className="grid-context-menu-group-label">{t('resultGrid.confirmDelete')}</div>
-                            <code className="grid-edit-preview">
-                                {buildDeletePreview(editContext.schema, editContext.table, editContext.pkColumns, pkIndexes.map(i => (rows[pendingDelete.row] ?? [])[i]))}
-                            </code>
-                            <div className="grid-edit-actions">
-                                <button className="btn btn-danger" onClick={confirmPendingDelete} disabled={savingDelete}>
-                                    {savingDelete ? t('resultGrid.deleting') : t('resultGrid.delete')}
-                                </button>
-                                <button className="btn btn-secondary" onClick={cancelPendingDelete} disabled={savingDelete}>
-                                    {t('resultGrid.cancel')}
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )}
-                {insertForm && editContext && (
-                    <div className="grid-edit-overlay" onMouseDown={e => { if (e.target === e.currentTarget) cancelInsertForm(); }}>
-                        <div className="grid-edit-popover insert-form-popover" role="dialog" aria-label={t('resultGrid.newRow')}>
-                            <div className="grid-context-menu-group-label">{t('resultGrid.newRowTitle', {schema: editContext.schema, table: editContext.table})}</div>
-                            <div className="insert-form-hint">{t('resultGrid.insertHint')}</div>
-                            {Object.keys(insertForm).map(name => (
-                                <div className="grid-edit-field" key={name}>
-                                    <span className="grid-edit-label">{name}</span>
-                                    <input
-                                        className="insert-form-input"
-                                        value={insertForm[name]}
-                                        onChange={e => setInsertForm(prev => (prev ? {...prev, [name]: e.target.value} : prev))}
-                                        disabled={savingInsert}
-                                    />
-                                </div>
-                            ))}
-                            {insertError && <div className="insert-form-error">{insertError}</div>}
-                            <div className="grid-edit-actions">
-                                <button className="btn btn-success" onClick={confirmInsert} disabled={savingInsert}>
-                                    {savingInsert ? t('resultGrid.inserting') : t('resultGrid.insert')}
-                                </button>
-                                <button className="btn btn-secondary" onClick={cancelInsertForm} disabled={savingInsert}>
-                                    {t('resultGrid.cancel')}
-                                </button>
-                            </div>
-                        </div>
-                    </div>
+                {editContext && (
+                    <PendingChangesReview
+                        open={reviewOpen}
+                        tabId={tabId}
+                        schema={editContext.schema}
+                        table={editContext.table}
+                        statements={reviewStatements}
+                        hasDeletes={pendingDeleteRows.size > 0}
+                        executing={executingBatch}
+                        error={batchError}
+                        onClose={closeReview}
+                        onDiscard={discardPendingChanges}
+                        onExecute={() => void executePendingBatch()}
+                    />
                 )}
             </div>
             {valuePanelOpen && (

@@ -38,6 +38,10 @@ export function Disconnect(arg1) {
   return window['go']['main']['App']['Disconnect'](arg1);
 }
 
+export function ExecuteBatch(arg1, arg2) {
+  return window['go']['main']['App']['ExecuteBatch'](arg1, arg2);
+}
+
 export function FetchRows(arg1, arg2) {
   return window['go']['main']['App']['FetchRows'](arg1, arg2);
 }
@@ -68,6 +72,10 @@ export function ListForeignKeys(arg1, arg2, arg3) {
 
 export function ListFunctions(arg1, arg2) {
   return window['go']['main']['App']['ListFunctions'](arg1, arg2);
+}
+
+export function ListIncomingForeignKeys(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ListIncomingForeignKeys'](arg1, arg2, arg3);
 }
 
 export function ListIndexes(arg1, arg2, arg3) {

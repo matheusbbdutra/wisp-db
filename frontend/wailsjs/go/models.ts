@@ -1,12 +1,36 @@
 export namespace db {
-	
+
+	export class BatchOp {
+	    Kind: string;
+	    Schema: string;
+	    Table: string;
+	    Columns: string[];
+	    Values: any[];
+	    PKColumns: string[];
+	    PKValues: any[];
+
+	    static createFrom(source: any = {}) {
+	        return new BatchOp(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Kind = source["Kind"];
+	        this.Schema = source["Schema"];
+	        this.Table = source["Table"];
+	        this.Columns = source["Columns"];
+	        this.Values = source["Values"];
+	        this.PKColumns = source["PKColumns"];
+	        this.PKValues = source["PKValues"];
+	    }
+	}
 	export class Column {
 	    Name: string;
 	    Type: string;
 	    IsPrimaryKey: boolean;
 	    IsGenerated: boolean;
 	    Nullable: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Column(source);
 	    }
@@ -54,6 +78,28 @@ export namespace db {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Name = source["Name"];
 	        this.Definition = source["Definition"];
+	    }
+	}
+	export class IncomingForeignKey {
+	    Name: string;
+	    FromSchema: string;
+	    FromTable: string;
+	    FromColumns: string[];
+	    ToColumns: string[];
+	    OnDelete: string;
+
+	    static createFrom(source: any = {}) {
+	        return new IncomingForeignKey(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Name = source["Name"];
+	        this.FromSchema = source["FromSchema"];
+	        this.FromTable = source["FromTable"];
+	        this.FromColumns = source["FromColumns"];
+	        this.ToColumns = source["ToColumns"];
+	        this.OnDelete = source["OnDelete"];
 	    }
 	}
 	export class Index {
@@ -306,4 +352,3 @@ export namespace store {
 	}
 
 }
-

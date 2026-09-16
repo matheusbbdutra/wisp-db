@@ -290,6 +290,107 @@ func (d *SQLiteDriver) DeleteRow(ctx context.Context, schema, table string, pkCo
 	return affected, nil
 }
 
+// ExecuteBatch runs every staged INSERT/DELETE inside a single sql.Tx on the tab's
+// dedicated connection — all-or-nothing (see DatabaseDriver.ExecuteBatch).
+func (d *SQLiteDriver) ExecuteBatch(ctx context.Context, ops []BatchOp) error {
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("iniciando transação: %w", err)
+	}
+	for _, op := range ops {
+		var query string
+		var args []any
+		switch op.Kind {
+		case "insert":
+			query, args, err = buildInsertRowQuery("?", op.Schema, op.Table, op.Columns, op.Values)
+		case "delete":
+			query, args, err = buildDeleteRowQuery("?", op.Schema, op.Table, op.PKColumns, op.PKValues)
+		default:
+			err = fmt.Errorf("tipo de operação desconhecido: %q", op.Kind)
+		}
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("executando %s em %q: %w", op.Kind, op.Table, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("confirmando transação: %w", err)
+	}
+	return nil
+}
+
+// ListIncomingForeignKeys scans EVERY table in the database (SQLite has no reverse FK
+// index) and keeps only the FKs whose ref table matches — there is no cheaper query
+// available via PRAGMA. Databases with a very large number of tables pay an N+1 cost
+// here; acceptable since this only runs once per batch-delete review, not per row.
+func (d *SQLiteDriver) ListIncomingForeignKeys(ctx context.Context, schema, table string) ([]IncomingForeignKey, error) {
+	tableRows, err := d.conn.QueryContext(ctx, `SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`)
+	if err != nil {
+		return nil, fmt.Errorf("listando tabelas: %w", err)
+	}
+	var allTables []string
+	for tableRows.Next() {
+		var name string
+		if err := tableRows.Scan(&name); err != nil {
+			tableRows.Close()
+			return nil, err
+		}
+		allTables = append(allTables, name)
+	}
+	if err := tableRows.Err(); err != nil {
+		return nil, err
+	}
+	tableRows.Close()
+
+	var result []IncomingForeignKey
+	for _, fromTable := range allTables {
+		fkRows, err := d.conn.QueryContext(ctx, fmt.Sprintf(`PRAGMA foreign_key_list(%q)`, fromTable))
+		if err != nil {
+			return nil, fmt.Errorf("listando foreign keys de %q: %w", fromTable, err)
+		}
+		byID := map[int]*IncomingForeignKey{}
+		var order []int
+		for fkRows.Next() {
+			var id, seq int
+			var refTable string
+			var from, to sql.NullString
+			var onUpdate, onDelete, match string
+			if err := fkRows.Scan(&id, &seq, &refTable, &from, &to, &onUpdate, &onDelete, &match); err != nil {
+				fkRows.Close()
+				return nil, err
+			}
+			if refTable != table {
+				continue
+			}
+			fk, ok := byID[id]
+			if !ok {
+				fk = &IncomingForeignKey{Name: fmt.Sprintf("fk_%d", id), FromSchema: "main", FromTable: fromTable, OnDelete: onDelete}
+				byID[id] = fk
+				order = append(order, id)
+			}
+			if from.Valid {
+				fk.FromColumns = append(fk.FromColumns, from.String)
+			}
+			if to.Valid {
+				fk.ToColumns = append(fk.ToColumns, to.String)
+			}
+		}
+		if err := fkRows.Err(); err != nil {
+			fkRows.Close()
+			return nil, err
+		}
+		fkRows.Close()
+		for _, id := range order {
+			result = append(result, *byID[id])
+		}
+	}
+	return result, nil
+}
+
 // TableDDL returns the original DDL stored in sqlite_master.sql — literal, without
 // reconstruction (SQLite already persists CREATE TABLE verbatim).
 func (d *SQLiteDriver) TableDDL(ctx context.Context, schema, table string) (string, error) {

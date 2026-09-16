@@ -549,6 +549,28 @@ func (a *App) DeleteRow(tabID string, schema string, table string, pkColumns []s
 	return s.Driver.DeleteRow(s.Ctx, schema, table, pkColumns, pkValues)
 }
 
+// ExecuteBatch runs every staged INSERT/DELETE from the grid's "review changes" screen
+// in a single transaction on tab tabId's connection — all-or-nothing. It resolves the
+// session by tabID just like UpdateCell.
+func (a *App) ExecuteBatch(tabID string, ops []db.BatchOp) error {
+	s, err := a.sessions.Get(tabID)
+	if err != nil {
+		return err
+	}
+	return s.Driver.ExecuteBatch(s.Ctx, ops)
+}
+
+// ListIncomingForeignKeys lists FKs on OTHER tables that reference this table's columns
+// on tab tabId's connection — used to warn about ON DELETE CASCADE before a batch
+// delete. It resolves the session by tabID just like IntrospectTable.
+func (a *App) ListIncomingForeignKeys(tabID string, schema string, table string) ([]db.IncomingForeignKey, error) {
+	s, err := a.sessions.Get(tabID)
+	if err != nil {
+		return nil, err
+	}
+	return s.Driver.ListIncomingForeignKeys(s.Ctx, schema, table)
+}
+
 // GetTableDDL returns the table creation DDL on tab tabId's connection. It resolves the
 // session by tabID just like IntrospectTable.
 func (a *App) GetTableDDL(tabID string, schema string, table string) (string, error) {

@@ -1,5 +1,40 @@
 # STATE — Wisp
 
+## ✅ Concluído (2026-09-16): staging INSERT/DELETE no ResultGrid
+Delegate `20260916T131731-grid-batch-review` (Cursor).
+
+**Validação retomada (2026-09-16):** `npm run build` (inclui `tsc`),
+`go build ./...` e `go vet ./...` passaram. O Vite emitiu somente avisos de
+anotações `PURE`/tamanho de bundle vindos de dependência; nenhum erro do
+código do projeto. O usuário confirmou o fluxo funcionando na janela nativa
+(staging, revisão, confirmação e execução). `git diff --check` também passa.
+
+**Feito (código):**
+- `ResultGrid.tsx`: removidos popovers imediatos de insert/delete; staging
+  multi-linha (`pendingInserts` verdes no fim do grid + `pendingDeleteRows`
+  vermelhos); toolbar "Revisar mudanças (N)" / "Descartar mudanças"; execução
+  via `ExecuteBatch` + callbacks `onRowInserted`/`onRowDeleted` (deletes em
+  ordem decrescente de índice).
+- Novo `PendingChangesReview.tsx`: preview SQL textual, copiar, aviso CASCADE
+  via `ListIncomingForeignKeys` + checkbox obrigatório, erro inline sem limpar
+  pendências.
+- i18n `resultGrid` em `en.json` / `pt-BR.json`; CSS em `App.css`
+  (`.pending-changes-*`).
+
+**Verificação anterior:** ReadLints sem erros nos arquivos tocados. A
+verificação de shell agora foi concluída conforme registrado acima.
+
+**Não tocado (contrato):** `.go`, `wailsjs/`, i18n infra, outros componentes.
+
+**Fila atual após o encerramento da Fase 3:** não há implementação urgente
+definida. Os próximos itens dependem de demanda real: transações explícitas,
+exportação de datasets grandes, driver MySQL, integração de agentes via MCP,
+túnel SSH e DuckDB. O autocomplete de aliases ainda merece confirmação em
+queries reais do usuário; os demais itens da Fase 3 estão concluídos no
+`docs/ROADMAP.md`.
+
+---
+
 ## ✅ Checkpoint de delegação em massa (2026-09-16): i18n + comentários Go + polish visual
 Sessão inteiramente delegada (Cursor > Codex, na ordem preferida pelo
 usuário a partir de agora), com meu papel restrito a desenhar o contrato

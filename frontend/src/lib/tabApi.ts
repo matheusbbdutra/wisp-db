@@ -89,6 +89,17 @@ export function DeleteRow(tabId: string, schema: string, table: string, pkColumn
     return withQueue(tabId, () => App.DeleteRow(tabId, schema, table, pkColumns, pkValues));
 }
 
+// Roda todos os INSERTs/DELETEs pendentes da tela de "Revisar mudanças" numa
+// única transação (tudo ou nada) — ver db.BatchOp e a nota em
+// DatabaseDriver.ExecuteBatch.
+export function ExecuteBatch(tabId: string, ops: db.BatchOp[]): Promise<void> {
+    return withQueue(tabId, () => App.ExecuteBatch(tabId, ops));
+}
+
+export function ListIncomingForeignKeys(tabId: string, schema: string, table: string): Promise<db.IncomingForeignKey[]> {
+    return withQueue(tabId, () => App.ListIncomingForeignKeys(tabId, schema, table));
+}
+
 export function GetTableDDL(tabId: string, schema: string, table: string): Promise<string> {
     return withQueue(tabId, () => App.GetTableDDL(tabId, schema, table));
 }

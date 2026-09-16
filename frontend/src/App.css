@@ -1739,6 +1739,68 @@
     font-size: 11.5px;
 }
 
+.pending-changes-review {
+    max-width: min(640px, 92%);
+    max-height: 85vh;
+    overflow-y: auto;
+}
+
+.pending-changes-banner {
+    font-size: 11.5px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    padding: 6px 8px;
+    background: var(--bg-grid);
+    border: 1px dashed var(--border-subtle);
+    border-radius: 6px;
+}
+
+.pending-changes-script {
+    max-height: 40vh;
+    overflow-y: auto;
+}
+
+.pending-changes-cascade {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 10px;
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    border-radius: 6px;
+}
+
+.pending-changes-cascade-title {
+    font-size: 12px;
+    color: var(--accent-red, #ef4444);
+}
+
+.pending-changes-cascade-list {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 11.5px;
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+}
+
+.pending-changes-cascade-ack {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-main);
+    cursor: pointer;
+}
+
+.pending-changes-cascade-ack input {
+    margin-top: 2px;
+    accent-color: var(--accent-red, #ef4444);
+}
+
+.pending-changes-actions {
+    flex-wrap: wrap;
+}
+
 .result-filter-input {
     background: var(--bg-card);
     border: 1px solid var(--border-subtle);

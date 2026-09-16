@@ -96,6 +96,33 @@ type ForeignKey struct {
 	Definition string
 }
 
+// IncomingForeignKey describes an FK on another table (FromSchema.FromTable) that
+// references THIS table's columns — the reverse direction of ForeignKey. Used to warn
+// about ON DELETE CASCADE before a batch delete: OnDelete is one of "CASCADE",
+// "RESTRICT", "SET NULL", "SET DEFAULT", "NO ACTION", or "" when the dialect does not
+// expose it.
+type IncomingForeignKey struct {
+	Name        string
+	FromSchema  string
+	FromTable   string
+	FromColumns []string
+	ToColumns   []string
+	OnDelete    string
+}
+
+// BatchOp is a single staged INSERT or DELETE within ExecuteBatch — the same shape as
+// the arguments of InsertRow/DeleteRow, tagged by Kind so a mixed batch can be built
+// from the grid's pending changes (see ADR 0004 and the "staged changes" review screen).
+type BatchOp struct {
+	Kind      string // "insert" or "delete"
+	Schema    string
+	Table     string
+	Columns   []string // insert only
+	Values    []any    // insert only
+	PKColumns []string // delete only
+	PKValues  []any    // delete only
+}
+
 // Trigger describes a table trigger with its full DDL, verbatim.
 type Trigger struct {
 	Name       string
@@ -179,6 +206,20 @@ type DatabaseDriver interface {
 	// it first), not an error; the caller must warn the user instead of assuming success
 	// (the same pattern as UpdateCell/optimistic checking).
 	DeleteRow(ctx context.Context, schema, table string, pkColumns []string, pkValues []any) (rowsAffected int64, err error)
+
+	// ExecuteBatch runs every staged INSERT/DELETE from the "review changes" screen inside
+	// a single transaction — all-or-nothing: any failing op rolls back the whole batch, so
+	// the grid never ends up half-applied. Uses the same parameterized builders as
+	// InsertRow/DeleteRow (buildInsertRowQuery/buildDeleteRowQuery); no optimistic check is
+	// re-run per delete here (the review screen already showed the exact PK values staged
+	// from the loaded rows) — a delete that no longer matches any row simply affects 0 rows
+	// without failing the transaction.
+	ExecuteBatch(ctx context.Context, ops []BatchOp) error
+
+	// ListIncomingForeignKeys lists FKs on OTHER tables that reference this table's columns
+	// — the reverse of ListForeignKeys. Used to warn the user before a batch delete when a
+	// child table has ON DELETE CASCADE pointing at the table being deleted from.
+	ListIncomingForeignKeys(ctx context.Context, schema, table string) ([]IncomingForeignKey, error)
 
 	// TableDDL returns the table creation DDL.
 	TableDDL(ctx context.Context, schema, table string) (string, error)

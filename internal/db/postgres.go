@@ -378,6 +378,94 @@ func (d *PostgresDriver) DeleteRow(ctx context.Context, schema, table string, pk
 	return tag.RowsAffected(), nil
 }
 
+// ExecuteBatch runs every staged INSERT/DELETE inside a single pgx transaction on the
+// tab's dedicated connection — all-or-nothing (see DatabaseDriver.ExecuteBatch).
+func (d *PostgresDriver) ExecuteBatch(ctx context.Context, ops []BatchOp) error {
+	// See the comment in Execute about "conn busy" with an open streaming cursor.
+	d.closePendingCursor(ctx)
+	tx, err := d.conn.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("iniciando transação: %w", err)
+	}
+	for _, op := range ops {
+		schema := op.Schema
+		if schema == "" || schema == "main" {
+			schema = "public"
+		}
+		var query string
+		var args []any
+		switch op.Kind {
+		case "insert":
+			query, args, err = buildInsertRowQuery("$", schema, op.Table, op.Columns, op.Values)
+		case "delete":
+			query, args, err = buildDeleteRowQuery("$", schema, op.Table, op.PKColumns, op.PKValues)
+		default:
+			err = fmt.Errorf("tipo de operação desconhecido: %q", op.Kind)
+		}
+		if err != nil {
+			tx.Rollback(ctx)
+			return err
+		}
+		if _, err := tx.Exec(ctx, query, args...); err != nil {
+			tx.Rollback(ctx)
+			return fmt.Errorf("executando %s em %s.%s: %w", op.Kind, schema, op.Table, err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("confirmando transação: %w", err)
+	}
+	return nil
+}
+
+// ListIncomingForeignKeys returns FKs on OTHER tables that reference this table's
+// columns — the reverse query of ListForeignKeys (confrelid/conrelid swapped), via
+// pg_constraint. confdeltype maps to the same OnDelete vocabulary SQLite's
+// PRAGMA foreign_key_list already uses ("NO ACTION" when unset), so the frontend cascade
+// warning can compare a single set of strings regardless of dialect.
+func (d *PostgresDriver) ListIncomingForeignKeys(ctx context.Context, schema, table string) ([]IncomingForeignKey, error) {
+	if schema == "" || schema == "main" {
+		schema = "public"
+	}
+	// See the comment in Execute about "conn busy" with an open streaming cursor.
+	d.closePendingCursor(ctx)
+	rows, err := d.conn.Query(ctx, `
+		SELECT c.conname, n.nspname, t.relname,
+		       (SELECT array_agg(a.attname ORDER BY k.ordinality)
+		        FROM unnest(c.conkey) WITH ORDINALITY AS k(attnum, ordinality)
+		        JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum),
+		       (SELECT array_agg(a.attname ORDER BY k.ordinality)
+		        FROM unnest(c.confkey) WITH ORDINALITY AS k(attnum, ordinality)
+		        JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.attnum),
+		       CASE c.confdeltype
+		           WHEN 'c' THEN 'CASCADE'
+		           WHEN 'r' THEN 'RESTRICT'
+		           WHEN 'n' THEN 'SET NULL'
+		           WHEN 'd' THEN 'SET DEFAULT'
+		           ELSE 'NO ACTION'
+		       END
+		FROM pg_constraint c
+		JOIN pg_class t ON t.oid = c.conrelid
+		JOIN pg_namespace n ON n.oid = t.relnamespace
+		JOIN pg_class rc ON rc.oid = c.confrelid
+		JOIN pg_namespace rn ON rn.oid = rc.relnamespace
+		WHERE rn.nspname = $1 AND rc.relname = $2 AND c.contype = 'f'
+		ORDER BY c.conname`, schema, table)
+	if err != nil {
+		return nil, fmt.Errorf("listando foreign keys de entrada de %s.%s: %w", schema, table, err)
+	}
+	defer rows.Close()
+
+	var fks []IncomingForeignKey
+	for rows.Next() {
+		var fk IncomingForeignKey
+		if err := rows.Scan(&fk.Name, &fk.FromSchema, &fk.FromTable, &fk.FromColumns, &fk.ToColumns, &fk.OnDelete); err != nil {
+			return nil, err
+		}
+		fks = append(fks, fk)
+	}
+	return fks, rows.Err()
+}
+
 // TableDDL reconstructs CREATE TABLE from the catalog, since Postgres has NO native
 // "SHOW CREATE TABLE": columns via information_schema.columns (ordered by
 // ordinal_position) + constraints via pg_get_constraintdef(oid), filtering conrelid by
