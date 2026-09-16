@@ -458,10 +458,9 @@ o painel continua mostrando a linha certa (não a visualmente adjacente);
 "Ver valor…" do menu de contexto também sincroniza certo. `go build`/
 `go vet`/`tsc --noEmit`/`npm run build` limpos.
 
-**Pendente de confirmação do usuário**: testar na janela nativa (não só
-Chrome) — o redimensionamento por arrasto do painel de valor e a faixa de
-reabertura da sidebar (elementos finos, mais sensíveis a diferenças de
-input entre Chrome de teste e WebKitGTK nativo).
+**Confirmado pelo usuário na janela nativa** (2026-09-15): "aparentemente
+utilizável, não encontrei bug aparente" — painel de valor (arrasto,
+formato), sidebar colapsável e o restante testado sem achado novo.
 
 **Itens de polish restantes** (não implementados nesta rodada, ficam pra
 quando o usuário quiser continuar — lista completa nos 3 arquivos
@@ -469,6 +468,40 @@ quando o usuário quiser continuar — lista completa nos 3 arquivos
 toolbar, hit-area maior nos resize-handles, `:focus-visible` global,
 segmented control no `.table-subbar`, scrollbars customizadas, contraste
 de `--text-muted`, empty states unificados entre Sidebar/ResultGrid/Meta.
+
+## ✅ EXPLAIN / plano de execução (2026-09-15)
+Item 3 do Phase 3. Implementação bem mais simples do que o esboço original
+do ROADMAP sugeria: **sem binding novo no backend** — um plano de execução
+é só mais um resultado de query (uma coluna de texto no Postgres, quatro
+colunas no SQLite). Botão "Explain" novo em `ConsoleTab.tsx`, ao lado de
+"Executar"/"Nova aba", prefixa o texto atual do editor via
+`frontend/src/lib/explainQuery.ts` (dialect-aware) e chama o mesmo
+`handleRun(..., true)` já usado por tudo — reaproveita `RunQuery`,
+`ResultGrid`, abas de resultado, sem UI nova.
+
+**Decisão deliberada**: nunca `EXPLAIN ANALYZE` — essa variante EXECUTA a
+query de verdade (rodaria um UPDATE/DELETE real só de "olhar o plano"),
+`EXPLAIN` puro só mostra a estimativa do planner sem rodar nada. O ROADMAP
+antigo mencionava ANALYZE; ajustei a decisão por segurança real, não é
+regressão de escopo.
+
+**Verificado contra Postgres real** via Claude in Chrome:
+`EXPLAIN SELECT * FROM customers WHERE id = 1` abriu aba nova mostrando
+`Index Scan using customers_pkey` / `Index Cond: (id = 1)`, editor
+original intacto. SQLite (`EXPLAIN QUERY PLAN`) não testado ao vivo nesta
+rodada — mesmo caminho de código, risco baixo (só troca o prefixo de
+string), mas fica como pendência de confirmação se o usuário quiser.
+
+`go build`/`go vet`/`go test ./...`/`tsc --noEmit`/`npm run build` limpos.
+Nada commitado ainda desta feature.
+
+**Nota operacional**: durante o teste, achei o `wails dev` anterior com o
+frontend dev server morto silenciosamente (matei sem querer o processo
+certo, mas o processo antigo da janela nativa ficou vivo servindo uma
+versão cacheada, sem hot-reload real) — tive que matar o processo antigo
+e subir um `wails dev` novo. Se a janela nativa parecer "travada" sem
+refletir mudanças, checar se `lsof -i :5173` (ou a porta do Vite) tem
+processo vivo antes de assumir que é bug de código.
 
 ## Última atualização
 2026-09-15 (fim de sessão) — Autocomplete completo (v1+v2), uppercase automático, pretty-print SQL, copiar especial no grid e **edição inline de células** (item 7, concluído nesta sessão com 4 bugs reais de causa raiz corrigidos — ver seção "Edição inline de células" acima), todos implementados via delegação ao OpenCode + revisão/depuração minha antes de aceitar.

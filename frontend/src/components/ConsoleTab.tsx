@@ -15,6 +15,7 @@ import ScriptsPanel from './ScriptsPanel';
 import ConnectionBar from './ConnectionBar';
 import {useDragResize} from '../lib/useDragResize';
 import {withQueue} from '../lib/tabCallQueue';
+import {explainQuery} from '../lib/explainQuery';
 
 const DEFAULT_BATCH_SIZE = 200;
 // Abas de resultado por console — limite pra não crescer memória sem parar
@@ -829,6 +830,17 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                                 </svg>
                                 Nova aba
                                 <kbd className="kbd-shortcut">Ctrl+Alt+Enter</kbd>
+                            </button>
+                            <button
+                                className="btn btn-secondary"
+                                onClick={() => handleRun(explainQuery(query, driver), true)}
+                                disabled={!connected || !query.trim()}
+                                title="Mostra o plano de execução (EXPLAIN) numa aba nova — nunca EXPLAIN ANALYZE, pra não executar de verdade uma query de escrita só de olhar o plano."
+                            >
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4M9 3v6h6M9 3l11 11" />
+                                </svg>
+                                Explain
                             </button>
                             {anyRunning && (
                                 <button className="btn btn-danger" onClick={handleCancel} title="Cancelar a consulta em andamento agora">
