@@ -34,7 +34,7 @@ export namespace db {
 	    static createFrom(source: any = {}) {
 	        return new Column(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Name = source["Name"];
@@ -51,11 +51,11 @@ export namespace db {
 	    RefTable: string;
 	    RefColumns: string[];
 	    Definition: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ForeignKey(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Name = source["Name"];
@@ -69,11 +69,11 @@ export namespace db {
 	export class Function {
 	    Name: string;
 	    Definition: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Function(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Name = source["Name"];
@@ -107,11 +107,11 @@ export namespace db {
 	    Columns: string[];
 	    Unique: boolean;
 	    Definition: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Index(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Name = source["Name"];
@@ -125,11 +125,11 @@ export namespace db {
 	    Name: string;
 	    Columns: Column[];
 	    Kind: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Table(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Schema = source["Schema"];
@@ -137,7 +137,7 @@ export namespace db {
 	        this.Columns = this.convertValues(source["Columns"], Column);
 	        this.Kind = source["Kind"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -159,11 +159,11 @@ export namespace db {
 	export class Trigger {
 	    Name: string;
 	    Definition: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Trigger(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Name = source["Name"];
@@ -174,15 +174,15 @@ export namespace db {
 }
 
 export namespace main {
-	
+
 	export class FetchBatch {
 	    Rows: any[][];
 	    HasMore: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new FetchBatch(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Rows = source["Rows"];
@@ -193,11 +193,11 @@ export namespace main {
 	    Columns: string[];
 	    Types: string[];
 	    DurationMs: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new QueryMetadata(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Columns = source["Columns"];
@@ -210,11 +210,11 @@ export namespace main {
 	    LatestVersion: string;
 	    HTMLURL: string;
 	    HasUpdate: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new UpdateInfo(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.CurrentVersion = source["CurrentVersion"];
@@ -227,7 +227,7 @@ export namespace main {
 }
 
 export namespace store {
-	
+
 	export class QueryHistoryEntry {
 	    ID: number;
 	    ConnectionID: string;
@@ -238,11 +238,11 @@ export namespace store {
 	    RowCount: number;
 	    // Go type: time
 	    ExecutedAt: any;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new QueryHistoryEntry(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -254,7 +254,7 @@ export namespace store {
 	        this.RowCount = source["RowCount"];
 	        this.ExecutedAt = this.convertValues(source["ExecutedAt"], null);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -279,11 +279,11 @@ export namespace store {
 	    Driver: string;
 	    // Go type: time
 	    CreatedAt: any;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new SavedConnection(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -291,7 +291,7 @@ export namespace store {
 	        this.Driver = source["Driver"];
 	        this.CreatedAt = this.convertValues(source["CreatedAt"], null);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -318,11 +318,11 @@ export namespace store {
 	    CreatedAt: any;
 	    // Go type: time
 	    UpdatedAt: any;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new SavedScript(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -331,7 +331,7 @@ export namespace store {
 	        this.CreatedAt = this.convertValues(source["CreatedAt"], null);
 	        this.UpdatedAt = this.convertValues(source["UpdatedAt"], null);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
