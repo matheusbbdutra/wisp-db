@@ -1,21 +1,19 @@
-// Package db define o contrato comum entre bancos suportados (Strategy pattern).
-// Cada dialeto (Postgres, DuckDB, ClickHouse, MySQL, SQLite) implementa DatabaseDriver
-// em seu próprio arquivo/pacote; nenhum código de negócio deve fazer switch por tipo
-// de banco fora desta camada. Ver docs/ARCHITECTURE.md e docs/adr/0002-cgo-policy.md.
+// Package db defines the common contract for supported databases (Strategy pattern).
+// Each dialect (Postgres, DuckDB, ClickHouse, MySQL, SQLite) implements DatabaseDriver
+// in its own file/package; no business code should switch on database type outside this
+// layer. See docs/ARCHITECTURE.md and docs/adr/0002-cgo-policy.md.
 package db
 
 import "context"
 
-// normalizeCellValue converte []byte pra string antes da linha virar
-// QueryResult.Rows — Go serializa []byte pra base64 em JSON (é assim que
-// json.Marshal trata o tipo), e a ponte IPC do Wails serializa QueryResult
-// como JSON puro. Bug real de produção: pgx v5 não tem um codec nativo pro
-// tipo XML do Postgres (diferente de JSON/JSONB, que ele decodifica pra
-// string), então rows.Values() devolve o valor cru do wire como []byte — sem
-// essa conversão, uma coluna XML aparecia como base64 ilegível no grid em
-// vez do texto real. Aplica-se a QUALQUER []byte não tratado por um driver
-// (não só XML), então normaliza de forma genérica em vez de listar tipos
-// específicos.
+// normalizeCellValue converts []byte to string before the row becomes QueryResult.Rows —
+// Go serializes []byte as base64 in JSON (that is how json.Marshal handles the type),
+// and the Wails IPC bridge serializes QueryResult as plain JSON. A real production bug:
+// pgx v5 has no native codec for the Postgres XML type (unlike JSON/JSONB, which it
+// decodes to string), so rows.Values() returns the raw wire value as []byte — without
+// this conversion, an XML column appeared as unreadable base64 in the grid instead of
+// the actual text. This applies to ANY []byte not handled by a driver (not just XML), so
+// it normalizes generically instead of listing specific types.
 func normalizeCellValue(v any) any {
 	if b, ok := v.([]byte); ok {
 		return string(b)
@@ -30,16 +28,14 @@ func normalizeRow(row []any) []any {
 	return row
 }
 
-// normalizeRowSkipping é normalizeRow, mas preserva []byte como está nas
-// colunas marcadas por `binary` (mesmo índice) — usado pra bytea real do
-// Postgres. Bug real achado em revisão de código: normalizeRow convertia
-// bytea genuíno pra string, e string com bytes que não formam UTF-8 válido
-// vira U+FFFD (replacement character) na serialização JSON — perde os bytes
-// originais de forma irrecuperável (copiar/exportar não recupera o valor
-// real). bytea sem conversão continua virando base64 em JSON (comportamento
-// de antes desta sessão para esse tipo) — não é bonito na grade, mas é
-// reversível; xml/outros tipos de texto sem codec continuam sendo
-// convertidos pra string legível.
+// normalizeRowSkipping is normalizeRow, but preserves []byte as-is in columns marked by
+// `binary` (same index) — used for actual Postgres bytea. A real bug found during code
+// review: normalizeRow converted genuine bytea to string, and strings containing bytes
+// that are not valid UTF-8 become U+FFFD (replacement character) during JSON
+// serialization — irreversibly losing the original bytes (copying/exporting cannot
+// recover the actual value). Unconverted bytea still becomes base64 in JSON (the
+// behavior for this type before this session) — not pretty in the grid, but reversible;
+// xml/other text types without a codec are still converted to readable strings.
 func normalizeRowSkipping(row []any, binary []bool) []any {
 	for i, v := range row {
 		if i < len(binary) && binary[i] {
@@ -50,17 +46,17 @@ func normalizeRowSkipping(row []any, binary []bool) []any {
 	return row
 }
 
-// QueryResult é o formato único de transporte de resultado na ponte IPC com o
-// frontend: colunas/tipos planos + matriz de linhas, sem duplicar chaves por
-// linha (evita o overhead de []map[string]any em JSON).
+// QueryResult is the single result transport format across the IPC bridge to the
+// frontend: flat columns/types + a row matrix, without duplicating keys per row (avoids
+// the overhead of []map[string]any in JSON).
 type QueryResult struct {
 	Columns []string
 	Types   []string
 	Rows    [][]any
 }
 
-// Column descreve uma coluna de tabela para fins de introspecção de schema e
-// de decisão de editabilidade (ver docs/adr/0004-inline-edit-safety.md).
+// Column describes a table column for schema introspection and editability decisions
+// (see docs/adr/0004-inline-edit-safety.md).
 type Column struct {
 	Name         string
 	Type         string
@@ -69,19 +65,19 @@ type Column struct {
 	Nullable     bool
 }
 
-// Table é o nó de metadados retornado pela introspecção de schema.
+// Table is the metadata node returned by schema introspection.
 type Table struct {
 	Schema  string
 	Name    string
 	Columns []Column
-	// Kind distingue tabela de view na exploração de schema — sempre
-	// "table" ou "view", nunca vazio (ver ListTables/IntrospectSchema em
-	// cada driver). Views não aceitam UpdateCell/edição inline.
+	// Kind distinguishes tables from views in schema browsing — always "table" or "view",
+	// never empty (see ListTables/IntrospectSchema in each driver). Views do not support
+	// UpdateCell/inline editing.
 	Kind string
 }
 
-// Index descreve um índice de tabela com sua definição DDL completa,
-// verbatim, e as colunas cobertas (na ordem do índice).
+// Index describes a table index with its full DDL definition, verbatim, and the covered
+// columns (in index order).
 type Index struct {
 	Name       string
 	Columns    []string
@@ -89,8 +85,8 @@ type Index struct {
 	Definition string
 }
 
-// ForeignKey descreve uma FK de saída de uma tabela (a tabela referenciada
-// é RefSchema/RefTable) com a definição DDL completa, verbatim.
+// ForeignKey describes an outgoing FK of a table (the referenced table is
+// RefSchema/RefTable) with its full DDL definition, verbatim.
 type ForeignKey struct {
 	Name       string
 	Columns    []string
@@ -100,103 +96,98 @@ type ForeignKey struct {
 	Definition string
 }
 
-// Trigger descreve um trigger de tabela com seu DDL completo, verbatim.
+// Trigger describes a table trigger with its full DDL, verbatim.
 type Trigger struct {
 	Name       string
 	Definition string
 }
 
-// Function descreve uma função do schema com seu DDL completo, verbatim.
+// Function describes a schema function with its full DDL, verbatim.
 type Function struct {
 	Name       string
 	Definition string
 }
 
-// DatabaseDriver é o contrato que todo dialeto suportado deve implementar.
-// Uma instância representa uma única conexão viva, isolada por tabId no
-// Session Manager — nunca compartilhada entre abas.
+// DatabaseDriver is the contract every supported dialect must implement. An instance
+// represents a single live connection, isolated by tabId in the Session Manager — never
+// shared between tabs.
 type DatabaseDriver interface {
-	// Connect abre a conexão com o banco usando a string/config fornecida.
+	// Connect opens the database connection using the supplied string/config.
 	Connect(ctx context.Context, dsn string) error
 
-	// Close encerra a conexão.
+	// Close closes the connection.
 	Close() error
 
-	// Execute roda uma query e retorna o resultado inteiro já escaneado no
-	// formato de transporte. Uso geral (introspecção interna, scripts); o
-	// fluxo interativo do editor usa ExecuteStreaming/FetchNext em vez
-	// disso, para não carregar resultados grandes inteiros em memória.
-	// ctx deve ser derivado do context.CancelFunc da sessão (tabId), para que
-	// cancelar a aba cancele a query no servidor de fato, não só localmente.
+	// Execute runs a query and returns the entire result already scanned into the transport
+	// format. General-purpose use (internal introspection, scripts); the interactive editor
+	// flow uses ExecuteStreaming/FetchNext instead to avoid loading entire large results
+	// into memory. ctx must be derived from the session's (tabId) context.CancelFunc so
+	// that canceling the tab actually cancels the query on the server, not just locally.
 	Execute(ctx context.Context, query string) (*QueryResult, error)
 
-	// ExecuteStreaming inicia uma query e retorna metadados de coluna sem
-	// buscar linhas ainda — pareado com FetchNext (busca sob demanda, em
-	// lotes) e CloseCursor (libera o cursor aberto). Uma nova chamada a
-	// ExecuteStreaming fecha automaticamente qualquer cursor anterior ainda
-	// aberto na mesma conexão (só um resultado em voo por vez, como Connect
-	// já faz com sessões).
+	// ExecuteStreaming starts a query and returns column metadata without fetching rows yet
+	// — paired with FetchNext (on-demand batch fetching) and CloseCursor (releases the open
+	// cursor). A new call to ExecuteStreaming automatically closes any previous cursor
+	// still open on the same connection (only one result in flight at a time, as Connect
+	// already does with sessions).
 	ExecuteStreaming(ctx context.Context, query string) (columns []string, types []string, err error)
 
-	// FetchNext retorna até n linhas do cursor aberto por ExecuteStreaming.
-	// hasMore=false indica que o cursor se esgotou (e já foi fechado
-	// internamente); chamar FetchNext sem um ExecuteStreaming anterior
-	// retorna (nil, false, nil), não erro.
+	// FetchNext returns up to n rows from the cursor opened by ExecuteStreaming.
+	// hasMore=false means the cursor is exhausted (and has already been closed internally);
+	// calling FetchNext without a prior ExecuteStreaming returns (nil, false, nil), not an
+	// error.
 	FetchNext(ctx context.Context, n int) (rows [][]any, hasMore bool, err error)
 
-	// CloseCursor fecha o cursor aberto por ExecuteStreaming, se houver
-	// (idempotente — chamar sem cursor aberto não é erro). Usado ao
-	// cancelar/reconectar/desconectar a aba antes do cursor se esgotar
-	// sozinho via FetchNext.
+	// CloseCursor closes the cursor opened by ExecuteStreaming, if any (idempotent —
+	// calling it without an open cursor is not an error). Used when
+	// canceling/reconnecting/disconnecting the tab before the cursor is exhausted on its
+	// own via FetchNext.
 	CloseCursor() error
 
-	// CancelRunningQuery dispara o cancelamento nativo do dialeto (ex.
-	// pgx.CancelQuery), quando disponível, além do cancelamento via ctx.
+	// CancelRunningQuery triggers native dialect cancellation (e.g. pgx.CancelQuery), when
+	// available, in addition to cancellation via ctx.
 	CancelRunningQuery(ctx context.Context) error
 
-	// ListSchemas, ListTables e Introspect implementam a introspecção lazy
-	// usada pela sidebar (ver docs/ARCHITECTURE.md, "Fluxo de metadados").
+	// ListSchemas, ListTables and Introspect implement the lazy introspection used by the
+	// sidebar (see docs/ARCHITECTURE.md, "Fluxo de metadados").
 	ListSchemas(ctx context.Context) ([]string, error)
 	ListTables(ctx context.Context, schema string) ([]Table, error)
 	Introspect(ctx context.Context, schema, table string) (*Table, error)
 
-	// IntrospectSchema retorna TODAS as tabelas de um schema já com Columns
-	// populado, em uma única consulta batched — evita N+1 round-trips (um
-	// Introspect por tabela) ao montar o catálogo de autocomplete pro schema
-	// inteiro de uma vez (ver App.IntrospectSchemaTables). Bug real de
-	// produção corrigido: com schemas de muitas tabelas, o loop de Introspect
-	// sequencial travava a fila da aba (mesma conexão exclusiva) por tempo
-	// suficiente pra parecer que a query do usuário tinha "sumido".
+	// IntrospectSchema returns ALL tables in a schema with Columns already populated, in a
+	// single batched query — avoids N+1 round-trips (one Introspect per table) when
+	// building the autocomplete catalog for the entire schema at once (see
+	// App.IntrospectSchemaTables). A real production bug fixed: with schemas containing
+	// many tables, the sequential Introspect loop blocked the tab's queue (same exclusive
+	// connection) long enough to make the user's query appear to have "disappeared".
 	IntrospectSchema(ctx context.Context, schema string) ([]Table, error)
 
-	// UpdateCell gera e executa um UPDATE parametrizado de uma única
-	// célula, com checagem otimista de concorrência (WHERE pk... AND
-	// coluna_antiga = ?, ver docs/adr/0004-inline-edit-safety.md).
-	// Retorna rowsAffected — 0 significa que a linha mudou entre o fetch
-	// e o save (outro processo alterou), não erro; o caller deve avisar
-	// o usuário em vez de assumir sucesso.
+	// UpdateCell generates and executes a parameterized UPDATE of a single cell, with
+	// optimistic concurrency checking (WHERE pk... AND coluna_antiga = ?, see
+	// docs/adr/0004-inline-edit-safety.md). It returns rowsAffected — 0 means the row
+	// changed between fetch and save (another process modified it), not an error; the
+	// caller must warn the user instead of assuming success.
 	UpdateCell(ctx context.Context, schema, table string, pkColumns []string, pkValues []any, column string, oldValue any, newValue any) (rowsAffected int64, err error)
 
-	// InsertRow insere uma linha nova, sempre com lista explícita de colunas
-	// (nunca posicional) — parametrizado, mesmo padrão de segurança do
-	// UpdateCell. columns/values devem estar na mesma ordem.
+	// InsertRow inserts a new row, always with an explicit column list (never positional) —
+	// parameterized, using the same security pattern as UpdateCell. columns/values must be
+	// in the same order.
 	InsertRow(ctx context.Context, schema, table string, columns []string, values []any) error
 
-	// DeleteRow apaga a linha identificada pela PK real (nunca por todas as
-	// colunas visíveis). Retorna rowsAffected — 0 significa que a linha já
-	// não existia mais (outro processo apagou antes), não erro; o caller
-	// deve avisar o usuário em vez de assumir sucesso (mesmo padrão de
-	// UpdateCell/checagem otimista).
+	// DeleteRow deletes the row identified by its real PK (never by all visible columns).
+	// It returns rowsAffected — 0 means the row no longer existed (another process deleted
+	// it first), not an error; the caller must warn the user instead of assuming success
+	// (the same pattern as UpdateCell/optimistic checking).
 	DeleteRow(ctx context.Context, schema, table string, pkColumns []string, pkValues []any) (rowsAffected int64, err error)
 
-	// TableDDL retorna o DDL de criação da tabela.
+	// TableDDL returns the table creation DDL.
 	TableDDL(ctx context.Context, schema, table string) (string, error)
-	// ListTriggers lista triggers de uma tabela, com DDL completo.
+	// ListTriggers lists a table's triggers, with full DDL.
 	ListTriggers(ctx context.Context, schema, table string) ([]Trigger, error)
-	// ListFunctions lista funções do schema (não é por tabela).
+	// ListFunctions lists schema functions (not per table).
 	ListFunctions(ctx context.Context, schema string) ([]Function, error)
-	// ListIndexes lista índices de uma tabela, com DDL completo.
+	// ListIndexes lists a table's indexes, with full DDL.
 	ListIndexes(ctx context.Context, schema, table string) ([]Index, error)
-	// ListForeignKeys lista as FKs de saída de uma tabela, com DDL completo.
+	// ListForeignKeys lists a table's outgoing FKs, with full DDL.
 	ListForeignKeys(ctx context.Context, schema, table string) ([]ForeignKey, error)
 }

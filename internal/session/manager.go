@@ -1,6 +1,6 @@
-// Package session implementa o isolamento de execução por aba (tabId), exigido
-// em docs/ARCHITECTURE.md e CLAUDE.md: cada aba tem sua própria conexão e seu
-// próprio context.CancelFunc, nunca compartilhados entre abas.
+// Package session implements per-tab (tabId) execution isolation, required by
+// docs/ARCHITECTURE.md and CLAUDE.md: each tab has its own connection and its own
+// context.CancelFunc, never shared between tabs.
 package session
 
 import (
@@ -12,32 +12,29 @@ import (
 	"wisp/internal/db"
 )
 
-// Session agrupa a conexão ativa de uma aba com o cancelamento associado a ela.
+// Session groups a tab's active connection with its associated cancellation.
 type Session struct {
 	TabID  string
 	Driver db.DatabaseDriver
-	// CacheKey identifica a conexão (driver+DSN) de forma estável para o
-	// schema cache (ver internal/schemacache) — nunca a DSN em texto puro.
+	// CacheKey stably identifies the connection (driver+DSN) for the schema cache (see
+	// internal/schemacache) — never the plaintext DSN.
 	CacheKey string
-	// ConnectionID é o id da conexão salva associada (store.SavedConnection),
-	// ou "" quando a sessão foi aberta por DSN direta sem SaveConnection —
-	// usado para registrar o histórico de queries (query_history) ligado à
-	// conexão certa.
+	// ConnectionID is the associated saved connection id (store.SavedConnection), or ""
+	// when the session was opened with a direct DSN without SaveConnection — used to record
+	// query history (query_history) linked to the correct connection.
 	ConnectionID string
 
-	// Ctx vive enquanto a sessão estiver conectada (cancelado só em Close ou
-	// numa reconexão que substitui a sessão) — usado para chamadas que não
-	// fazem parte do fluxo de uma query específica (ListSchemas, ListTables).
+	// Ctx lives as long as the session is connected (canceled only in Close or on
+	// reconnection that replaces the session) — used for calls outside a specific query
+	// flow (ListSchemas, ListTables).
 	Ctx context.Context
-	// QueryCtx é o ctx da execução de query em voo no momento (RunQuery/
-	// FetchRows) — cancelado individualmente por Cancel(), sem invalidar a
-	// sessão inteira (permite rodar uma query nova depois de cancelar uma
-	// anterior, sem precisar reconectar).
+	// QueryCtx is the ctx of the currently in-flight query execution (RunQuery/FetchRows) —
+	// canceled individually by Cancel(), without invalidating the entire session (allows
+	// running a new query after canceling a previous one without reconnecting).
 	QueryCtx context.Context
 
-	// Campos usados por App para registrar o histórico de uma query em
-	// streaming (RunQuery grava a entrada, FetchRows atualiza o total de
-	// linhas conforme busca e quando o cursor se esgota).
+	// Fields used by App to record streaming query history (RunQuery writes the entry,
+	// FetchRows updates the row total as it fetches and when the cursor is exhausted).
 	QueryStartedAt   time.Time
 	PendingQueryText string
 	PendingHistoryID int64
@@ -47,8 +44,8 @@ type Session struct {
 	queryCancel context.CancelFunc
 }
 
-// Manager mantém o mapeamento tabId -> Session. Seguro para uso concorrente:
-// múltiplas abas podem abrir/fechar/cancelar sessões ao mesmo tempo.
+// Manager maintains the tabId -> Session mapping. Safe for concurrent use: multiple tabs
+// can open/close/cancel sessions at the same time.
 type Manager struct {
 	mu       sync.Mutex
 	sessions map[string]*Session
@@ -58,10 +55,10 @@ func NewManager() *Manager {
 	return &Manager{sessions: make(map[string]*Session)}
 }
 
-// Open registra uma nova sessão para tabId, encerrando qualquer sessão
-// anterior com o mesmo id (reconexão da mesma aba). cacheKey identifica a
-// conexão para o schema cache (ver internal/schemacache); connectionID é o
-// id da conexão salva associada, ou "" para conexão por DSN direta.
+// Open registers a new session for tabId, closing any previous session with the same id
+// (reconnecting the same tab). cacheKey identifies the connection for the schema cache
+// (see internal/schemacache); connectionID is the associated saved connection id, or ""
+// for a direct DSN connection.
 func (m *Manager) Open(tabID string, driver db.DatabaseDriver, cacheKey string, connectionID string) (context.Context, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -82,7 +79,7 @@ func (m *Manager) Open(tabID string, driver db.DatabaseDriver, cacheKey string, 
 	return ctx, nil
 }
 
-// Get retorna a sessão ativa de uma aba, ou erro se não houver conexão aberta.
+// Get returns a tab's active session, or an error if there is no open connection.
 func (m *Manager) Get(tabID string) (*Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -94,17 +91,16 @@ func (m *Manager) Get(tabID string) (*Session, error) {
 	return s, nil
 }
 
-// StartQuery prepara um QueryCtx novo (derivado do Ctx da sessão) para uma
-// nova execução. NÃO cancela o QueryCtx de uma query anterior automaticamente
-// — descoberto na prática (pgx real, não suposição) que cancelar o ctx de
-// uma query cujo cursor ainda está aberto (hasMore=true, usuário rodou outra
-// query sem esgotar a anterior) faz o pgx fechar a conexão inteira como
-// efeito colateral de segurança do protocolo, quebrando a sessão sem o
-// usuário ter pedido isso. Quem libera o cursor anterior com segurança é
-// ExecuteStreaming (via CloseCursor interno, no nível SQL, sem tocar em
-// ctx) — chamado automaticamente a cada nova execução. Cancelamento via ctx
-// fica reservado só para Cancel() (ação explícita do usuário), que aceita
-// esse efeito colateral como parte do preço de interromper de verdade.
+// StartQuery prepares a new QueryCtx (derived from the session's Ctx) for a new
+// execution. It does NOT automatically cancel the QueryCtx of a previous query —
+// discovered in practice (real pgx, not an assumption) that canceling the ctx of a query
+// whose cursor is still open (hasMore=true, user ran another query without exhausting
+// the previous one) makes pgx close the entire connection as a protocol safety side
+// effect, breaking the session without the user requesting it. ExecuteStreaming safely
+// releases the previous cursor (via internal CloseCursor, at the SQL level, without
+// touching ctx) — called automatically on each new execution. Cancellation via ctx is
+// reserved for Cancel() only (explicit user action), which accepts this side effect as
+// part of the cost of actually interrupting execution.
 func (m *Manager) StartQuery(tabID string) (context.Context, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -119,15 +115,14 @@ func (m *Manager) StartQuery(tabID string) (context.Context, error) {
 	return qctx, nil
 }
 
-// Cancel interrompe a query em andamento da aba via o cancelamento nativo
-// do driver (ex. pgx CancelRequest). NÃO cancela o QueryCtx — verificado na
-// prática (pgx real) que isso desbloqueia um FetchNext em andamento sozinho
-// (ex.: ~9ms pra abortar um fetch de milhões de linhas) sem o efeito
-// colateral de cancelar o ctx, que faz o pgx fechar a conexão inteira,
-// exigindo reconectar. Limitação conhecida: SQLite não tem cancelamento
-// nativo (CancelRunningQuery é no-op lá) — cancelar uma query SQLite em
-// andamento não é totalmente suportado hoje (queries locais/rápidas, então
-// o impacto prático é baixo; reabrir se virar problema real).
+// Cancel interrupts the tab's running query through native driver cancellation (e.g. pgx
+// CancelRequest). It does NOT cancel QueryCtx — verified in practice (real pgx) that
+// this alone unblocks an ongoing FetchNext (e.g. ~9ms to abort a fetch of millions of
+// rows) without the side effect of canceling ctx, which makes pgx close the entire
+// connection, requiring reconnection. Known limitation: SQLite has no native
+// cancellation (CancelRunningQuery is a no-op there) — canceling a running SQLite query
+// is not fully supported today (local/fast queries, so the practical impact is low;
+// revisit if it becomes a real problem).
 func (m *Manager) Cancel(ctx context.Context, tabID string) error {
 	s, err := m.Get(tabID)
 	if err != nil {
@@ -136,7 +131,7 @@ func (m *Manager) Cancel(ctx context.Context, tabID string) error {
 	return s.Driver.CancelRunningQuery(ctx)
 }
 
-// Close encerra e remove a sessão de uma aba (ex.: aba fechada pelo usuário).
+// Close closes and removes a tab's session (e.g. tab closed by the user).
 func (m *Manager) Close(tabID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

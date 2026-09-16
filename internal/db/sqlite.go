@@ -10,20 +10,20 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// SQLiteDriver implementa DatabaseDriver para arquivos SQLite locais
-// (modernc.org/sqlite, puro Go — ver docs/adr/0002-cgo-policy.md).
+// SQLiteDriver implements DatabaseDriver for local SQLite files (modernc.org/sqlite,
+// pure Go — see docs/adr/0002-cgo-policy.md).
 type SQLiteDriver struct {
 	conn   *sql.Conn
 	pool   *sql.DB
-	cursor *sql.Rows // cursor aberto por ExecuteStreaming, ver FetchNext/CloseCursor
-	// cursorBinaryCols marca colunas BLOB do cursor aberto — mesmo motivo do
-	// campo homônimo em PostgresDriver (ver normalizeRowSkipping).
+	cursor *sql.Rows // cursor opened by ExecuteStreaming, see FetchNext/CloseCursor
+	// cursorBinaryCols marks BLOB columns in the open cursor — for the same reason as the
+	// field of the same name in PostgresDriver (see normalizeRowSkipping).
 	cursorBinaryCols []bool
 }
 
-// binaryColumnMaskSQLite marca (por índice) colunas cujo tipo declarado é
-// BLOB — essas não devem virar string via normalizeRow (bytes binários
-// genuínos ficariam irrecuperáveis, mesmo motivo do bytea no Postgres).
+// binaryColumnMaskSQLite marks columns whose declared type is BLOB (by index) — these
+// must not become strings via normalizeRow (genuine binary bytes would become
+// irrecoverable, for the same reason as bytea in Postgres).
 func binaryColumnMaskSQLite(colTypes []*sql.ColumnType) []bool {
 	mask := make([]bool, len(colTypes))
 	for i, ct := range colTypes {
@@ -36,11 +36,11 @@ func NewSQLiteDriver() *SQLiteDriver {
 	return &SQLiteDriver{}
 }
 
-// Connect exige que o arquivo já exista — o driver subjacente (database/sql
-// + modernc.org/sqlite) cria silenciosamente um banco novo vazio se o
-// caminho não existir, o que faz "Conectar" a um caminho errado parecer
-// bem-sucedido e só falhar depois, de forma confusa (ex.: "no such table"),
-// em vez de avisar na hora. ":memory:" é a exceção óbvia (não é arquivo).
+// Connect requires the file to already exist — the underlying driver (database/sql +
+// modernc.org/sqlite) silently creates a new empty database if the path does not exist,
+// making "Connect" to an incorrect path appear successful, only to fail later in a
+// confusing way (e.g. "no such table") instead of warning immediately. ":memory:" is the
+// obvious exception (not a file).
 func (d *SQLiteDriver) Connect(ctx context.Context, dsn string) error {
 	if dsn != ":memory:" {
 		path := dsn
@@ -89,10 +89,9 @@ func (d *SQLiteDriver) Execute(ctx context.Context, query string) (*QueryResult,
 	return scanRows(rows)
 }
 
-// ExecuteStreaming inicia a query e devolve só os metadados de coluna — as
-// linhas são buscadas sob demanda via FetchNext (ver docs/ARCHITECTURE.md,
-// "Data Grid Virtualizado" e o pedido do usuário de paginação real em vez
-// de carregar tudo de uma vez).
+// ExecuteStreaming starts the query and returns only column metadata — rows are fetched
+// on demand via FetchNext (see docs/ARCHITECTURE.md, "Data Grid Virtualizado" and the
+// user's request for real pagination instead of loading everything at once).
 func (d *SQLiteDriver) ExecuteStreaming(ctx context.Context, query string) ([]string, []string, error) {
 	d.CloseCursor()
 
@@ -161,15 +160,15 @@ func (d *SQLiteDriver) CloseCursor() error {
 	return err
 }
 
-// CancelRunningQuery: SQLite é embutido e single-file — não há cancelamento
-// nativo de servidor remoto. O ctx cancelado (Session Manager) já interrompe
-// a chamada local, que é o único mecanismo aplicável aqui.
+// CancelRunningQuery: SQLite is embedded and single-file — there is no native remote
+// server cancellation. The canceled ctx (Session Manager) already interrupts the local
+// call, which is the only applicable mechanism here.
 func (d *SQLiteDriver) CancelRunningQuery(ctx context.Context) error {
 	return nil
 }
 
 func (d *SQLiteDriver) ListSchemas(ctx context.Context) ([]string, error) {
-	// SQLite não tem conceito de schema múltiplo por padrão (fora ATTACH).
+	// SQLite has no concept of multiple schemas by default (apart from ATTACH).
 	return []string{"main"}, nil
 }
 
@@ -192,10 +191,9 @@ func (d *SQLiteDriver) ListTables(ctx context.Context, schema string) ([]Table, 
 	return tables, rows.Err()
 }
 
-// Introspect usa PRAGMA table_xinfo, que expõe a coluna "hidden": 2 e 3
-// identificam colunas geradas (virtual/stored) desde o SQLite 3.31 — é o que
-// alimenta IsGenerated para a checagem de segurança de edição inline
-// (docs/adr/0004-inline-edit-safety.md).
+// Introspect uses PRAGMA table_xinfo, which exposes the "hidden" column: 2 and 3
+// identify generated columns (virtual/stored) since SQLite 3.31 — this feeds IsGenerated
+// for the inline-editing safety check (docs/adr/0004-inline-edit-safety.md).
 func (d *SQLiteDriver) Introspect(ctx context.Context, schema, table string) (*Table, error) {
 	rows, err := d.conn.QueryContext(ctx, fmt.Sprintf(`PRAGMA table_xinfo(%q)`, table))
 	if err != nil {
@@ -222,10 +220,10 @@ func (d *SQLiteDriver) Introspect(ctx context.Context, schema, table string) (*T
 	return result, rows.Err()
 }
 
-// IntrospectSchema é o equivalente de IntrospectSchema do Postgres, mas aqui
-// o loop por tabela fica: SQLite é um arquivo local (sem round-trip de rede),
-// então o custo do N+1 que motivou a versão batched do Postgres não existe
-// aqui — não há requisito real pra evitar o loop.
+// IntrospectSchema is the equivalent of Postgres IntrospectSchema, but the per-table
+// loop remains here: SQLite is a local file (no network round-trip), so the N+1 cost
+// that motivated the batched Postgres version does not exist here — there is no actual
+// requirement to avoid the loop.
 func (d *SQLiteDriver) IntrospectSchema(ctx context.Context, schema string) ([]Table, error) {
 	tables, err := d.ListTables(ctx, schema)
 	if err != nil {
@@ -243,11 +241,10 @@ func (d *SQLiteDriver) IntrospectSchema(ctx context.Context, schema string) ([]T
 	return result, nil
 }
 
-// UpdateCell executa um UPDATE parametrizado de uma única célula com
-// checagem otimista de concorrência (WHERE pk = ? AND coluna_antiga = ?,
-// ver docs/adr/0004-inline-edit-safety.md). Placeholders `?` nativos do
-// driver; identificadores quotados, valores sempre como argumento — nunca
-// concatenados no SQL.
+// UpdateCell executes a parameterized UPDATE of a single cell with optimistic
+// concurrency checking (WHERE pk = ? AND coluna_antiga = ?, see
+// docs/adr/0004-inline-edit-safety.md). Native driver `?` placeholders; identifiers are
+// quoted, values are always passed as arguments — never concatenated into SQL.
 func (d *SQLiteDriver) UpdateCell(ctx context.Context, schema, table string, pkColumns []string, pkValues []any, column string, oldValue any, newValue any) (int64, error) {
 	query, args, err := buildUpdateCellQuery("?", schema, table, pkColumns, pkValues, column, oldValue, newValue)
 	if err != nil {
@@ -264,7 +261,7 @@ func (d *SQLiteDriver) UpdateCell(ctx context.Context, schema, table string, pkC
 	return affected, nil
 }
 
-// InsertRow executa um INSERT parametrizado com lista explícita de colunas.
+// InsertRow executes a parameterized INSERT with an explicit column list.
 func (d *SQLiteDriver) InsertRow(ctx context.Context, schema, table string, columns []string, values []any) error {
 	query, args, err := buildInsertRowQuery("?", schema, table, columns, values)
 	if err != nil {
@@ -276,7 +273,7 @@ func (d *SQLiteDriver) InsertRow(ctx context.Context, schema, table string, colu
 	return nil
 }
 
-// DeleteRow executa um DELETE parametrizado por PK real.
+// DeleteRow executes a parameterized DELETE by real PK.
 func (d *SQLiteDriver) DeleteRow(ctx context.Context, schema, table string, pkColumns []string, pkValues []any) (int64, error) {
 	query, args, err := buildDeleteRowQuery("?", schema, table, pkColumns, pkValues)
 	if err != nil {
@@ -293,8 +290,8 @@ func (d *SQLiteDriver) DeleteRow(ctx context.Context, schema, table string, pkCo
 	return affected, nil
 }
 
-// TableDDL retorna o DDL original guardado em sqlite_master.sql — literal,
-// sem reconstrução (o SQLite já persiste o CREATE TABLE verbatim).
+// TableDDL returns the original DDL stored in sqlite_master.sql — literal, without
+// reconstruction (SQLite already persists CREATE TABLE verbatim).
 func (d *SQLiteDriver) TableDDL(ctx context.Context, schema, table string) (string, error) {
 	var ddl sql.NullString
 	err := d.conn.QueryRowContext(ctx,
@@ -308,7 +305,7 @@ func (d *SQLiteDriver) TableDDL(ctx context.Context, schema, table string) (stri
 	return ddl.String, nil
 }
 
-// ListTriggers lista triggers da tabela via sqlite_master (name + sql).
+// ListTriggers lists table triggers via sqlite_master (name + sql).
 func (d *SQLiteDriver) ListTriggers(ctx context.Context, schema, table string) ([]Trigger, error) {
 	rows, err := d.conn.QueryContext(ctx,
 		`SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ? ORDER BY name`, table)
@@ -332,16 +329,16 @@ func (d *SQLiteDriver) ListTriggers(ctx context.Context, schema, table string) (
 	return triggers, rows.Err()
 }
 
-// ListFunctions: SQLite não tem função de usuário no sentido tradicional —
-// retorna vazio (não é bug; o frontend mostra estado vazio com nota).
+// ListFunctions: SQLite has no user functions in the traditional sense — returns empty
+// (not a bug; the frontend shows an empty state with a note).
 func (d *SQLiteDriver) ListFunctions(ctx context.Context, schema string) ([]Function, error) {
 	return nil, nil
 }
 
-// ListIndexes lista índices explícitos da tabela via sqlite_master (exclui
-// os autoindex de PK/UNIQUE, que já aparecem no TableDDL como parte da
-// própria CREATE TABLE — "sqlite_autoindex_" é o prefixo interno do SQLite
-// pra esses). Colunas via PRAGMA index_info, na ordem do índice.
+// ListIndexes lists explicit table indexes via sqlite_master (excludes PK/UNIQUE
+// autoindexes, which already appear in TableDDL as part of CREATE TABLE itself —
+// "sqlite_autoindex_" is SQLite's internal prefix for them). Columns come from PRAGMA
+// index_info, in index order.
 func (d *SQLiteDriver) ListIndexes(ctx context.Context, schema, table string) ([]Index, error) {
 	rows, err := d.conn.QueryContext(ctx,
 		`SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND name NOT LIKE 'sqlite_autoindex_%' ORDER BY name`, table)
@@ -366,11 +363,10 @@ func (d *SQLiteDriver) ListIndexes(ctx context.Context, schema, table string) ([
 		return nil, err
 	}
 
-	// PRAGMA index_list traz o flag "unique" por TABELA (não por índice) —
-	// bug real corrigido em revisão de código: a versão anterior sempre
-	// retornava Unique=false, então "CREATE UNIQUE INDEX" aparecia como "não"
-	// na UI (resposta errada, não só ausência de informação). Lê uma vez por
-	// tabela e cruza pelo nome do índice.
+	// PRAGMA index_list provides the "unique" flag per TABLE (not per index) — a real bug
+	// fixed during code review: the previous version always returned Unique=false, so
+	// "CREATE UNIQUE INDEX" appeared as "no" in the UI (an incorrect answer, not just
+	// missing information). Read once per table and match by index name.
 	uniqueByName, err := d.uniqueIndexNames(ctx, table)
 	if err != nil {
 		return nil, err
@@ -386,8 +382,8 @@ func (d *SQLiteDriver) ListIndexes(ctx context.Context, schema, table string) ([
 	return indexes, nil
 }
 
-// uniqueIndexNames lê PRAGMA index_list(tabela) e devolve o conjunto de
-// nomes de índice marcados como únicos.
+// uniqueIndexNames reads PRAGMA index_list(tabela) and returns the set of index names
+// marked as unique.
 func (d *SQLiteDriver) uniqueIndexNames(ctx context.Context, table string) (map[string]bool, error) {
 	rows, err := d.conn.QueryContext(ctx, fmt.Sprintf(`PRAGMA index_list(%q)`, table))
 	if err != nil {
@@ -411,8 +407,7 @@ func (d *SQLiteDriver) uniqueIndexNames(ctx context.Context, table string) (map[
 	return unique, rows.Err()
 }
 
-// indexColumns lê PRAGMA index_info pra pegar as colunas do índice, na
-// ordem seqno.
+// indexColumns reads PRAGMA index_info to retrieve the index columns in seqno order.
 func (d *SQLiteDriver) indexColumns(ctx context.Context, indexName string) ([]string, error) {
 	infoRows, err := d.conn.QueryContext(ctx, fmt.Sprintf(`PRAGMA index_info(%q)`, indexName))
 	if err != nil {
@@ -434,9 +429,9 @@ func (d *SQLiteDriver) indexColumns(ctx context.Context, indexName string) ([]st
 	return cols, infoRows.Err()
 }
 
-// ListForeignKeys lista as FKs de saída da tabela via PRAGMA foreign_key_list.
-// SQLite não nomeia FKs (sem "CONSTRAINT nome"), então Name/Definition usam
-// um rótulo sintético ("fk_<id>") e uma reconstrução textual simples.
+// ListForeignKeys lists the table's outgoing FKs via PRAGMA foreign_key_list. SQLite
+// does not name FKs (no "CONSTRAINT nome"), so Name/Definition use a synthetic label
+// ("fk_<id>") and a simple textual reconstruction.
 func (d *SQLiteDriver) ListForeignKeys(ctx context.Context, schema, table string) ([]ForeignKey, error) {
 	rows, err := d.conn.QueryContext(ctx, fmt.Sprintf(`PRAGMA foreign_key_list(%q)`, table))
 	if err != nil {
@@ -500,17 +495,16 @@ func (d *SQLiteDriver) ListForeignKeys(ctx context.Context, schema, table string
 	return result, nil
 }
 
-// quoteIdent quota um identificador SQL com aspas duplas, escapando aspas
-// internas por duplicação — evita injeção via nome de tabela/coluna.
+// quoteIdent quotes a SQL identifier with double quotes, escaping internal quotes by
+// doubling them — prevents injection through table/column names.
 func quoteIdent(ident string) string {
 	return `"` + strings.ReplaceAll(ident, `"`, `""`) + `"`
 }
 
-// buildUpdateCellQuery monta o UPDATE parametrizado compartilhado pelos
-// dialetos: placeholder "?" (SQLite) ou "$n" (Postgres, qualquer outro
-// valor); valores NULL na checagem otimista viram IS NULL em vez de = ?
-// (NULL nunca iguala com =). A ordem dos args acompanha a numeração dos
-// placeholders: PKs, valor antigo, valor novo.
+// buildUpdateCellQuery builds the parameterized UPDATE shared by the dialects:
+// placeholder "?" (SQLite) or "$n" (Postgres, any other value); NULL values in the
+// optimistic check become IS NULL instead of = ? (NULL never compares equal with =).
+// Argument order follows placeholder numbering: PKs, old value, new value.
 func buildUpdateCellQuery(placeholder, schema, table string, pkColumns []string, pkValues []any, column string, oldValue any, newValue any) (string, []any, error) {
 	if table == "" {
 		return "", nil, fmt.Errorf("tabela vazia")
@@ -540,11 +534,10 @@ func buildUpdateCellQuery(placeholder, schema, table string, pkColumns []string,
 		qualified = quoteIdent(schema) + "." + qualified
 	}
 
-	// setPh precisa ser calculado ANTES do loop do WHERE: o placeholder do
-	// SET aparece primeiro no texto final da query, e o binding posicional
-	// do driver ("?" no SQLite) segue a ordem textual dos placeholders, não
-	// a ordem de chamada em Go. args é montado na mesma ordem (newValue
-	// primeiro) pra ficar consistente nos dois estilos de placeholder.
+	// setPh must be calculated BEFORE the WHERE loop: the SET placeholder appears first in
+	// the final query text, and the driver's positional binding ("?" in SQLite) follows the
+	// textual order of placeholders, not the order of calls in Go. args is built in the
+	// same order (newValue first) to remain consistent across both placeholder styles.
 	setPh := ph()
 	args := []any{newValue}
 
@@ -572,9 +565,9 @@ func buildUpdateCellQuery(placeholder, schema, table string, pkColumns []string,
 	return query, args, nil
 }
 
-// qualifyTableName monta o nome de tabela qualificado por schema, exceto
-// pro schema implícito "main" do SQLite (mesma regra usada em
-// buildUpdateCellQuery) — evitar duplicar essa condição em cada builder.
+// qualifyTableName builds the schema-qualified table name, except for SQLite's implicit
+// "main" schema (the same rule used in buildUpdateCellQuery) — avoids duplicating this
+// condition in each builder.
 func qualifyTableName(schema, table string) string {
 	qualified := quoteIdent(table)
 	if schema != "" && schema != "main" {
@@ -583,11 +576,10 @@ func qualifyTableName(schema, table string) string {
 	return qualified
 }
 
-// buildInsertRowQuery monta o INSERT parametrizado compartilhado pelos
-// dialetos — sempre com a lista explícita de colunas (nunca INSERT INTO
-// tabela VALUES (...) sem nomear, que quebra silenciosamente se a ordem
-// física das colunas mudar). columns/values devem vir na mesma ordem
-// (ConsoleTab monta os dois a partir do editContext/linha nova do grid).
+// buildInsertRowQuery builds the parameterized INSERT shared by the dialects — always
+// with an explicit column list (never INSERT INTO tabela VALUES (...) without naming
+// columns, which silently breaks if the physical column order changes). columns/values
+// must be in the same order (ConsoleTab builds both from editContext/the new grid row).
 func buildInsertRowQuery(placeholder, schema, table string, columns []string, values []any) (string, []any, error) {
 	if table == "" {
 		return "", nil, fmt.Errorf("tabela vazia")
@@ -624,10 +616,10 @@ func buildInsertRowQuery(placeholder, schema, table string, columns []string, va
 	return query, values, nil
 }
 
-// buildDeleteRowQuery monta o DELETE parametrizado compartilhado pelos
-// dialetos, sempre por PK real (nunca por todas as colunas visíveis — uma
-// linha com valor NULL numa coluna não-PK não deve entrar no WHERE, só a
-// chave primária identifica a linha de forma inequívoca).
+// buildDeleteRowQuery builds the parameterized DELETE shared by the dialects, always by
+// real PK (never by all visible columns — a row with a NULL value in a non-PK column
+// must not include that column in the WHERE clause; only the primary key unambiguously
+// identifies the row).
 func buildDeleteRowQuery(placeholder, schema, table string, pkColumns []string, pkValues []any) (string, []any, error) {
 	if table == "" {
 		return "", nil, fmt.Errorf("tabela vazia")
@@ -667,8 +659,8 @@ func buildDeleteRowQuery(placeholder, schema, table string, pkColumns []string, 
 	return query, args, nil
 }
 
-// scanRows converte um *sql.Rows genérico no formato de transporte comum
-// {columns, types, rows} usado por todos os drivers.
+// scanRows converts a generic *sql.Rows into the common transport format {columns,
+// types, rows} used by all drivers.
 func scanRows(rows *sql.Rows) (*QueryResult, error) {
 	columns, err := rows.Columns()
 	if err != nil {

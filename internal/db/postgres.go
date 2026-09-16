@@ -10,10 +10,10 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// binaryColumnMask marca (por índice de coluna) quais campos são bytea —
-// esses NÃO devem virar string em normalizeRow (ver normalizeRowSkipping),
-// senão bytes binários genuínos viram lixo irrecuperável ao passar por
-// string() (bug real achado em revisão de código).
+// binaryColumnMask marks which fields are bytea (by column index) — these MUST NOT
+// become strings in normalizeRow (see normalizeRowSkipping), otherwise genuine binary
+// bytes become irrecoverable garbage when passed through string() (a real bug found
+// during code review).
 func binaryColumnMask(fields []pgconn.FieldDescription) []bool {
 	mask := make([]bool, len(fields))
 	for i, f := range fields {
@@ -22,14 +22,14 @@ func binaryColumnMask(fields []pgconn.FieldDescription) []bool {
 	return mask
 }
 
-// PostgresDriver implementa DatabaseDriver via pgx (puro Go, protocolo
-// nativo — sem CGO). Uma instância = uma conexão dedicada de uma aba
-// (nunca compartilhada, ver internal/session).
+// PostgresDriver implements DatabaseDriver via pgx (pure Go, native protocol — no CGO).
+// One instance = one dedicated connection for a tab (never shared, see
+// internal/session).
 type PostgresDriver struct {
 	conn   *pgx.Conn
-	cursor pgx.Rows // cursor aberto por ExecuteStreaming, ver FetchNext/CloseCursor
-	// cursorBinaryCols marca (por índice de coluna) quais colunas do cursor
-	// aberto são bytea — ver normalizeRow/binaryColumnMask, ambos em driver.go.
+	cursor pgx.Rows // cursor opened by ExecuteStreaming, see FetchNext/CloseCursor
+	// cursorBinaryCols marks which columns of the open cursor are bytea (by column index) —
+	// see normalizeRow/binaryColumnMask, both in driver.go.
 	cursorBinaryCols []bool
 }
 
@@ -47,9 +47,9 @@ func (d *PostgresDriver) Connect(ctx context.Context, dsn string) error {
 }
 
 func (d *PostgresDriver) Close() error {
-	// closePendingCursor (não CloseCursor puro) — mesmo motivo do comentário
-	// em closePendingCursor: sem cancelar primeiro, desconectar no meio de
-	// uma query grande sem LIMIT travaria aqui drenando tudo antes de fechar.
+	// closePendingCursor (not plain CloseCursor) — for the same reason described in
+	// closePendingCursor: without canceling first, disconnecting during a large query
+	// without LIMIT would hang here, draining everything before closing.
 	if d.conn != nil {
 		d.closePendingCursor(context.Background())
 	}
@@ -60,9 +60,9 @@ func (d *PostgresDriver) Close() error {
 }
 
 func (d *PostgresDriver) Execute(ctx context.Context, query string) (*QueryResult, error) {
-	// Fecha um cursor de streaming pendente (ExecuteStreaming/FetchNext) antes
-	// de reusar a conexão — pgx recusa uma query nova com "conn busy" enquanto
-	// rows de uma anterior não estão esgotadas/fechadas.
+	// Close a pending streaming cursor (ExecuteStreaming/FetchNext) before reusing the
+	// connection — pgx rejects a new query with "conn busy" while rows from a previous
+	// query are not exhausted/closed.
 	d.closePendingCursor(ctx)
 	rows, err := d.conn.Query(ctx, query)
 	if err != nil {
@@ -91,10 +91,9 @@ func (d *PostgresDriver) Execute(ctx context.Context, query string) (*QueryResul
 	return result, rows.Err()
 }
 
-// ExecuteStreaming inicia a query e devolve só os metadados de coluna — as
-// linhas são buscadas sob demanda via FetchNext (ver docs/ARCHITECTURE.md,
-// "Data Grid Virtualizado" e o pedido do usuário de paginação real em vez
-// de carregar tudo de uma vez).
+// ExecuteStreaming starts the query and returns only column metadata — rows are fetched
+// on demand via FetchNext (see docs/ARCHITECTURE.md, "Data Grid Virtualizado" and the
+// user's request for real pagination instead of loading everything at once).
 func (d *PostgresDriver) ExecuteStreaming(ctx context.Context, query string) ([]string, []string, error) {
 	d.closePendingCursor(ctx)
 
@@ -147,20 +146,19 @@ func (d *PostgresDriver) CloseCursor() error {
 	return nil
 }
 
-// closePendingCursor fecha um cursor de streaming não esgotado avisando o
-// servidor pra PARAR de produzir linhas antes de fechar.
+// closePendingCursor closes an unexhausted streaming cursor by telling the server to
+// STOP producing rows before closing.
 //
-// Causa raiz de um bug real de produção (usuário trocando de query com uma
-// anterior grande/sem LIMIT ainda com hasMore=true, "aba trava na fila"):
-// nosso "cursor" não é um cursor real do servidor — é o pgx já recebendo o
-// resultado inteiro da rede, com FetchNext só consumindo aos poucos do que
-// já chegou. rows.Close() (chamado por CloseCursor) LÊ E DESCARTA
-// sincronamente TODAS as linhas restantes do socket até o comando concluir
-// no servidor (ver pgconn.ResultReader.Close, "for !rr.commandConcluded")
-// — numa tabela grande sem LIMIT isso trava por muito tempo. Mandar
-// CancelRequest primeiro faz o servidor abortar a query em andamento, então
-// o dreno que seguer é rápido (erro de cancelamento) em vez de continuar
-// empurrando milhões de linhas só pra jogar fora.
+// Root cause of a real production bug (user switching queries while a previous large
+// query without LIMIT still had hasMore=true, "tab stuck in the queue"): our "cursor" is
+// not a real server cursor — pgx is already receiving the entire result over the
+// network, with FetchNext only consuming what has arrived a little at a time.
+// rows.Close() (called by CloseCursor) synchronously READS AND DISCARDS ALL remaining
+// rows from the socket until the command completes on the server (see
+// pgconn.ResultReader.Close, "for !rr.commandConcluded") — on a large table without
+// LIMIT this hangs for a long time. Sending CancelRequest first makes the server abort
+// the running query, so the subsequent drain is fast (cancellation error) instead of
+// continuing to push millions of rows just to discard them.
 func (d *PostgresDriver) closePendingCursor(ctx context.Context) {
 	if d.cursor == nil {
 		return
@@ -169,10 +167,9 @@ func (d *PostgresDriver) closePendingCursor(ctx context.Context) {
 	d.CloseCursor()
 }
 
-// CancelRunningQuery dispara o cancelamento nativo do protocolo Postgres
-// (CancelRequest em conexão auxiliar) — é o que garante que "stop" na aba
-// realmente derruba a query no servidor, não só localmente (ver CLAUDE.md,
-// "Isolamento de sessão").
+// CancelRunningQuery triggers native Postgres protocol cancellation (CancelRequest on an
+// auxiliary connection) — this ensures that "stop" in the tab actually terminates the
+// query on the server, not just locally (see CLAUDE.md, "Isolamento de sessão").
 func (d *PostgresDriver) CancelRunningQuery(ctx context.Context) error {
 	if d.conn == nil {
 		return nil
@@ -181,7 +178,7 @@ func (d *PostgresDriver) CancelRunningQuery(ctx context.Context) error {
 }
 
 func (d *PostgresDriver) ListSchemas(ctx context.Context) ([]string, error) {
-	// Ver comentário em Execute sobre "conn busy" com cursor de streaming aberto.
+	// See the comment in Execute about "conn busy" with an open streaming cursor.
 	d.closePendingCursor(ctx)
 	rows, err := d.conn.Query(ctx,
 		`SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT LIKE 'pg\_%' AND schema_name != 'information_schema' ORDER BY schema_name`)
@@ -202,7 +199,7 @@ func (d *PostgresDriver) ListSchemas(ctx context.Context) ([]string, error) {
 }
 
 func (d *PostgresDriver) ListTables(ctx context.Context, schema string) ([]Table, error) {
-	// Ver comentário em Execute sobre "conn busy" com cursor de streaming aberto.
+	// See the comment in Execute about "conn busy" with an open streaming cursor.
 	d.closePendingCursor(ctx)
 	rows, err := d.conn.Query(ctx,
 		`SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = $1 ORDER BY table_name`, schema)
@@ -222,10 +219,10 @@ func (d *PostgresDriver) ListTables(ctx context.Context, schema string) ([]Table
 	return tables, rows.Err()
 }
 
-// tableKindFromPG traduz table_type do information_schema pro Kind exposto
-// na UI ("table"/"view") — views não aceitam UpdateCell/edição inline.
-// Materialized views não aparecem em information_schema.tables (ficam em
-// pg_matviews); fora de escopo aqui, gap conhecido e não implementado.
+// tableKindFromPG translates information_schema table_type into the Kind exposed in the
+// UI ("table"/"view") — views do not support UpdateCell/inline editing. Materialized
+// views do not appear in information_schema.tables (they are in pg_matviews); out of
+// scope here, a known, unimplemented gap.
 func tableKindFromPG(tableType string) string {
 	if tableType == "VIEW" {
 		return "view"
@@ -233,11 +230,11 @@ func tableKindFromPG(tableType string) string {
 	return "table"
 }
 
-// Introspect cruza information_schema.columns (tipo/nullable/generated) com
-// table_constraints/key_column_usage (PK real) — nunca heurística por nome
-// de coluna, conforme docs/adr/0004-inline-edit-safety.md.
+// Introspect joins information_schema.columns (type/nullable/generated) with
+// table_constraints/key_column_usage (real PK) — never using column-name heuristics, as
+// specified in docs/adr/0004-inline-edit-safety.md.
 func (d *PostgresDriver) Introspect(ctx context.Context, schema, table string) (*Table, error) {
-	// Ver comentário em Execute sobre "conn busy" com cursor de streaming aberto.
+	// See the comment in Execute about "conn busy" with an open streaming cursor.
 	d.closePendingCursor(ctx)
 	rows, err := d.conn.Query(ctx, `
 		SELECT c.column_name, c.data_type, c.is_nullable = 'YES', c.is_generated = 'ALWAYS',
@@ -269,13 +266,13 @@ func (d *PostgresDriver) Introspect(ctx context.Context, schema, table string) (
 	return result, rows.Err()
 }
 
-// IntrospectSchema é o equivalente batched de Introspect para um schema
-// inteiro: mesma junção information_schema.columns + table_constraints/
-// key_column_usage do Introspect, mas SEM filtro de table_name — uma única
-// query traz as colunas de todas as tabelas do schema, evitando N round-trips
-// (ver comentário na interface DatabaseDriver).
+// IntrospectSchema is the batched equivalent of Introspect for an entire schema: the
+// same information_schema.columns + table_constraints/key_column_usage join as
+// Introspect, but WITHOUT the table_name filter — a single query retrieves columns for
+// all tables in the schema, avoiding N round-trips (see the comment on the
+// DatabaseDriver interface).
 func (d *PostgresDriver) IntrospectSchema(ctx context.Context, schema string) ([]Table, error) {
-	// Ver comentário em Execute sobre "conn busy" com cursor de streaming aberto.
+	// See the comment in Execute about "conn busy" with an open streaming cursor.
 	d.closePendingCursor(ctx)
 	rows, err := d.conn.Query(ctx, `
 		SELECT c.table_name, t.table_type, c.column_name, c.data_type, c.is_nullable = 'YES', c.is_generated = 'ALWAYS',
@@ -325,10 +322,10 @@ func (d *PostgresDriver) IntrospectSchema(ctx context.Context, schema string) ([
 	return result, nil
 }
 
-// UpdateCell executa um UPDATE parametrizado de uma única célula com
-// checagem otimista de concorrência (WHERE pk = $n AND coluna_antiga = $n,
-// ver docs/adr/0004-inline-edit-safety.md). Placeholders $1..$n nativos do
-// protocolo Postgres; valores sempre como argumento — nunca concatenados.
+// UpdateCell executes a parameterized UPDATE of a single cell with optimistic
+// concurrency checking (WHERE pk = $n AND coluna_antiga = $n, see
+// docs/adr/0004-inline-edit-safety.md). Native Postgres protocol placeholders $1..$n;
+// values are always passed as arguments — never concatenated.
 func (d *PostgresDriver) UpdateCell(ctx context.Context, schema, table string, pkColumns []string, pkValues []any, column string, oldValue any, newValue any) (int64, error) {
 	if schema == "" || schema == "main" {
 		schema = "public"
@@ -337,7 +334,7 @@ func (d *PostgresDriver) UpdateCell(ctx context.Context, schema, table string, p
 	if err != nil {
 		return 0, err
 	}
-	// Ver comentário em Execute sobre "conn busy" com cursor de streaming aberto.
+	// See the comment in Execute about "conn busy" with an open streaming cursor.
 	d.closePendingCursor(ctx)
 	tag, err := d.conn.Exec(ctx, query, args...)
 	if err != nil {
@@ -346,7 +343,7 @@ func (d *PostgresDriver) UpdateCell(ctx context.Context, schema, table string, p
 	return tag.RowsAffected(), nil
 }
 
-// InsertRow executa um INSERT parametrizado com lista explícita de colunas.
+// InsertRow executes a parameterized INSERT with an explicit column list.
 func (d *PostgresDriver) InsertRow(ctx context.Context, schema, table string, columns []string, values []any) error {
 	if schema == "" || schema == "main" {
 		schema = "public"
@@ -355,7 +352,7 @@ func (d *PostgresDriver) InsertRow(ctx context.Context, schema, table string, co
 	if err != nil {
 		return err
 	}
-	// Ver comentário em Execute sobre "conn busy" com cursor de streaming aberto.
+	// See the comment in Execute about "conn busy" with an open streaming cursor.
 	d.closePendingCursor(ctx)
 	if _, err := d.conn.Exec(ctx, query, args...); err != nil {
 		return fmt.Errorf("inserindo linha em %s.%s: %w", schema, table, err)
@@ -363,7 +360,7 @@ func (d *PostgresDriver) InsertRow(ctx context.Context, schema, table string, co
 	return nil
 }
 
-// DeleteRow executa um DELETE parametrizado por PK real.
+// DeleteRow executes a parameterized DELETE by real PK.
 func (d *PostgresDriver) DeleteRow(ctx context.Context, schema, table string, pkColumns []string, pkValues []any) (int64, error) {
 	if schema == "" || schema == "main" {
 		schema = "public"
@@ -372,7 +369,7 @@ func (d *PostgresDriver) DeleteRow(ctx context.Context, schema, table string, pk
 	if err != nil {
 		return 0, err
 	}
-	// Ver comentário em Execute sobre "conn busy" com cursor de streaming aberto.
+	// See the comment in Execute about "conn busy" with an open streaming cursor.
 	d.closePendingCursor(ctx)
 	tag, err := d.conn.Exec(ctx, query, args...)
 	if err != nil {
@@ -381,18 +378,17 @@ func (d *PostgresDriver) DeleteRow(ctx context.Context, schema, table string, pk
 	return tag.RowsAffected(), nil
 }
 
-// TableDDL reconstrói o CREATE TABLE a partir do catálogo, pois o Postgres
-// NÃO tem "SHOW CREATE TABLE" nativo: colunas via information_schema.columns
-// (ordenadas por ordinal_position) + constraints via pg_get_constraintdef(oid)
-// filtrando conrelid pelo oid da tabela (pg_class/pg_namespace).
-// Escopo v1 (gap conhecido): colunas + constraints. Índices
-// (pg_indexes.indexdef) ficam de fora — documentado como limitação, não
-// implementado silenciosamente incompleto.
+// TableDDL reconstructs CREATE TABLE from the catalog, since Postgres has NO native
+// "SHOW CREATE TABLE": columns via information_schema.columns (ordered by
+// ordinal_position) + constraints via pg_get_constraintdef(oid), filtering conrelid by
+// the table's oid (pg_class/pg_namespace). V1 scope (known gap): columns + constraints.
+// Indexes (pg_indexes.indexdef) are left out — documented as a limitation, not silently
+// implemented incompletely.
 func (d *PostgresDriver) TableDDL(ctx context.Context, schema, table string) (string, error) {
 	if schema == "" || schema == "main" {
 		schema = "public"
 	}
-	// Ver comentário em Execute sobre "conn busy" com cursor de streaming aberto.
+	// See the comment in Execute about "conn busy" with an open streaming cursor.
 	d.closePendingCursor(ctx)
 	colRows, err := d.conn.Query(ctx, `
 		SELECT column_name, data_type, udt_name, character_maximum_length,
@@ -420,10 +416,10 @@ func (d *PostgresDriver) TableDDL(ctx context.Context, schema, table string) (st
 		colType := resolveColumnType(dataType, udtName, maxLen)
 		def := fmt.Sprintf("  %s %s", quoteIdentPG(name), colType)
 		if generated && genExpr != nil {
-			// Coluna gerada (STORED — Postgres não suporta VIRTUAL): sem a
-			// expressão, a reconstrução perderia a geração e criaria uma
-			// coluna normal (bug real encontrado testando contra Postgres
-			// real, ver memória wisp-table-schema-tab-context-canceled-fix).
+			// Generated column (STORED — Postgres does not support VIRTUAL): without the
+			// expression, reconstruction would lose generation and create a regular column (a
+			// real bug found by testing against real Postgres, see memory
+			// wisp-table-schema-tab-context-canceled-fix).
 			def += fmt.Sprintf(" GENERATED ALWAYS AS (%s) STORED", *genExpr)
 		} else {
 			if !nullable {
@@ -470,14 +466,14 @@ func (d *PostgresDriver) TableDDL(ctx context.Context, schema, table string) (st
 	return ddl, nil
 }
 
-// ListTriggers retorna triggers de usuário da tabela via pg_trigger +
-// pg_get_triggerdef(oid), excluindo tgisinternal (triggers internos de FK
-// não são "triggers do usuário").
+// ListTriggers returns the table's user triggers via pg_trigger +
+// pg_get_triggerdef(oid), excluding tgisinternal (internal FK triggers are not "user
+// triggers").
 func (d *PostgresDriver) ListTriggers(ctx context.Context, schema, table string) ([]Trigger, error) {
 	if schema == "" || schema == "main" {
 		schema = "public"
 	}
-	// Ver comentário em Execute sobre "conn busy" com cursor de streaming aberto.
+	// See the comment in Execute about "conn busy" with an open streaming cursor.
 	d.closePendingCursor(ctx)
 	rows, err := d.conn.Query(ctx, `
 		SELECT t.tgname, pg_get_triggerdef(t.oid)
@@ -502,13 +498,13 @@ func (d *PostgresDriver) ListTriggers(ctx context.Context, schema, table string)
 	return triggers, rows.Err()
 }
 
-// ListFunctions retorna funções do schema via pg_proc + pg_get_functiondef,
-// só prokind = 'f' (funções normais — exclui agregados/window).
+// ListFunctions returns schema functions via pg_proc + pg_get_functiondef, only prokind
+// = 'f' (normal functions — excludes aggregates/window functions).
 func (d *PostgresDriver) ListFunctions(ctx context.Context, schema string) ([]Function, error) {
 	if schema == "" || schema == "main" {
 		schema = "public"
 	}
-	// Ver comentário em Execute sobre "conn busy" com cursor de streaming aberto.
+	// See the comment in Execute about "conn busy" with an open streaming cursor.
 	d.closePendingCursor(ctx)
 	rows, err := d.conn.Query(ctx, `
 		SELECT p.proname, pg_get_functiondef(p.oid)
@@ -532,16 +528,15 @@ func (d *PostgresDriver) ListFunctions(ctx context.Context, schema string) ([]Fu
 	return functions, rows.Err()
 }
 
-// ListIndexes retorna índices da tabela via pg_index + pg_get_indexdef,
-// excluindo o índice de suporte de uma constraint PK/UNIQUE (já aparece no
-// TableDDL via CONSTRAINT) — critério: indisprimary sempre exclui, e
-// conrelid/conindid via pg_constraint exclui o de UNIQUE também, restando só
-// índices "de verdade" (CREATE INDEX explícito).
+// ListIndexes returns table indexes via pg_index + pg_get_indexdef, excluding the
+// backing index of a PK/UNIQUE constraint (already included in TableDDL via CONSTRAINT)
+// — criteria: indisprimary always excludes, and conrelid/conindid via pg_constraint also
+// excludes the UNIQUE index, leaving only "real" indexes (explicit CREATE INDEX).
 func (d *PostgresDriver) ListIndexes(ctx context.Context, schema, table string) ([]Index, error) {
 	if schema == "" || schema == "main" {
 		schema = "public"
 	}
-	// Ver comentário em Execute sobre "conn busy" com cursor de streaming aberto.
+	// See the comment in Execute about "conn busy" with an open streaming cursor.
 	d.closePendingCursor(ctx)
 	rows, err := d.conn.Query(ctx, `
 		SELECT ic.relname, i.indisunique, pg_get_indexdef(i.indexrelid),
@@ -574,13 +569,13 @@ func (d *PostgresDriver) ListIndexes(ctx context.Context, schema, table string) 
 	return indexes, rows.Err()
 }
 
-// ListForeignKeys retorna as FKs de saída da tabela (a própria tabela é a
-// origem) via pg_constraint (contype = 'f') + pg_get_constraintdef.
+// ListForeignKeys returns the table's outgoing FKs (the table itself is the source) via
+// pg_constraint (contype = 'f') + pg_get_constraintdef.
 func (d *PostgresDriver) ListForeignKeys(ctx context.Context, schema, table string) ([]ForeignKey, error) {
 	if schema == "" || schema == "main" {
 		schema = "public"
 	}
-	// Ver comentário em Execute sobre "conn busy" com cursor de streaming aberto.
+	// See the comment in Execute about "conn busy" with an open streaming cursor.
 	d.closePendingCursor(ctx)
 	rows, err := d.conn.Query(ctx, `
 		SELECT c.conname, pg_get_constraintdef(c.oid),
@@ -614,14 +609,15 @@ func (d *PostgresDriver) ListForeignKeys(ctx context.Context, schema, table stri
 	return fks, rows.Err()
 }
 
-// quoteIdentPG quota um identificador Postgres com aspas duplas, escapando
-// aspas internas por duplicação — evita injeção via nome de schema/tabela.
+// quoteIdentPG quotes a Postgres identifier with double quotes, escaping internal quotes
+// by doubling them — prevents injection through schema/table names.
 func quoteIdentPG(ident string) string {
 	return `"` + strings.ReplaceAll(ident, `"`, `""`) + `"`
 }
 
-// resolveColumnType mapeia o trio data_type/udt_name/character_maximum_length
-// do information_schema para um tipo exibível no DDL reconstruído.
+// resolveColumnType maps the information_schema
+// data_type/udt_name/character_maximum_length trio to a type suitable for display in the
+// reconstructed DDL.
 func resolveColumnType(dataType, udtName string, maxLen *int) string {
 	switch dataType {
 	case "character varying":

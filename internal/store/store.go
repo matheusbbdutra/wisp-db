@@ -1,14 +1,14 @@
-// Package store implementa a persistência local do Wisp (conexões salvas,
-// histórico de queries e cache de schema) em um único arquivo SQLite via
-// modernc.org/sqlite (puro Go, sem CGO). Ver docs/adr/0003-storage.md.
+// Package store implements Wisp's local persistence (saved connections, query history,
+// and schema cache) in a single SQLite file via modernc.org/sqlite (pure Go, no CGO).
+// See docs/adr/0003-storage.md.
 //
-// Credenciais nunca são gravadas em texto puro: a DSN completa passa pelo
-// internal/vault (ChaCha20-Poly1305, chave no keychain do SO) antes de
-// chegar ao disco. Decisão pragmática (não documentada originalmente no
-// ADR 0003): em vez de decompor a DSN em host/port/user/senha por dialeto
-// — trabalho específico por driver sem ganho real no MVP — guardamos a DSN
-// inteira cifrada em encrypted_secret. Reabrir se algum dialeto precisar de
-// edição de campo individual (ex. trocar só a senha) sem redigitar tudo.
+// Credentials are never written in plaintext: the full DSN goes through internal/vault
+// (ChaCha20-Poly1305, key in the OS keychain) before reaching disk. A pragmatic decision
+// (not originally documented in ADR 0003): instead of decomposing the DSN into
+// host/port/user/password per dialect — driver-specific work with no real benefit in the
+// MVP — we store the entire DSN encrypted in encrypted_secret. Revisit if any dialect
+// needs individual field editing (e.g. changing only the password) without retyping
+// everything.
 package store
 
 import (
@@ -58,8 +58,8 @@ CREATE TABLE IF NOT EXISTS saved_scripts (
 );
 `
 
-// SavedConnection é a representação exposta ao frontend — nunca inclui a
-// DSN/segredo decifrado, só o necessário para listar e escolher.
+// SavedConnection is the representation exposed to the frontend — it never includes the
+// decrypted DSN/secret, only what is needed to list and select.
 type SavedConnection struct {
 	ID        string
 	Name      string
@@ -67,8 +67,8 @@ type SavedConnection struct {
 	CreatedAt time.Time
 }
 
-// SavedScript é um script SQL nomeado, editável e reaberto (diferente do
-// histórico, que é log automático de execuções).
+// SavedScript is a named SQL script that can be edited and reopened (unlike history,
+// which is an automatic execution log).
 type SavedScript struct {
 	ID        string
 	Name      string
@@ -77,7 +77,7 @@ type SavedScript struct {
 	UpdatedAt time.Time
 }
 
-// QueryHistoryEntry é uma execução registrada em query_history.
+// QueryHistoryEntry is an execution recorded in query_history.
 type QueryHistoryEntry struct {
 	ID           int64
 	ConnectionID string
@@ -89,14 +89,14 @@ type QueryHistoryEntry struct {
 	ExecutedAt   time.Time
 }
 
-// Store encapsula o *sql.DB do arquivo local do Wisp e o Vault usado para
-// cifrar/decifrar as DSNs salvas.
+// Store encapsulates the *sql.DB for Wisp's local file and the Vault used to
+// encrypt/decrypt saved DSNs.
 type Store struct {
 	db    *sql.DB
 	vault *vault.Vault
 }
 
-// Open abre (criando se necessário) o arquivo SQLite em path e aplica o schema.
+// Open opens (creating if necessary) the SQLite file at path and applies the schema.
 func Open(path string, v *vault.Vault) (*Store, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -113,7 +113,8 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-// SaveConnection cifra dsn e grava uma nova conexão nomeada. Retorna o id gerado.
+// SaveConnection encrypts dsn and saves a new named connection. It returns the generated
+// id.
 func (s *Store) SaveConnection(name, driver, dsn string) (string, error) {
 	ciphertext, err := s.vault.Encrypt(dsn)
 	if err != nil {
@@ -131,7 +132,7 @@ func (s *Store) SaveConnection(name, driver, dsn string) (string, error) {
 	return id, nil
 }
 
-// ListConnections retorna as conexões salvas sem decifrar a DSN.
+// ListConnections returns saved connections without decrypting the DSN.
 func (s *Store) ListConnections() ([]SavedConnection, error) {
 	rows, err := s.db.Query(`SELECT id, name, driver, created_at FROM connections ORDER BY created_at DESC`)
 	if err != nil {
@@ -150,8 +151,8 @@ func (s *Store) ListConnections() ([]SavedConnection, error) {
 	return result, rows.Err()
 }
 
-// ResolveConnection decifra a DSN de uma conexão salva — só deve ser chamado
-// no momento de conectar de fato, nunca para exibição na UI.
+// ResolveConnection decrypts a saved connection's DSN — it should only be called when
+// actually connecting, never for display in the UI.
 func (s *Store) ResolveConnection(id string) (driver string, dsn string, err error) {
 	var ciphertext []byte
 	err = s.db.QueryRow(`SELECT driver, encrypted_secret FROM connections WHERE id = ?`, id).
@@ -167,19 +168,19 @@ func (s *Store) ResolveConnection(id string) (driver string, dsn string, err err
 	return driver, dsn, nil
 }
 
-// DeleteConnection remove uma conexão salva.
+// DeleteConnection removes a saved connection.
 func (s *Store) DeleteConnection(id string) error {
 	_, err := s.db.Exec(`DELETE FROM connections WHERE id = ?`, id)
 	return err
 }
 
-// RecordQuery grava uma execução em query_history. Um connectionID vazio
-// significa que a sessão ativa não está associada a nenhuma conexão salva
-// (Connect direto por DSN) — como connection_id é NOT NULL com FK para
-// connections(id), nesse caso nada é inserido e nil é retornado sem erro.
-// RecordQuery retorna o id da linha inserida (0 se não inseriu, caso
-// connectionID vazio) — usado por FinishQuery para atualizar o total real
-// de linhas depois que o cursor em streaming se esgota (ver App.FetchRows).
+// RecordQuery records an execution in query_history. An empty connectionID means the
+// active session is not associated with a saved connection (Connect directly via DSN) —
+// since connection_id is NOT NULL with an FK to connections(id), nothing is inserted in
+// this case and nil is returned without error. RecordQuery returns the inserted row id
+// (0 if nothing was inserted because connectionID was empty) — used by FinishQuery to
+// update the actual row total after the streaming cursor is exhausted (see
+// App.FetchRows).
 func (s *Store) RecordQuery(connectionID, tabID, queryText, status string, durationMs int64, rowCount int) (int64, error) {
 	if connectionID == "" {
 		return 0, nil
@@ -198,11 +199,11 @@ func (s *Store) RecordQuery(connectionID, tabID, queryText, status string, durat
 	return id, nil
 }
 
-// FinishQuery atualiza status e row_count de uma entrada já gravada por
-// RecordQuery — usado quando o resultado é buscado em streaming (ver
-// App.FetchRows) e o total de linhas só é conhecido depois do fetch inicial
-// (ou quando o cursor se esgota / dá erro no meio do caminho). id == 0 é
-// tratado como no-op (RecordQuery retorna 0 quando não grava nada).
+// FinishQuery updates status and row_count of an entry already written by RecordQuery —
+// used when the result is fetched in streaming mode (see App.FetchRows) and the row
+// total is only known after the initial fetch (or when the cursor is exhausted / errors
+// midway through). id == 0 is treated as a no-op (RecordQuery returns 0 when it writes
+// nothing).
 func (s *Store) FinishQuery(id int64, status string, rowCount int) error {
 	if id == 0 {
 		return nil
@@ -217,8 +218,7 @@ func (s *Store) FinishQuery(id int64, status string, rowCount int) error {
 	return nil
 }
 
-// ListQueryHistory retorna as últimas N entradas do histórico, da mais
-// recente para a mais antiga.
+// ListQueryHistory returns the last N history entries, newest to oldest.
 func (s *Store) ListQueryHistory(limit int) ([]QueryHistoryEntry, error) {
 	rows, err := s.db.Query(
 		`SELECT id, connection_id, tab_id, query_text, executed_at, duration_ms, status, row_count FROM query_history ORDER BY executed_at DESC LIMIT ?`,
@@ -240,7 +240,7 @@ func (s *Store) ListQueryHistory(limit int) ([]QueryHistoryEntry, error) {
 	return result, rows.Err()
 }
 
-// SaveScript grava um novo script SQL nomeado. Retorna o id gerado.
+// SaveScript saves a new named SQL script. It returns the generated id.
 func (s *Store) SaveScript(name, queryText string) (string, error) {
 	id := uuid.NewString()
 	_, err := s.db.Exec(
@@ -253,8 +253,7 @@ func (s *Store) SaveScript(name, queryText string) (string, error) {
 	return id, nil
 }
 
-// ListScripts retorna os scripts salvos, do mais recentemente atualizado
-// para o mais antigo.
+// ListScripts returns saved scripts, from most recently updated to oldest.
 func (s *Store) ListScripts() ([]SavedScript, error) {
 	rows, err := s.db.Query(`SELECT id, name, query_text, created_at, updated_at FROM saved_scripts ORDER BY updated_at DESC`)
 	if err != nil {
@@ -273,7 +272,7 @@ func (s *Store) ListScripts() ([]SavedScript, error) {
 	return result, rows.Err()
 }
 
-// UpdateScript sobrescreve nome e/ou texto de um script existente.
+// UpdateScript overwrites the name and/or text of an existing script.
 func (s *Store) UpdateScript(id, name, queryText string) error {
 	res, err := s.db.Exec(
 		`UPDATE saved_scripts SET name = ?, query_text = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
@@ -288,17 +287,17 @@ func (s *Store) UpdateScript(id, name, queryText string) error {
 	return nil
 }
 
-// DeleteScript remove um script salvo permanentemente.
+// DeleteScript permanently removes a saved script.
 func (s *Store) DeleteScript(id string) error {
 	_, err := s.db.Exec(`DELETE FROM saved_scripts WHERE id = ?`, id)
 	return err
 }
 
-// GetSchemaCacheJSON, SetSchemaCacheJSON e DeleteSchemaCacheJSON implementam
-// a camada persistente do schema cache (ver internal/schemacache.Cache —
-// este Store satisfaz schemacache.PersistentStore estruturalmente, sem
-// import direto entre os pacotes). cacheKey nunca é a DSN em texto puro —
-// é um hash calculado pelo chamador (ver schemacache.Key).
+// GetSchemaCacheJSON, SetSchemaCacheJSON and DeleteSchemaCacheJSON implement the
+// persistent schema cache layer (see internal/schemacache.Cache — this Store
+// structurally satisfies schemacache.PersistentStore, with no direct import between
+// packages). cacheKey is never the plaintext DSN — it is a hash calculated by the caller
+// (see schemacache.Key).
 func (s *Store) GetSchemaCacheJSON(cacheKey string) (catalogJSON string, found bool, err error) {
 	var ttlExpiresAt time.Time
 	err = s.db.QueryRow(

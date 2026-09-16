@@ -1,11 +1,10 @@
-// Package schemacache implementa o cache de metadados de schema em duas
-// camadas descrito em docs/ARCHITECTURE.md ("Fluxo de metadados"): memória
-// (rápido, vive enquanto a conexão está ativa) + persistência opcional
-// (sobrevive entre sessões). TTL configurável, invalidação manual e
-// invalidação por DDL detectado (ver App.Execute em app.go).
+// Package schemacache implements the two-layer schema metadata cache described in
+// docs/ARCHITECTURE.md ("Fluxo de metadados"): memory (fast, lives while the connection
+// is active) + optional persistence (survives across sessions). Configurable TTL, manual
+// invalidation, and invalidation on detected DDL (see App.Execute in app.go).
 //
-// A identidade de uma conexão para fins de cache nunca é a DSN em texto
-// puro (que contém credenciais) — é um hash SHA-256 de "driver|dsn" (ver Key).
+// A connection's cache identity is never the plaintext DSN (which contains credentials)
+// — it is a SHA-256 hash of "driver|dsn" (see Key).
 package schemacache
 
 import (
@@ -19,16 +18,16 @@ import (
 	"wisp/internal/db"
 )
 
-// Catalog é o conteúdo cacheado para uma conexão: a lista de schemas e,
-// para os schemas já expandidos na sidebar, a lista de tabelas.
+// Catalog is the cached content for a connection: the schema list and, for schemas
+// already expanded in the sidebar, the table list.
 type Catalog struct {
 	Schemas []string              `json:"schemas"`
 	Tables  map[string][]db.Table `json:"tables"`
 }
 
-// PersistentStore é o contrato mínimo que internal/store.Store satisfaz
-// (satisfação estrutural, sem import direto — evita acoplar este pacote ao
-// schema SQLite completo do store).
+// PersistentStore is the minimal contract satisfied by internal/store.Store (structural
+// satisfaction, no direct import — avoids coupling this package to the store's full
+// SQLite schema).
 type PersistentStore interface {
 	GetSchemaCacheJSON(cacheKey string) (catalogJSON string, found bool, err error)
 	SetSchemaCacheJSON(cacheKey string, catalogJSON string, ttl time.Duration) error
@@ -40,9 +39,8 @@ type entry struct {
 	expiresAt time.Time
 }
 
-// Cache combina a camada em memória com uma camada persistente opcional
-// (persistent pode ser nil — o cache então só vive em memória, ainda válido
-// dentro da mesma execução do app).
+// Cache combines the in-memory layer with an optional persistent layer (persistent may
+// be nil — the cache then lives only in memory, still valid within the same app run).
 type Cache struct {
 	ttl        time.Duration
 	mu         sync.Mutex
@@ -54,15 +52,15 @@ func New(ttl time.Duration, persistent PersistentStore) *Cache {
 	return &Cache{ttl: ttl, mem: make(map[string]entry), persistent: persistent}
 }
 
-// Key deriva a identidade de cache de uma conexão (driver + DSN) sem nunca
-// expor a DSN em texto puro.
+// Key derives a connection's cache identity (driver + DSN) without ever exposing the
+// plaintext DSN.
 func Key(driverName, dsn string) string {
 	sum := sha256.Sum256([]byte(driverName + "|" + dsn))
 	return hex.EncodeToString(sum[:])
 }
 
-// Get retorna o catálogo cacheado (memória, com fallback pra camada
-// persistente) e se estava válido (encontrado e não expirado).
+// Get returns the cached catalog (memory, falling back to the persistent layer) and
+// whether it was valid (found and not expired).
 func (c *Cache) Get(cacheKey string) (Catalog, bool) {
 	c.mu.Lock()
 	if e, ok := c.mem[cacheKey]; ok {
@@ -93,8 +91,8 @@ func (c *Cache) Get(cacheKey string) (Catalog, bool) {
 	return catalog, true
 }
 
-// Set grava o catálogo nas duas camadas (persistente é melhor-esforço: erro
-// ali não impede o cache em memória de funcionar nesta sessão).
+// Set writes the catalog to both layers (persistence is best-effort: an error there does
+// not prevent the in-memory cache from working in this session).
 func (c *Cache) Set(cacheKey string, catalog Catalog) error {
 	c.mu.Lock()
 	c.mem[cacheKey] = entry{catalog: catalog, expiresAt: time.Now().Add(c.ttl)}
@@ -110,8 +108,8 @@ func (c *Cache) Set(cacheKey string, catalog Catalog) error {
 	return c.persistent.SetSchemaCacheJSON(cacheKey, string(raw), c.ttl)
 }
 
-// Invalidate remove o catálogo cacheado de uma conexão nas duas camadas —
-// usado em refresh manual e quando DDL é detectado na própria aba.
+// Invalidate removes a connection's cached catalog from both layers — used for manual
+// refresh and when DDL is detected in the tab itself.
 func (c *Cache) Invalidate(cacheKey string) {
 	c.mu.Lock()
 	delete(c.mem, cacheKey)

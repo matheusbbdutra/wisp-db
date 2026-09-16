@@ -2,9 +2,9 @@ package db
 
 import "fmt"
 
-// DriverName identifica o dialeto suportado. Este é o único ponto do código
-// que faz seleção por tipo de banco — nenhum outro módulo deve ter switch
-// espalhado por dialeto (ver CLAUDE.md, "Convenções de código").
+// DriverName identifies the supported dialect. This is the only place in the code that
+// selects by database type — no other module should have switches scattered by dialect
+// (see CLAUDE.md, "Convenções de código").
 type DriverName string
 
 const (
@@ -12,7 +12,7 @@ const (
 	DriverPostgres DriverName = "postgres"
 )
 
-// New retorna uma nova instância (não conectada) do driver solicitado.
+// New returns a new (disconnected) instance of the requested driver.
 func New(name DriverName) (DatabaseDriver, error) {
 	switch name {
 	case DriverSQLite:

@@ -19,21 +19,21 @@ import (
 	"wisp/internal/vault"
 )
 
-// schemaCacheTTL é o tempo de validade do cache de schema (ver
-// internal/schemacache e docs/ARCHITECTURE.md, "Fluxo de metadados").
+// schemaCacheTTL is the schema cache lifetime (see internal/schemacache and
+// docs/ARCHITECTURE.md, "Fluxo de metadados").
 const schemaCacheTTL = 15 * time.Minute
 
-// App é o binding raiz exposto ao frontend via Wails. Mantém o Session
-// Manager (isolamento por tabId, ver internal/session), o Store local
-// (conexões/histórico/cache, ver internal/store e docs/adr/0003-storage.md)
-// e o schema cache em duas camadas (ver internal/schemacache).
+// App is the root binding exposed to the frontend through Wails. It holds the Session
+// Manager (tabId isolation, see internal/session), the local Store
+// (connections/history/cache, see internal/store and docs/adr/0003-storage.md), and the
+// two-layer schema cache (see internal/schemacache).
 type App struct {
 	ctx         context.Context
 	sessions    *session.Manager
 	store       *store.Store
 	schemaCache *schemacache.Cache
-	// canClose vira true só depois que o frontend confirma (via ConfirmQuit)
-	// que nenhuma aba de console tem SQL não salvo — ver beforeClose.
+	// canClose becomes true only after the frontend confirms (via ConfirmQuit) that no
+	// console tab has unsaved SQL — see beforeClose.
 	canClose bool
 }
 
@@ -41,8 +41,8 @@ func NewApp() *App {
 	return &App{sessions: session.NewManager()}
 }
 
-// startup é chamado pelo runtime do Wails ao iniciar a janela. Abre o store
-// local em <config do usuário>/wisp/wisp.db, criando o schema se necessário.
+// startup is called by the Wails runtime when the window starts. It opens the local
+// store at <user config>/wisp/wisp.db, creating the schema if needed.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 
@@ -72,29 +72,28 @@ func (a *App) startup(ctx context.Context) {
 	}
 	a.store = s
 
-	// Cache em duas camadas (memória + Store); persistent fica nil se o
-	// Store não abriu — o cache ainda funciona só em memória nesse caso.
+	// Two-layer cache (memory + Store); persistent remains nil if the Store failed to open
+	// — the cache still works in memory only in that case.
 	a.schemaCache = schemacache.New(schemaCacheTTL, s)
 }
 
-// shutdown fecha o store local ao encerrar o app.
+// shutdown closes the local store when the app exits.
 func (a *App) shutdown(ctx context.Context) {
 	if a.store != nil {
 		a.store.Close()
 	}
 }
 
-// beforeClose intercepta o fechamento da janela (registrado em main.go via
-// options.App.OnBeforeClose) pra dar ao frontend a chance de perguntar "tem
-// SQL não salvo?" em cada aba de console antes de sair de verdade — mesmo
-// modal já usado pra fechar uma aba individual (ver ConsoleTab.tsx
-// confirmClose), só que orquestrado pra todas as abas de uma vez.
+// beforeClose intercepts window closure (registered in main.go via
+// options.App.OnBeforeClose) to let the frontend ask "is there unsaved SQL?" in each
+// console tab before actually exiting — the same modal already used to close an
+// individual tab (see ConsoleTab.tsx confirmClose), orchestrated for all tabs at once.
 //
-// SEMPRE bloqueia o primeiro pedido de fechamento (prevent=true) e emite um
-// evento pro frontend decidir. Quando o frontend termina de perguntar (nada
-// pra salvar, ou o usuário confirmou/descartou em todas), ele chama
-// ConfirmQuit — que marca canClose e pede runtime.Quit de novo; dessa vez
-// beforeClose deixa passar (prevent=false), sem re-perguntar em loop.
+// It ALWAYS blocks the first close request (prevent=true) and emits an event for the
+// frontend to decide. When the frontend finishes asking (nothing to save, or the user
+// confirmed/discarded in every tab), it calls ConfirmQuit — which sets canClose and
+// requests runtime.Quit again; this time beforeClose allows it (prevent=false), without
+// repeatedly asking in a loop.
 func (a *App) beforeClose(ctx context.Context) bool {
 	if a.canClose {
 		return false
@@ -103,27 +102,25 @@ func (a *App) beforeClose(ctx context.Context) bool {
 	return true
 }
 
-// ConfirmQuit é chamado pelo frontend depois de resolver (salvar/descartar)
-// o SQL não salvo de todas as abas de console — ou imediatamente, se nenhuma
-// estava suja. Marca canClose e pede o fechamento de verdade (ver beforeClose).
+// ConfirmQuit is called by the frontend after resolving (saving/discarding) unsaved SQL
+// in all console tabs — or immediately if none were dirty. It sets canClose and requests
+// the actual shutdown (see beforeClose).
 func (a *App) ConfirmQuit() {
 	a.canClose = true
 	runtime.Quit(a.ctx)
 }
 
-// wispReleasesAPI é a lista de releases do repositório (não .../releases/
-// latest!) — bug real evitado antes de implementar: o endpoint "latest" do
-// GitHub IGNORA releases marcadas como prerelease e devolve 404 quando não
-// existe nenhuma release estável ainda (confirmado batendo na API real
-// durante o desenvolvimento desta feature) — todas as releases do Wisp até
-// agora são prerelease (v0.1.0-beta.N). A lista comum já vem ordenada da
-// mais recente pra mais antiga, então o primeiro item é sempre o que
-// interessa.
+// wispReleasesAPI is the repository release list (not .../releases/latest!) — a real bug
+// avoided before implementation: GitHub's "latest" endpoint IGNORES releases marked as
+// prerelease and returns 404 when no stable release exists yet (confirmed against the
+// real API while developing this feature) — all Wisp releases so far are prereleases
+// (v0.1.0-beta.N). The regular list is already ordered newest to oldest, so the first
+// item is always the relevant one.
 const wispReleasesAPI = "https://api.github.com/repos/matheusbbdutra/wisp-db/releases"
 
-// UpdateInfo é o resultado do CheckForUpdate — só aviso, nunca baixa nem
-// substitui o binário sozinho (Wails não tem updater nativo, diferente do
-// autoUpdater do Electron/updater do Tauri).
+// UpdateInfo is the result of CheckForUpdate — notification only; it never downloads or
+// replaces the binary on its own (Wails has no native updater, unlike Electron's
+// autoUpdater/Tauri's updater).
 type UpdateInfo struct {
 	CurrentVersion string
 	LatestVersion  string
@@ -136,14 +133,13 @@ type githubRelease struct {
 	HTMLURL string `json:"html_url"`
 }
 
-// CheckForUpdate consulta a API pública do GitHub (sem autenticação, sem
-// credencial nenhuma envolvida) e compara com AppVersion (version.go).
-// Comparação é só igualdade de string (não semver-aware) — suficiente pro
-// escopo v1 "só aviso": qualquer tag diferente da embutida no binário conta
-// como "tem atualização", already coberto pelo caso real (nunca fica pra
-// trás demais entre checagens manuais). Timeout curto pra não travar a UI
-// se a rede estiver ruim/indisponível (uso 100% opcional, nunca bloqueia
-// nenhum fluxo do app).
+// CheckForUpdate queries the public GitHub API (no authentication or credentials
+// involved) and compares against AppVersion (version.go). Comparison uses string
+// equality only (not semver-aware) — sufficient for the v1 "notification only" scope:
+// any tag different from the one embedded in the binary counts as "update available",
+// already covering the real use case (never falling too far behind between manual
+// checks). A short timeout keeps the UI from hanging if the network is poor/unavailable
+// (entirely optional; never blocks any app workflow).
 func (a *App) CheckForUpdate() (*UpdateInfo, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
@@ -180,10 +176,9 @@ func (a *App) CheckForUpdate() (*UpdateInfo, error) {
 	}, nil
 }
 
-// OpenReleaseURL abre a página da release no navegador padrão do sistema
-// (nunca dentro da própria janela do Wisp). Restrito a https://github.com/
-// — nunca abre uma URL arbitrária vinda de outro lugar, só a que o próprio
-// CheckForUpdate acabou de devolver.
+// OpenReleaseURL opens the release page in the system default browser (never inside
+// Wisp's own window). Restricted to https://github.com/ — never opens an arbitrary URL
+// from elsewhere, only the one just returned by CheckForUpdate.
 func (a *App) OpenReleaseURL(rawURL string) error {
 	if !strings.HasPrefix(rawURL, "https://github.com/") {
 		return fmt.Errorf("URL fora do domínio esperado")
@@ -192,19 +187,18 @@ func (a *App) OpenReleaseURL(rawURL string) error {
 	return nil
 }
 
-// --- Bindings expostos ao frontend (Wails IPC) ---
+// --- Bindings exposed to the frontend (Wails IPC) ---
 
-// Connect abre uma conexão dedicada para a aba tabId, usando o dialeto
-// driverName ("sqlite" ou "postgres") e a dsn fornecida. Qualquer conexão
-// anterior da mesma aba é encerrada (ver session.Manager.Open).
+// Connect opens a dedicated connection for tab tabId using the driverName dialect
+// ("sqlite" or "postgres") and the supplied dsn. Any previous connection for the same
+// tab is closed (see session.Manager.Open).
 func (a *App) Connect(tabID string, driverName string, dsn string) error {
 	return a.connect(tabID, driverName, dsn, "")
 }
 
-// connect é o núcleo compartilhado por Connect (DSN direta) e ConnectSaved
-// (conexão salva) — connectionID vazio significa "sem conexão salva
-// associada" e é o que faz RecordQuery pular a gravação no histórico
-// (ver internal/store.RecordQuery).
+// connect is the shared core of Connect (direct DSN) and ConnectSaved (saved connection)
+// — an empty connectionID means "no associated saved connection" and makes RecordQuery
+// skip writing history (see internal/store.RecordQuery).
 func (a *App) connect(tabID string, driverName string, dsn string, connectionID string) error {
 	driver, err := db.New(db.DriverName(driverName))
 	if err != nil {
@@ -221,33 +215,33 @@ func (a *App) connect(tabID string, driverName string, dsn string, connectionID 
 	return nil
 }
 
-// QueryMetadata é o retorno de RunQuery: colunas/tipos da query iniciada e
-// a duração da execução inicial (não inclui o tempo de buscar as linhas em
-// si, que é medido por fora no FetchRows). Uma struct em vez de múltiplos
-// retornos porque bindings Wails não lidam bem com mais de um valor além
-// do error (ver ADR pattern já usado em db.QueryResult/store.SavedConnection).
+// QueryMetadata is the return value of RunQuery: columns/types of the started query and
+// the initial execution duration (excluding the time spent fetching the rows themselves,
+// measured separately in FetchRows). A struct is used instead of multiple return values
+// because Wails bindings do not handle more than one value besides error well (see the
+// ADR pattern already used in db.QueryResult/store.SavedConnection).
 type QueryMetadata struct {
 	Columns    []string
 	Types      []string
 	DurationMs int64
 }
 
-// FetchBatch é o retorno de FetchRows: um lote de linhas e se ainda há mais
-// disponível no cursor.
+// FetchBatch is the return value of FetchRows: a batch of rows and whether more are
+// available in the cursor.
 type FetchBatch struct {
 	Rows    [][]any
 	HasMore bool
 }
 
-// RunQuery inicia a execução de uma query na conexão da aba tabId em modo
-// streaming — só os metadados de coluna voltam aqui; as linhas são buscadas
-// sob demanda via FetchRows, em lotes, para não carregar resultados grandes
-// inteiros em memória (equivalente ao "fetch size" configurável de clientes
-// como o DBeaver, em vez de trazer tudo de uma vez).
+// RunQuery starts executing a query on tab tabId's connection in streaming mode — only
+// column metadata is returned here; rows are fetched on demand via FetchRows, in
+// batches, to avoid loading entire large results into memory (equivalent to the
+// configurable "fetch size" in clients such as DBeaver, instead of fetching everything
+// at once).
 //
-// Cria um QueryCtx novo pra essa execução (ver session.Manager.StartQuery)
-// — assim o botão Cancelar consegue abortar só esta query (via ctx e via
-// cancelamento nativo do driver), sem invalidar a sessão/conexão inteira.
+// It creates a new QueryCtx for this execution (see session.Manager.StartQuery) —
+// allowing the Cancel button to abort only this query (via ctx and native driver
+// cancellation), without invalidating the entire session/connection.
 func (a *App) RunQuery(tabID string, query string) (*QueryMetadata, error) {
 	s, err := a.sessions.Get(tabID)
 	if err != nil {
@@ -267,9 +261,9 @@ func (a *App) RunQuery(tabID string, query string) (*QueryMetadata, error) {
 	columns, types, err := s.Driver.ExecuteStreaming(qctx, query)
 	duration := time.Since(s.QueryStartedAt).Milliseconds()
 
-	// DDL detectado na própria aba invalida o schema cache dessa conexão
-	// imediatamente (ver docs/ARCHITECTURE.md, "Fluxo de metadados") — não
-	// espera o TTL expirar sozinho.
+	// DDL detected in the tab itself immediately invalidates this connection's schema cache
+	// (see docs/ARCHITECTURE.md, "Fluxo de metadados") — without waiting for the TTL to
+	// expire on its own.
 	if err == nil && a.schemaCache != nil && isDDL(query) {
 		a.schemaCache.Invalidate(s.CacheKey)
 	}
@@ -293,10 +287,10 @@ func (a *App) RunQuery(tabID string, query string) (*QueryMetadata, error) {
 	return &QueryMetadata{Columns: columns, Types: types, DurationMs: duration}, nil
 }
 
-// FetchRows busca o próximo lote de até batchSize linhas do cursor aberto
-// por RunQuery. hasMore=false indica que o resultado terminou — nesse
-// momento (ou em caso de erro no meio do fetch) o histórico gravado por
-// RunQuery é atualizado com o total real de linhas buscadas.
+// FetchRows fetches the next batch of up to batchSize rows from the cursor opened by
+// RunQuery. hasMore=false means the result is exhausted — at that point (or on an error
+// during fetching), the history recorded by RunQuery is updated with the actual total
+// number of rows fetched.
 func (a *App) FetchRows(tabID string, batchSize int) (*FetchBatch, error) {
 	s, err := a.sessions.Get(tabID)
 	if err != nil {
@@ -322,9 +316,9 @@ func (a *App) FetchRows(tabID string, batchSize int) (*FetchBatch, error) {
 	return &FetchBatch{Rows: rows, HasMore: hasMore}, nil
 }
 
-// isDDL detecta, pelo primeiro token da query, se ela é uma alteração de
-// schema (CREATE/ALTER/DROP) — checagem léxica simples, não um parser SQL
-// (ver docs/ARCHITECTURE.md, "sem parser SQL customizado").
+// isDDL detects whether a query changes the schema (CREATE/ALTER/DROP) from its first
+// token — a simple lexical check, not a SQL parser (see docs/ARCHITECTURE.md, "sem
+// parser SQL customizado").
 func isDDL(query string) bool {
 	fields := strings.Fields(query)
 	if len(fields) == 0 {
@@ -338,20 +332,20 @@ func isDDL(query string) bool {
 	}
 }
 
-// CancelQuery interrompe a execução em andamento na aba tabId, cancelando o
-// context local e disparando o cancelamento nativo do driver quando suportado.
+// CancelQuery interrupts the execution in progress in tab tabId, canceling the local
+// context and triggering native driver cancellation when supported.
 func (a *App) CancelQuery(tabID string) error {
 	return a.sessions.Cancel(a.ctx, tabID)
 }
 
-// Disconnect encerra e remove a sessão da aba tabId.
+// Disconnect closes and removes the session for tab tabId.
 func (a *App) Disconnect(tabID string) error {
 	return a.sessions.Close(tabID)
 }
 
-// ListSchemas retorna os schemas visíveis na conexão da aba tabId (usado
-// pela sidebar — introspecção lazy, ver docs/ARCHITECTURE.md). Consulta o
-// schema cache antes de ir ao banco; grava no cache após um fetch real.
+// ListSchemas returns the schemas visible on tab tabId's connection (used by the sidebar
+// — lazy introspection, see docs/ARCHITECTURE.md). It checks the schema cache before
+// querying the database and writes to the cache after an actual fetch.
 func (a *App) ListSchemas(tabID string) ([]string, error) {
 	s, err := a.sessions.Get(tabID)
 	if err != nil {
@@ -380,8 +374,8 @@ func (a *App) ListSchemas(tabID string) ([]string, error) {
 	return schemas, nil
 }
 
-// ListTables retorna as tabelas de um schema na conexão da aba tabId.
-// Mesma lógica de cache de ListSchemas, por schema individual.
+// ListTables returns the tables in a schema on tab tabId's connection. It uses the same
+// caching logic as ListSchemas, per individual schema.
 func (a *App) ListTables(tabID string, schema string) ([]db.Table, error) {
 	s, err := a.sessions.Get(tabID)
 	if err != nil {
@@ -412,11 +406,11 @@ func (a *App) ListTables(tabID string, schema string) ([]db.Table, error) {
 	return tables, nil
 }
 
-// IntrospectTable retorna uma tabela com Columns populado (usado pelo
-// autocomplete de colunas — ListTables só traz Schema/Name, ver
-// internal/db.DatabaseDriver.Introspect). Consulta o schema cache antes de
-// ir ao banco; grava/atualiza a entrada correspondente no cache após um
-// fetch real (mesmo padrão de ListSchemas/ListTables acima).
+// IntrospectTable returns a table with Columns populated (used for column autocomplete —
+// ListTables only provides Schema/Name, see internal/db.DatabaseDriver.Introspect). It
+// checks the schema cache before querying the database and writes/updates the
+// corresponding cache entry after an actual fetch (the same pattern as
+// ListSchemas/ListTables above).
 func (a *App) IntrospectTable(tabID string, schema string, tableName string) (*db.Table, error) {
 	s, err := a.sessions.Get(tabID)
 	if err != nil {
@@ -464,12 +458,11 @@ func (a *App) IntrospectTable(tabID string, schema string, tableName string) (*d
 	return full, nil
 }
 
-// IntrospectSchemaTables retorna todas as tabelas de um schema já com
-// Columns populado, numa única consulta batched (ver
-// internal/db.DatabaseDriver.IntrospectSchema) — usado pelo catálogo de
-// autocomplete do console (ConsoleTab) em vez de um IntrospectTable por
-// tabela, que virava fila lenta em schemas com muitas tabelas. Mesmo padrão
-// de cache de IntrospectTable: cache-hit não vai ao banco.
+// IntrospectSchemaTables returns all tables in a schema with Columns already populated,
+// in a single batched query (see internal/db.DatabaseDriver.IntrospectSchema) — used by
+// the console autocomplete catalog (ConsoleTab) instead of one IntrospectTable per
+// table, which caused a slow queue in schemas with many tables. The same caching pattern
+// as IntrospectTable: a cache hit does not query the database.
 func (a *App) IntrospectSchemaTables(tabID string, schema string) ([]db.Table, error) {
 	s, err := a.sessions.Get(tabID)
 	if err != nil {
@@ -509,8 +502,8 @@ func (a *App) IntrospectSchemaTables(tabID string, schema string) ([]db.Table, e
 	return tables, nil
 }
 
-// RefreshSchema invalida o cache da conexão da aba tabId — usado pelo botão
-// "Atualizar" da sidebar para forçar um fetch real em vez de esperar o TTL.
+// RefreshSchema invalidates the cache for tab tabId's connection — used by the sidebar's
+// "Refresh" button to force an actual fetch instead of waiting for the TTL.
 func (a *App) RefreshSchema(tabID string) error {
 	s, err := a.sessions.Get(tabID)
 	if err != nil {
@@ -522,12 +515,12 @@ func (a *App) RefreshSchema(tabID string) error {
 	return nil
 }
 
-// UpdateCell atualiza uma única célula via UPDATE parametrizado com
-// checagem otimista de concorrência (ver db.DatabaseDriver.UpdateCell e
-// docs/adr/0004-inline-edit-safety.md). Retorna as linhas afetadas — 0
-// significa que outro processo alterou a linha entre o fetch e o save
-// (não erro); o frontend avisa o usuário e reverte a célula. Resolve a
-// sessão pelo tabID igual aos outros bindings (RunQuery/IntrospectTable).
+// UpdateCell updates a single cell through a parameterized UPDATE with optimistic
+// concurrency checking (see db.DatabaseDriver.UpdateCell and
+// docs/adr/0004-inline-edit-safety.md). It returns the affected rows — 0 means another
+// process changed the row between fetch and save (not an error); the frontend warns the
+// user and reverts the cell. It resolves the session by tabID just like the other
+// bindings (RunQuery/IntrospectTable).
 func (a *App) UpdateCell(tabID string, schema string, table string, pkColumns []string, pkValues []any, column string, oldValue any, newValue any) (int64, error) {
 	s, err := a.sessions.Get(tabID)
 	if err != nil {
@@ -536,8 +529,8 @@ func (a *App) UpdateCell(tabID string, schema string, table string, pkColumns []
 	return s.Driver.UpdateCell(s.Ctx, schema, table, pkColumns, pkValues, column, oldValue, newValue)
 }
 
-// InsertRow insere uma linha nova na conexão da aba tabId. Resolve a sessão
-// pelo tabID igual a UpdateCell.
+// InsertRow inserts a new row on tab tabId's connection. It resolves the session by
+// tabID just like UpdateCell.
 func (a *App) InsertRow(tabID string, schema string, table string, columns []string, values []any) error {
 	s, err := a.sessions.Get(tabID)
 	if err != nil {
@@ -546,8 +539,8 @@ func (a *App) InsertRow(tabID string, schema string, table string, columns []str
 	return s.Driver.InsertRow(s.Ctx, schema, table, columns, values)
 }
 
-// DeleteRow apaga uma linha (por PK real) na conexão da aba tabId. Resolve
-// a sessão pelo tabID igual a UpdateCell.
+// DeleteRow deletes a row (by its real PK) on tab tabId's connection. It resolves the
+// session by tabID just like UpdateCell.
 func (a *App) DeleteRow(tabID string, schema string, table string, pkColumns []string, pkValues []any) (int64, error) {
 	s, err := a.sessions.Get(tabID)
 	if err != nil {
@@ -556,8 +549,8 @@ func (a *App) DeleteRow(tabID string, schema string, table string, pkColumns []s
 	return s.Driver.DeleteRow(s.Ctx, schema, table, pkColumns, pkValues)
 }
 
-// GetTableDDL retorna o DDL de criação da tabela na conexão da aba tabId.
-// Resolve a sessão pelo tabID igual a IntrospectTable.
+// GetTableDDL returns the table creation DDL on tab tabId's connection. It resolves the
+// session by tabID just like IntrospectTable.
 func (a *App) GetTableDDL(tabID string, schema string, table string) (string, error) {
 	s, err := a.sessions.Get(tabID)
 	if err != nil {
@@ -566,8 +559,8 @@ func (a *App) GetTableDDL(tabID string, schema string, table string) (string, er
 	return s.Driver.TableDDL(s.Ctx, schema, table)
 }
 
-// ListTriggers lista triggers da tabela na conexão da aba tabId.
-// Resolve a sessão pelo tabID igual a IntrospectTable.
+// ListTriggers lists table triggers on tab tabId's connection. It resolves the session
+// by tabID just like IntrospectTable.
 func (a *App) ListTriggers(tabID string, schema string, table string) ([]db.Trigger, error) {
 	s, err := a.sessions.Get(tabID)
 	if err != nil {
@@ -576,9 +569,8 @@ func (a *App) ListTriggers(tabID string, schema string, table string) ([]db.Trig
 	return s.Driver.ListTriggers(s.Ctx, schema, table)
 }
 
-// ListFunctions lista funções do schema na conexão da aba tabId (nível de
-// schema, não filtrado por tabela). Resolve a sessão pelo tabID igual a
-// IntrospectTable.
+// ListFunctions lists schema functions on tab tabId's connection (schema level, not
+// filtered by table). It resolves the session by tabID just like IntrospectTable.
 func (a *App) ListFunctions(tabID string, schema string) ([]db.Function, error) {
 	s, err := a.sessions.Get(tabID)
 	if err != nil {
@@ -587,8 +579,8 @@ func (a *App) ListFunctions(tabID string, schema string) ([]db.Function, error) 
 	return s.Driver.ListFunctions(s.Ctx, schema)
 }
 
-// ListIndexes lista índices da tabela na conexão da aba tabId. Resolve a
-// sessão pelo tabID igual a IntrospectTable.
+// ListIndexes lists table indexes on tab tabId's connection. It resolves the session by
+// tabID just like IntrospectTable.
 func (a *App) ListIndexes(tabID string, schema string, table string) ([]db.Index, error) {
 	s, err := a.sessions.Get(tabID)
 	if err != nil {
@@ -597,8 +589,8 @@ func (a *App) ListIndexes(tabID string, schema string, table string) ([]db.Index
 	return s.Driver.ListIndexes(s.Ctx, schema, table)
 }
 
-// ListForeignKeys lista as FKs de saída da tabela na conexão da aba tabId.
-// Resolve a sessão pelo tabID igual a IntrospectTable.
+// ListForeignKeys lists the table's outgoing FKs on tab tabId's connection. It resolves
+// the session by tabID just like IntrospectTable.
 func (a *App) ListForeignKeys(tabID string, schema string, table string) ([]db.ForeignKey, error) {
 	s, err := a.sessions.Get(tabID)
 	if err != nil {
@@ -607,10 +599,10 @@ func (a *App) ListForeignKeys(tabID string, schema string, table string) ([]db.F
 	return s.Driver.ListForeignKeys(s.Ctx, schema, table)
 }
 
-// --- Conexões salvas (persistidas cifradas, ver internal/vault) ---
+// --- Saved connections (persisted encrypted, see internal/vault) ---
 
-// SaveConnection cifra e persiste uma conexão para reuso futuro (nome amigável
-// + driver + DSN completa). Nunca grava a DSN em texto puro (ver internal/vault).
+// SaveConnection encrypts and persists a connection for future reuse (friendly name +
+// driver + full DSN). It never writes the DSN in plaintext (see internal/vault).
 func (a *App) SaveConnection(name string, driverName string, dsn string) (string, error) {
 	if a.store == nil {
 		return "", fmt.Errorf("store local indisponível")
@@ -618,7 +610,7 @@ func (a *App) SaveConnection(name string, driverName string, dsn string) (string
 	return a.store.SaveConnection(name, driverName, dsn)
 }
 
-// ListSavedConnections retorna as conexões salvas sem expor a DSN/segredo.
+// ListSavedConnections returns saved connections without exposing the DSN/secret.
 func (a *App) ListSavedConnections() ([]store.SavedConnection, error) {
 	if a.store == nil {
 		return nil, fmt.Errorf("store local indisponível")
@@ -626,8 +618,8 @@ func (a *App) ListSavedConnections() ([]store.SavedConnection, error) {
 	return a.store.ListConnections()
 }
 
-// ConnectSaved decifra a DSN de uma conexão salva e abre a sessão da aba
-// tabId com ela — a DSN decifrada nunca é retornada ao frontend.
+// ConnectSaved decrypts a saved connection's DSN and uses it to open the session for tab
+// tabId — the decrypted DSN is never returned to the frontend.
 func (a *App) ConnectSaved(tabID string, connectionID string) error {
 	if a.store == nil {
 		return fmt.Errorf("store local indisponível")
@@ -639,10 +631,10 @@ func (a *App) ConnectSaved(tabID string, connectionID string) error {
 	return a.connect(tabID, driverName, dsn, connectionID)
 }
 
-// TestConnection tenta conectar e imediatamente fecha, sem persistir nada
-// nem abrir sessão de aba — usado pelo modal de conexão para validar antes
-// de salvar (evita salvar uma conexão com erro de digitação, ex. nome de
-// banco errado). Timeout de 10s para não travar em host inalcançável.
+// TestConnection attempts to connect and immediately closes the connection, without
+// persisting anything or opening a tab session — used by the connection modal to
+// validate before saving (avoids saving a connection with a typo, e.g. an incorrect
+// database name). A 10s timeout prevents hanging on an unreachable host.
 func (a *App) TestConnection(driverName string, dsn string) error {
 	driver, err := db.New(db.DriverName(driverName))
 	if err != nil {
@@ -656,7 +648,7 @@ func (a *App) TestConnection(driverName string, dsn string) error {
 	return driver.Close()
 }
 
-// DeleteSavedConnection remove uma conexão salva permanentemente.
+// DeleteSavedConnection permanently removes a saved connection.
 func (a *App) DeleteSavedConnection(connectionID string) error {
 	if a.store == nil {
 		return fmt.Errorf("store local indisponível")
@@ -664,8 +656,7 @@ func (a *App) DeleteSavedConnection(connectionID string) error {
 	return a.store.DeleteConnection(connectionID)
 }
 
-// GetQueryHistory retorna as últimas N execuções registradas (da mais
-// recente para a mais antiga).
+// GetQueryHistory returns the last N recorded executions (newest to oldest).
 func (a *App) GetQueryHistory(limit int) ([]store.QueryHistoryEntry, error) {
 	if a.store == nil {
 		return nil, fmt.Errorf("store local indisponível")
@@ -673,9 +664,9 @@ func (a *App) GetQueryHistory(limit int) ([]store.QueryHistoryEntry, error) {
 	return a.store.ListQueryHistory(limit)
 }
 
-// --- Scripts SQL salvos (nomeados, editáveis — diferente do histórico) ---
+// --- Saved SQL scripts (named, editable — unlike history) ---
 
-// SaveScript grava um novo script SQL nomeado. Retorna o id gerado.
+// SaveScript saves a new named SQL script. It returns the generated id.
 func (a *App) SaveScript(name string, queryText string) (string, error) {
 	if a.store == nil {
 		return "", fmt.Errorf("store local indisponível")
@@ -683,8 +674,7 @@ func (a *App) SaveScript(name string, queryText string) (string, error) {
 	return a.store.SaveScript(name, queryText)
 }
 
-// ListScripts retorna os scripts salvos, do mais recentemente atualizado
-// para o mais antigo.
+// ListScripts returns saved scripts, from most recently updated to oldest.
 func (a *App) ListScripts() ([]store.SavedScript, error) {
 	if a.store == nil {
 		return nil, fmt.Errorf("store local indisponível")
@@ -692,7 +682,7 @@ func (a *App) ListScripts() ([]store.SavedScript, error) {
 	return a.store.ListScripts()
 }
 
-// UpdateScript sobrescreve nome e/ou texto de um script existente.
+// UpdateScript overwrites the name and/or text of an existing script.
 func (a *App) UpdateScript(id string, name string, queryText string) error {
 	if a.store == nil {
 		return fmt.Errorf("store local indisponível")
@@ -700,7 +690,7 @@ func (a *App) UpdateScript(id string, name string, queryText string) error {
 	return a.store.UpdateScript(id, name, queryText)
 }
 
-// DeleteScript remove um script salvo permanentemente.
+// DeleteScript permanently removes a saved script.
 func (a *App) DeleteScript(id string) error {
 	if a.store == nil {
 		return fmt.Errorf("store local indisponível")
@@ -708,9 +698,9 @@ func (a *App) DeleteScript(id string) error {
 	return a.store.DeleteScript(id)
 }
 
-// PickSQLiteFile abre o diálogo nativo do sistema para selecionar um arquivo
-// de banco SQLite existente (.db, .sqlite, .sqlite3). Retorna o caminho absoluto
-// ou string vazia se o usuário cancelou o diálogo.
+// PickSQLiteFile opens the native system dialog to select an existing SQLite database
+// file (.db, .sqlite, .sqlite3). It returns the absolute path or an empty string if the
+// user canceled the dialog.
 func (a *App) PickSQLiteFile() (string, error) {
 	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
 		Title: "Selecionar banco de dados SQLite",

@@ -1,7 +1,7 @@
 package main
 
-// AppVersion segue o mesmo texto das tags git (ex. "v0.1.0-beta.3") —
-// atualizar manualmente a cada release, mesmo padrão não automatizado do
-// VERSION em packaging/deb/build.sh (sem infra de ldflags/build-time nesta
-// fase). Usado pelo verificador de atualização (CheckForUpdate, app.go).
+// AppVersion follows the same text as git tags (e.g. "v0.1.0-beta.3") — update it
+// manually for each release, using the same non-automated pattern as VERSION in
+// packaging/deb/build.sh (no ldflags/build-time infrastructure at this stage). Used by
+// the update checker (CheckForUpdate, app.go).
 const AppVersion = "v0.1.0-beta.4"

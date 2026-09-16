@@ -1,8 +1,7 @@
-// Package vault implementa a cifragem de credenciais do Wisp (ADR: nunca
-// texto puro em disco, ver docs/adr/0003-storage.md e CLAUDE.md). A chave
-// mestra é gerada uma vez e guardada no keychain do SO via go-keyring
-// (Secret Service no Linux, Keychain no macOS, Credential Manager no
-// Windows) — nunca em arquivo de config ou variável de ambiente.
+// Package vault implements Wisp credential encryption (ADR: never plaintext on disk, see
+// docs/adr/0003-storage.md and CLAUDE.md). The master key is generated once and stored
+// in the OS keychain via go-keyring (Secret Service on Linux, Keychain on macOS,
+// Credential Manager on Windows) — never in a config file or environment variable.
 package vault
 
 import (
@@ -20,8 +19,8 @@ const (
 	keySize        = chacha20poly1305.KeySize
 )
 
-// Vault cifra/decifra segredos de conexão usando ChaCha20-Poly1305 com uma
-// chave mestra persistida no keychain do SO.
+// Vault encrypts/decrypts connection secrets using ChaCha20-Poly1305 with a master key
+// persisted in the OS keychain.
 type Vault struct {
 	aead interface {
 		Seal(dst, nonce, plaintext, additionalData []byte) []byte
@@ -30,8 +29,8 @@ type Vault struct {
 	}
 }
 
-// Open carrega a chave mestra do keychain do SO, gerando e persistindo uma
-// nova na primeira execução.
+// Open loads the master key from the OS keychain, generating and persisting a new one on
+// the first run.
 func Open() (*Vault, error) {
 	key, err := loadOrCreateMasterKey()
 	if err != nil {
@@ -44,8 +43,8 @@ func Open() (*Vault, error) {
 	return &Vault{aead: aead}, nil
 }
 
-// Encrypt cifra plaintext (ex.: senha de conexão) retornando nonce+ciphertext
-// concatenados, prontos para gravar em encrypted_secret (ver internal/store).
+// Encrypt encrypts plaintext (e.g. a connection password), returning concatenated
+// nonce+ciphertext, ready to write to encrypted_secret (see internal/store).
 func (v *Vault) Encrypt(plaintext string) ([]byte, error) {
 	nonce := make([]byte, v.aead.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
@@ -54,8 +53,8 @@ func (v *Vault) Encrypt(plaintext string) ([]byte, error) {
 	return v.aead.Seal(nonce, nonce, []byte(plaintext), nil), nil
 }
 
-// Decrypt reverte Encrypt. Falha se ciphertext foi adulterado (autenticação
-// do ChaCha20-Poly1305), nunca retorna dado parcial/corrompido silenciosamente.
+// Decrypt reverses Encrypt. It fails if ciphertext has been tampered with
+// (ChaCha20-Poly1305 authentication), never silently returning partial/corrupted data.
 func (v *Vault) Decrypt(ciphertext []byte) (string, error) {
 	nonceSize := v.aead.NonceSize()
 	if len(ciphertext) < nonceSize {
