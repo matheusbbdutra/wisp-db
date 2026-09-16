@@ -646,6 +646,47 @@ depois.
 `go build`/`go vet`/`tsc --noEmit`/`vitest run` (27 testes)/
 `npm run build` limpos. Nada commitado ainda desta mudança.
 
+## ⏸️ Pausa combinada com o usuário (2026-09-15) — Phase 3 fechado, sem próximo item definido
+Perguntei sobre Phase 4+ (query builder, busca semântica, sync, SSH,
+DuckDB) — usuário confirmou que nenhum tem demanda real validada ainda
+(todos deliberadamente "esperar aparecer necessidade real de uso", ver
+ROADMAP) e decidiu **pausar aqui** em vez de adiantar algo ou puxar o
+polish visual agora.
+
+**Estado**: `master` limpo, todos os commits da sessão de pé (Phase 3
+completo: itens 1-5 + autocomplete de alias + verificador de atualização
+automático). Nada pendente de teste imediato — usuário vai testar o
+autocomplete de alias com queries grandes reais amanhã, por conta própria.
+
+**Retomar por**: esperar o usuário trazer o próximo pedido real de uso
+(bug encontrado no dia a dia, ou demanda concreta de algum item do
+Phase 4+/polish visual). Não iniciar nada novo por conta própria.
+
+## ✅ i18n: plano desenhado + docs internos traduzidos (2026-09-16)
+Usuário pediu i18n de verdade (com seletor de idioma) pra UI, mas depois
+pediu explicitamente pra **não implementar agora** — só fechar o que já
+estava em andamento: tradução dos relatórios internos e o plano técnico.
+
+- **Docs traduzidos pra inglês** (delegado ao OpenCode, verificado sem
+  resquício de PT-BR via grep de acentuação): `docs/reports/agy-*.md` (3
+  arquivos) e `docs/analysis/*.md` (5 arquivos, incluindo os que eu mesmo
+  gravei nesta sessão). Resumo em
+  `docs/analysis/i18n-reports-translation-2026-09-15.md`.
+- **Plano de i18n da UI desenhado e ACEITO, não implementado**:
+  `docs/adr/0006-i18n.md` — `i18next`+`react-i18next` (confirmado MIT e
+  mantido ativamente via `npm view` real: 26.4.2/17.0.14), estrutura
+  `frontend/src/i18n/` com `locales/en.json`+`locales/pt-BR.json`,
+  detecção por locale do SO com override salvo em `localStorage`,
+  seletor de idioma na barra de abas. Decisões confirmadas com o
+  usuário: idioma padrão detecta do SO (não fixo em inglês); mensagens
+  de erro do backend Go entram no escopo (viram texto fixo em inglês,
+  sem i18n de verdade no Go). **Também planejado pra mesma leva futura**:
+  comentários de código Go (`app.go`/`internal/**/*.go`) também vão pra
+  inglês — ainda em PT-BR, não mexido agora.
+- **Escopo explicitamente fora desta rodada**: nenhum componente React
+  foi tocado, nenhuma string de UI foi trocada, nenhuma dependência nova
+  foi instalada ainda. É trabalho pra uma leva dedicada futura.
+
 ## Última atualização
 2026-09-15 (fim de sessão) — Autocomplete completo (v1+v2), uppercase automático, pretty-print SQL, copiar especial no grid e **edição inline de células** (item 7, concluído nesta sessão com 4 bugs reais de causa raiz corrigidos — ver seção "Edição inline de células" acima), todos implementados via delegação ao OpenCode + revisão/depuração minha antes de aceitar.
 

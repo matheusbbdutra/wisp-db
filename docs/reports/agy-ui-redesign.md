@@ -1,56 +1,56 @@
-# Relatório de Redesign Visual da UI — Wisp
+# UI Visual Redesign Report — Wisp
 
-**Data:** 2026-09-14  
-**Escopo:** Redesign visual completo da interface frontend (React/Monaco Editor), mantendo bindings Go, lógica interna e arquitetura intocados.
-
----
-
-## 1. Lista de Arquivos Alterados
-
-- `frontend/src/style.css`: Reset e estilização base da aplicação, remoção de centralização herdada de template, integração com variáveis de sistema e scrollbars customizadas.
-- `frontend/src/App.css`: Design system completo em CSS puro com variáveis de cores, elevações, botões estilizados, inputs, status badges, chips de conexões salvas, hierarquia da sidebar, toolbar do editor e tabela do grid.
-- `frontend/src/App.tsx`: Atualização semântica da toolbar do editor (botão Executar com ícone de Play e badge `<kbd>Ctrl+Enter</kbd>`, botão Cancelar com ícone de Stop) e preservação estrita de todos os estados e handlers.
-- `frontend/src/components/ConnectionBar.tsx`: Organização em duas fileiras limpas (conexão ativa e favoritos salvos), classes dedicadas para input DSN monoestilizado, badges de status pulsantes/coloridos e chips de conexões com tags de dialeto.
-- `frontend/src/components/Sidebar.tsx`: Hierarquia visual clara com ícones SVG inline para schemas (database) e tabelas (grid), setas de expansão com animação sutil, empty state ilustrado e botão de atualização compacto.
-- `frontend/src/components/SqlEditor.tsx`: Configuração de opções visuais do Monaco Editor para alinhamento com a nova paleta (font-family mono moderna, font-size 13px, padding vertical, remoção de réguas desnecessárias e scrollbars finas).
-- `frontend/src/components/ResultGrid.tsx`: Visual estilo IDE/DB tool profissional com cabeçalho sticky, numeração de linhas (#) em coluna fixa à esquerda, zebra striping sutil, destaque visual para valores `NULL`, toolbar de contagem de linhas/colunas e empty state explicativo.
+**Date:** 2026-09-14  
+**Scope:** Full visual redesign of the frontend interface (React/Monaco Editor), keeping Go bindings, internal logic, and architecture untouched.
 
 ---
 
-## 2. Decisões de Design
+## 1. List of Changed Files
 
-### Paleta de Cores (Dark Theme Profissional)
-Inspirada em ferramentas desktop modernas (VS Code, TablePlus, DataGrip):
-- **Fundo da Janela / Base:** `#121214` (zinc escuro profundo)
-- **Top Bar & Barras de Ferramentas:** `#18181b` / `#1a1a1e`
-- **Sidebar de Navegação:** `#141416` com bordas em `#242428` / `#2d2d32`
-- **Editor Monaco:** `#1e1e1e` (tema padrão `vs-dark` totalmente integrado)
-- **Grid de Resultados:** `#131315` com cabeçalho em `#1f1f23` e destaque em hover `rgba(59, 130, 246, 0.09)`
-- **Acentos e Estados:**
-  - Botão de Executar / Sucesso: Verde esmeralda (`#059669` / `#047857`)
-  - Conexão / Primário: Azul profissional (`#2563eb` / `#1d4ed8`)
-  - Alertas / Erro / Cancelar: Vermelho (`#dc2626` / `#ef4444`)
-  - Indicador `NULL`: Âmbar sutil (`#d97706` com itálico)
-
-### Tipografia
-- **UI Geral:** `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`
-- **Código, DSN, SQL e Células de Dados:** `ui-monospace, "Cascadia Code", "Fira Code", "JetBrains Mono", Menlo, Consolas, monospace` com suporte a `tabular-nums` para alinhamento numérico impecável.
-
-### Conformidade 100% Offline (Zero CDN)
-- Todos os ícones foram implementados em **SVG inline**, sem adição de pacotes externos, sem requisições de rede ou dependências de fontes CDN.
-- Mantido estritamente o isolamento local exigido pela arquitetura do Wisp.
+- `frontend/src/style.css`: Base app reset and styling, removal of template-inherited centering, integration with system variables and custom scrollbars.
+- `frontend/src/App.css`: Complete design system in pure CSS with color variables, elevations, styled buttons, inputs, status badges, saved-connection chips, sidebar hierarchy, editor toolbar, and grid table.
+- `frontend/src/App.tsx`: Semantic update of the editor toolbar (Run button with Play icon and `<kbd>Ctrl+Enter</kbd>` badge, Cancel button with Stop icon) and strict preservation of all states and handlers.
+- `frontend/src/components/ConnectionBar.tsx`: Organization into two clean rows (active connection and saved favorites), dedicated classes for mono-styled DSN input, pulsing/colored status badges, and connection chips with dialect tags.
+- `frontend/src/components/Sidebar.tsx`: Clear visual hierarchy with inline SVG icons for schemas (database) and tables (grid), subtly animated expansion arrows, illustrated empty state, and a compact refresh button.
+- `frontend/src/components/SqlEditor.tsx`: Monaco Editor visual options tuned to the new palette (modern mono font-family, 13px font-size, vertical padding, removal of unneeded rulers and thin scrollbars).
+- `frontend/src/components/ResultGrid.tsx`: Professional IDE/DB-tool look with sticky header, row numbers (#) in a fixed left column, subtle zebra striping, visual highlight for `NULL` values, row/column count toolbar, and explanatory empty state.
 
 ---
 
-## 3. Verificação de Tipagem e Build
+## 2. Design Decisions
 
-Execução dos comandos obrigatórios:
+### Color Palette (Professional Dark Theme)
+Inspired by modern desktop tools (VS Code, TablePlus, DataGrip):
+- **Window / Base Background:** `#121214` (deep dark zinc)
+- **Top Bar & Toolbars:** `#18181b` / `#1a1a1e`
+- **Navigation Sidebar:** `#141416` with borders in `#242428` / `#2d2d32`
+- **Monaco Editor:** `#1e1e1e` (fully integrated default `vs-dark` theme)
+- **Results Grid:** `#131315` with header in `#1f1f23` and hover highlight `rgba(59, 130, 246, 0.09)`
+- **Accents and States:**
+  - Run / Success button: Emerald green (`#059669` / `#047857`)
+  - Connection / Primary: Professional blue (`#2563eb` / `#1d4ed8`)
+  - Alerts / Error / Cancel: Red (`#dc2626` / `#ef4444`)
+  - `NULL` indicator: Subtle amber (`#d97706` with italic)
+
+### Typography
+- **General UI:** `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`
+- **Code, DSN, SQL, and Data Cells:** `ui-monospace, "Cascadia Code", "Fira Code", "JetBrains Mono", Menlo, Consolas, monospace` with `tabular-nums` support for flawless numeric alignment.
+
+### 100% Offline Compliance (Zero CDN)
+- All icons were implemented as **inline SVG**, with no added external packages, no network requests, and no CDN font dependencies.
+- The local isolation required by the Wisp architecture was strictly maintained.
+
+---
+
+## 3. Type Check and Build Verification
+
+Running the mandatory commands:
 
 ```bash
 cd frontend && npx tsc --noEmit && npm run build
 ```
 
-### Saída:
+### Output:
 ```text
 vite v7.0.0 building for production...
 transforming...
@@ -70,13 +70,13 @@ dist/assets/index-C-IHNGN1.js                4,156.35 kB │ gzip: 1,087.94 kB
 ✓ built in 18.57s
 ```
 
-- `npx tsc --noEmit`: código de saída 0 (zero erros de tipagem).
-- `npm run build`: código de saída 0 (build de produção concluído com sucesso).
+- `npx tsc --noEmit`: exit code 0 (zero type errors).
+- `npm run build`: exit code 0 (production build completed successfully).
 
 ---
 
-## 4. Limitações e Fora de Escopo
+## 4. Limitations and Out of Scope
 
-- **Virtualização do Grid (Glide Data Grid):** Não foi adicionada neste momento, permanecendo como tabela HTML com renderização imediata, cabeçalho sticky e scroll otimizado, respeitando a decisão de roadmap da Fase 1.
-- **Redimensionamento manual de painéis (Split panes / Resizers):** A proporção atual (sidebar 250px fixa, editor 220px, grid ocupando o restante flex) é responsiva ao resize da janela, mas ainda não possui barras de arraste entre painéis.
-- **Lógica e bindings de backend:** Mantidos 100% intactos conforme solicitado.
+- **Grid Virtualization (Glide Data Grid):** Not added at this time; the grid remains a plain HTML table with immediate rendering, sticky header, and optimized scroll, per the Phase 1 roadmap decision.
+- **Manual Panel Resizing (Split panes / Resizers):** The current proportions (fixed 250px sidebar, 220px editor, grid taking the remaining flex space) respond to window resizing but have no drag bars between panels yet.
+- **Backend logic and bindings:** Kept 100% intact as requested.

@@ -1,68 +1,68 @@
-# Relatório de Reformulação do Gerenciamento de Conexões — Wisp
+# Connection Management Redesign Report — Wisp
 
-**Data:** 2026-09-14  
-**Responsável:** Antigravity (agy)  
-**Contexto:** Substituição completa da barra de DSN cru por seleção de conexões salvas e modal estruturado (file picker para SQLite, campos estruturados para Postgres).
+**Date:** 2026-09-14  
+**Owner:** Antigravity (agy)  
+**Context:** Full replacement of the raw DSN bar with saved-connection selection and a structured modal (file picker for SQLite, structured fields for Postgres).
 
 ---
 
-## 1. Arquivos Alterados
+## 1. Changed Files
 
 1. **`app.go`**:
-   - Adicionado import `"github.com/wailsapp/wails/v2/pkg/runtime"`.
-   - Adicionado novo binding exposto ao frontend: `PickSQLiteFile() (string, error)`, que dispara o diálogo nativo do sistema operacional (`runtime.OpenFileDialog`) com filtros para `*.db;*.sqlite;*.sqlite3`.
-2. **`frontend/wailsjs/go/main/App.d.ts` e `frontend/wailsjs/go/main/App.js`**:
-   - Adicionada assinatura de tipo e binding JS para `PickSQLiteFile()`.
-3. **`frontend/src/components/ConnectionModal.tsx`** *(novo)*:
-   - Modal estruturado de conexão com abas "Nova Conexão" e "Conexões Salvas (N)".
-   - Suporte a SQLite com botão para acionar o file picker nativo via `PickSQLiteFile()`.
-   - Suporte a PostgreSQL com campos estruturados (Host, Porta, Database, Usuário, Senha, Modo SSL).
-   - Sanitização e escape seguro de usuário e senha via `encodeURIComponent` para prevenir quebra de DSN por caracteres especiais (`@`, `:`, `/`).
-   - Ações de "Salvar" e "Salvar e Conectar", além de exclusão de conexões salvas com `DeleteSavedConnection`.
+   - Added import `"github.com/wailsapp/wails/v2/pkg/runtime"`.
+   - Added a new binding exposed to the frontend: `PickSQLiteFile() (string, error)`, which triggers the native OS file dialog (`runtime.OpenFileDialog`) with filters for `*.db;*.sqlite;*.sqlite3`.
+2. **`frontend/wailsjs/go/main/App.d.ts` and `frontend/wailsjs/go/main/App.js`**:
+   - Added the type signature and JS binding for `PickSQLiteFile()`.
+3. **`frontend/src/components/ConnectionModal.tsx`** *(new)*:
+   - Structured connection modal with "New Connection" and "Saved Connections (N)" tabs.
+   - SQLite support with a button that triggers the native file picker via `PickSQLiteFile()`.
+   - PostgreSQL support with structured fields (Host, Port, Database, User, Password, SSL Mode).
+   - Safe sanitization and escaping of user and password via `encodeURIComponent` to prevent DSN breakage from special characters (`@`, `:`, `/`).
+   - "Save" and "Save & Connect" actions, plus deletion of saved connections with `DeleteSavedConnection`.
 4. **`frontend/src/components/ConnectionBar.tsx`**:
-   - Barra de DSN cru totalmente removida da topbar.
-   - Substituída por:
-     - Dropdown seletor de conexões salvas (`ListSavedConnections`).
-     - Botão "Conectar" / "Desconectar" baseado na conexão selecionada (`ConnectSaved`).
-     - Botão "Gerenciar Conexões" para abrir o modal.
-     - Tag indicadora da conexão ativa (driver + nome).
-     - Badge de status da sessão.
+   - Raw DSN bar fully removed from the topbar.
+   - Replaced with:
+     - Saved-connection selector dropdown (`ListSavedConnections`).
+     - "Connect" / "Disconnect" button based on the selected connection (`ConnectSaved`).
+     - "Manage Connections" button to open the modal.
+     - Active-connection indicator tag (driver + name).
+     - Session status badge.
 5. **`frontend/src/App.tsx`**:
-   - Limpeza de estados locais de DSN/driver soltos em `App.tsx` (agora centralizados no fluxo seguro de conexões salvas).
-   - Remoção de handlers redundantes de DSN.
+   - Cleaned up loose local DSN/driver state in `App.tsx` (now centralized in the safe saved-connections flow).
+   - Removed redundant DSN handlers.
 6. **`frontend/src/App.css`**:
-   - Adicionadas classes e temas para o modal estruturado, backdrop escuro, abas, campos de formulário, pills de seleção de driver, botão do file picker e lista de conexões no gerenciador.
+   - Added classes and themes for the structured modal, dark backdrop, tabs, form fields, driver selection pills, file picker button, and the connection list in the manager.
 
 ---
 
-## 2. Decisões de UX
+## 2. UX Decisions
 
-- **Eliminação de DSN em texto cru na barra principal:** A causa raiz dos problemas anteriores (perda de DSN ao trocar de driver e criação silenciosa de banco vazio no SQLite) foi eliminada na origem. A DSN agora é sempre gerada de forma transparente e estruturada.
-- **SQLite com File Picker Nativo:** Em vez de digitar um caminho ou arriscar typos em paths do sistema de arquivos, o usuário clica em "Procurar arquivo..." e seleciona o `.db` diretamente no diálogo nativo do SO (GTK no Linux/WebKit, Cocoa no macOS, Win32 no Windows).
-- **Postgres Estruturado com Escape Obrigatório:** Campos de host, porta, banco, usuário e senha dedicados, aplicando `encodeURIComponent` em credenciais sensíveis antes de montar `postgres://...`, protegendo contra caracteres especiais como `@` ou `:`.
-- **Topbar Limpa e Produtiva:** A barra superior agora ocupa apenas uma única linha limpa com o select de conexões existentes, botão de conectar/desconectar, atalho para o modal e status da sessão.
+- **Removal of raw-text DSN from the main bar:** The root cause of the previous problems (losing the DSN when switching drivers and silently creating an empty database in SQLite) was eliminated at the source. The DSN is now always generated transparently and in structured form.
+- **SQLite with Native File Picker:** Instead of typing a path or risking typos in filesystem paths, the user clicks "Browse file..." and selects the `.db` directly in the native OS dialog (GTK on Linux/WebKit, Cocoa on macOS, Win32 on Windows).
+- **Structured Postgres with Mandatory Escaping:** Dedicated host, port, database, user, and password fields, applying `encodeURIComponent` to sensitive credentials before building `postgres://...`, protecting against special characters such as `@` or `:`.
+- **Clean and Productive Topbar:** The top bar now takes up only a single clean row with the existing-connections select, connect/disconnect button, modal shortcut, and session status.
 
 ---
 
-## 3. Validação dos 3 Passos Obrigatórios
+## 3. Validation of the 3 Mandatory Steps
 
-### Passo 1: Validação Go (`go build`, `go vet`, `gofmt`)
+### Step 1: Go Validation (`go build`, `go vet`, `gofmt`)
 ```bash
 cd /home/matheusdutra/Projects/wisp && go build ./... && go vet ./... && gofmt -l -w .
 ```
-- **Resultado:** Código de saída 0. Nenhum erro ou alerta.
+- **Result:** Exit code 0. No errors or warnings.
 
-### Passo 2: Verificação de Tipagem Frontend (`npx tsc --noEmit`)
+### Step 2: Frontend Type Check (`npx tsc --noEmit`)
 ```bash
 cd frontend && npx tsc --noEmit
 ```
-- **Resultado:** Código de saída 0. Zero erros de TypeScript.
+- **Result:** Exit code 0. Zero TypeScript errors.
 
-### Passo 3: Build do Wails (`wails build -tags webkit2_41`)
+### Step 3: Wails Build (`wails build -tags webkit2_41`)
 ```bash
 wails build -tags webkit2_41
 ```
-- **Saída:**
+- **Output:**
 ```text
 Wails CLI v2.16.0
 # Building target: linux/amd64
@@ -73,11 +73,11 @@ Wails CLI v2.16.0
   • Packaging application: Done.
 Built '/home/matheusdutra/Projects/wisp/build/bin/wisp' in 9.185s.
 ```
-- **Resultado:** Código de saída 0. Binário gerado com sucesso.
+- **Result:** Exit code 0. Binary built successfully.
 
 ---
 
-## 4. Limitações e Fora de Escopo
+## 4. Limitations and Out of Scope
 
-- **Edição direta de conexão existente:** O usuário pode criar novas conexões salvas e excluir as existentes; a edição in-place de parâmetros de uma conexão existente não foi solicitada e poderá ser adicionada futuramente caso necessário.
-- **Testes de conexão (Ping/Test Connection):** O usuário pode salvar e conectar diretamente em um clique ("Salvar e Conectar"). Um botão isolado de "Testar Conexão" sem salvar fica para evolução futura.
+- **Direct editing of an existing connection:** Users can create new saved connections and delete existing ones; in-place editing of an existing connection's parameters was not requested and may be added later if needed.
+- **Connection testing (Ping/Test Connection):** Users can save and connect directly in one click ("Save & Connect"). A standalone "Test Connection" button without saving is left for future work.

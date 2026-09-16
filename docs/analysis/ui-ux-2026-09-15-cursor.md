@@ -1,185 +1,185 @@
-# Análise UX/UI — Wisp (Cursor Agent) — 2026-09-15
+# UX/UI Analysis — Wisp (Cursor Agent) — 2026-09-15
 
-> **Gerado por:** Cursor Agent (Composer).  
-> **Escopo:** análise e proposta apenas — **sem implementação**.  
-> **Fontes:** código atual em `frontend/src/` + memória `wisp-ui-ux-analysis-value-viewer-sidebar-task` + contexto `wisp` no memory-mcp.  
-> **App rodando:** não testei via `wails dev` nesta rodada; achados são de leitura estruturada do código/CSS.
-
----
-
-## Resumo executivo (prioridade)
-
-1. **P0 — Visor de valor dockado à direita do grid** (dentro de `ResultGrid`, não no `workspace`): trocar o modal `.grid-edit-overlay` por painel lateral redimensionável com `useDragResize`, seguindo a célula ativa só enquanto o painel estiver aberto.
-2. **P0 — Sidebar colapsável (esconder, não ícone-only)** em `ConsoleTab`: toggle + persistência `localStorage`; reabrir por faixa fina / botão na borda. Nota: `TableTab`/`SchemaTab` **não** têm Sidebar hoje.
-3. **P1 — Polimento de consistência visual**: tokens CSS vs hex hardcoded, `--accent-color` indefinido, densidade da toolbar de execução, filtro do grid em larguras estreitas, affordance ↗ vs SVGs.
-4. **P2 — Histórico/Scripts à direita do workspace** já competem por espaço horizontal: o inspetor de célula deve ficar **escopo-grid** para não empilhar três painéis à direita no mesmo eixo.
-
----
-
-## Ponto 1 — Visor de valor: modal → painel lateral
-
-### Diagnóstico (estado atual)
-
-| Peça | Onde | Problema |
-| --- | --- | --- |
-| Modal | `CellValueViewer.tsx` L29–51 | Overlay central + backdrop; bloqueia leitura do grid e exige reabrir para outra célula |
-| Montagem | `ResultGrid.tsx` L142, L689–695 | Estado `valueViewer` só preenchido pelo menu “Ver valor…” (L627–637) |
-| CSS | `App.css` L1486–1494 (`.grid-edit-overlay`), L1575–1640 (`.value-viewer-*`) | Mesmo padrão visual do popover de confirmação de UPDATE — modo “diálogo”, não “ferramenta” |
-
-O comentário no próprio componente já diz “estilo DBeaver”, mas a interação é de **modal**, não do painel Value/Panels do DBeaver.
-
-### Layout: esquerda vs direita
-
-**Recomendação: direita do canvas do grid (dentro de `.result-container` / ao lado de `.result-grid-canvas`).**
-
-Por quê:
-
-- A esquerda do `workspace` já é ocupada pela Sidebar de schemas (`ConsoleTab.tsx` L755–764).
-- `ResultGrid` é compartilhado por Console e TableTab (`ConsoleTab.tsx` ~L876; `TableTab.tsx` painel Dados). Solução no `ResultGrid` cobre os dois contextos sem prop drilling até `App.tsx`.
-- Padrão DBeaver/DataGrip: inspetor à **direita** da grade.
-- Histórico/Scripts já dockam à **direita do workspace** (`.history-panel` ~280px, `App.css` L1101+; montados em `ConsoleTab.tsx` L895–900). Se o visor fosse irmão do `main-panel` no workspace, ao abrir Histórico + Visor o usuário perderia metade da tela. Escopo **dentro do grid** evita esse empilhamento.
-
-**Não recomendar esquerda do grid:** competiria com a Sidebar no Console e, na TableTab (sem Sidebar), criaria um painel “órfão” sem o mesmo contexto visual.
-
-### Redimensionamento
-
-Reusar `useDragResize` (`frontend/src/lib/useDragResize.ts`) com `axis: 'x'`, algo como `initial: 320`, `min: 220`, `max: 640`, `storageKey: 'wisp:valueViewerWidth'`, handle `.resize-handle-v` entre canvas e painel — mesmo padrão sidebar/editor.
-
-**Limitação atual do hook:** retorna só `{size, onMouseDown}` — **não expõe `setSize`**. Para colapsar o painel a 0 sem perder a largura “lembrada”, a implementação futura deve:
-
-- guardar `viewerOpen: boolean` (e opcionalmente `wisp:valueViewerOpen` no `localStorage`), e
-- aplicar `width` só quando aberto; ao reabrir, reutilizar `size` do hook.
-
-Não inventar segundo mecanismo de drag.
-
-### Seguir seleção vs abrir só por ação explícita
-
-**Recomendação híbrida (padrão DBeaver):**
-
-1. Painel **fechado por padrão** (ou última preferência persistida).
-2. Abrir via: menu “Ver valor…”, **e** toggle na toolbar do grid (ícone/`{}`/“Valor”) — mini-barra/rail de ~24–28px quando fechado é opcional mas alinhada ao feedback do usuário (“minibarra lateral”).
-3. **Enquanto aberto**, atualizar conteúdo a partir da célula ativa:
-   - fonte natural: `gridSelection?.current?.cell` + `onGridSelectionChange` já ligados em `ResultGrid.tsx` L125, L593–594;
-   - mapear display row → original com `toOriginalRow` (já existe por causa do filtro, L170–172);
-   - `NULL` → mostrar literal visual consistente com o grid (âmbar / `NULL`), não string vazia ambígua.
-4. **Não** seguir seleção com painel fechado (evita trabalho e re-render desnecessário).
-5. Duplo-clique para editar (`handleCellClicked` L314–338) permanece independente — abrir o visor não deve conflitar com edição inline.
-
-### O que preservar
-
-- `valueFormat.ts`: Auto/Texto/JSON/XML, `detectFormat` / `formatValue`.
-- Toggle quebra de linha, Copiar (`copyToClipboard`).
-- Nome da coluna no header.
-- Remover “Fechar” como único caminho: preferir toggle do painel + Esc quando o foco estiver no painel (Esc no grid já tem outros significados — avaliar na implementação para não roubar cancelamento de edição).
-
-### Onde viver o estado (convenção do projeto)
-
-- Estado `viewerOpen` + payload derivado da seleção: **dentro de `ResultGrid`** (já concentra menu, edição, filtro).
-- Refatorar `CellValueViewer` para modo `docked` (sem overlay), props: `columnName`, `rawValue`, `onClose`/`onToggle`, opcionalmente `compact`.
-- Evitar subir estado para `ConsoleTab`/`TableTab` (prop drilling > 2 níveis).
-
-### Esforço estimado
-
-| Item | Esforço |
-| --- | --- |
-| Layout dock + CSS (sem overlay) | médio |
-| Sync com `gridSelection` | baixo–médio |
-| Toggle + persistência open/width | baixo |
-| Rail colapsado (ícone) | baixo (opcional P1) |
-
----
-
-## Ponto 2 — Sidebar minimizável
-
-### Diagnóstico
-
-- Sidebar: `Sidebar.tsx` (header L165+, search L175+, tree L187+).
-- Largura: **só** `ConsoleTab.tsx` L135 + L756–764 via `useDragResize` (`wisp:sidebarWidth`, 180–480).
-- **Correção ao enunciado da task:** `TableTab.tsx` e `SchemaTab.tsx` **não** usam `Sidebar` nem `useDragResize`. Colapso aplica-se ao Console (e a qualquer futuro host da Sidebar).
-
-Hoje o mínimo útil é 180px — ainda consome espaço em monitores estreitos / grids largos; não há “recolher de um clique”.
-
-### Colapsado = escondido (não ícone-only)
-
-**Recomendação: colapsar = ocultar a árvore (width ~0 / `display` off), com controle para reabrir.**
-
-Por quê ícone-only falha aqui:
-
-- Conteúdo é **texto** (schemas/tabelas + busca), não toolbar de ícones.
-- Busca (`sidebar-search-input`) e nomes longos não cabem em 48px.
-- O botão ↗ por tabela e expand/collapse de schema dependem de labels.
-
-### Interação proposta
-
-1. Botão chevron/“«” no `sidebar-header` (ao lado do refresh) → colapsa.
-2. Com colapsado: faixa ~16–20px **ou** só o handle vertical + botão “Schemas” flutuante na borda esquerda do `workspace` (preferência: faixa com botão, mais descoberta).
-3. Persistir `wisp:sidebarCollapsed` (`'1'|'0'`) no `localStorage`, espelhando o padrão do hook / uppercase do editor.
-4. Ao colapsar, **não** destruir estado React da árvore (expanded/search/tables) — só esconder; evita refetch ao reabrir.
-5. Atalho opcional (P2): `Ctrl+B` estilo VS Code — só se não conflitar com atalhos Monaco já usados.
-
-### Onde o estado vive
-
-- `collapsed` em `ConsoleTab` (dono do `sidebarResize`), passando `collapsed`/`onToggleCollapse` para `Sidebar` **ou** controlando width no wrapper (`style={{width: collapsed ? 0 : sidebarResize.size, ...}}` + esconder handle).
-- `Sidebar` continua “burro” quanto a resize (já recebe `style`) — bom para SRP.
-
-### Esforço
-
-Baixo–médio (UI + persistência; sem backend).
-
----
-
-## Ponto 3 — Revisão geral de UI (polish, priorizado)
-
-Foco em inconsistências do que **já existe**, não features novas.
-
-| Pri | Achado | Evidência | Esforço |
-| --- | --- | --- | --- |
-| P1 | `--accent-color` usado no resize-handle mas **não** definido em `:root` (fallback `#3b82f6`) | `App.css` L932 vs L5–34 | baixo |
-| P1 | Hex hardcoded fora dos tokens (`#1e1e22`, `#131315`, `#2563eb`, `#4ade80`, `#93c5fd`, status `#10b981`) | value-viewer, grid-edit, badges, tree links | médio |
-| P1 | Toolbar de execução densa: 2–3 `<kbd>` visíveis por botão + batch size | `ConsoleTab.tsx` L781–830; `.kbd-shortcut` | baixo–médio |
-| P1 | `toolbar-tab-id` expõe `tabId` na UI — útil p/ debug, ruído p/ usuário final | `ConsoleTab.tsx` L752 | baixo (ocultar ou só title/dev) |
-| P2 | Filtro do grid largura fixa 220px + badges à esquerda — risco de wrap/aperto | `App.css` L1559–1567; toolbar L546–567 | baixo |
-| P2 | Affordance abrir aba: caractere “↗” vs ícones SVG no restante | `Sidebar.tsx` L271 | baixo |
-| P2 | Histórico/Scripts: largura fixa, **sem** `useDragResize` (assimétrico vs Sidebar) | `.history-panel` L1101; `ConsoleTab` L895–900 | médio |
-| P2 | Duas faixas de chrome empilhadas (`.topbar` + `.toolbar-secondary`) | `ConnectionBar` + Console | médio (cuidado: não redesign amplo) |
-| P3 | TableTab meta ainda em `<table class="columns-table">` — ok p/ metadados; alinhar tipografia/padding aos tokens do grid | `TableTab.tsx` L298+ | baixo |
-| P3 | Empty states misturam `style={{fontSize…}}` inline | `ResultGrid.tsx` L528 | baixo |
-
-**Fora de escopo consciente:** redesign completo, Tailwind/MUI, virtualização do meta, novos painéis de propriedade de tabela.
-
----
-
-## Ordem sugerida de implementação (quando aprovada)
-
-1. Dock do `CellValueViewer` + sync de seleção + toggle (fecha o feedback literal do usuário).
-2. Collapse da Sidebar no Console.
-3. Pacote P1 de tokens/toolbar/`tabId`.
-4. Opcionais P2 (resize History/Scripts, rail do visor).
-
----
-
-## Riscos / invariantes
-
-- Não quebrar edição inline / overlay de confirmação UPDATE (continuar modal — é fluxo destrutivo, overlay faz sentido).
-- Respeitar filtro: sempre `toOriginalRow` ao ler valor da seleção.
-- Sem framework CSS novo; só variáveis em `:root` + classes existentes.
-- Estado por aba/grid local — não globalizar no `App.tsx`.
-
----
-
-## Limitações desta análise
-
-- Memory-mcp: `get_memory` foi rejeitado uma vez no ambiente; `search_memory` funcionou (task + contexto `wisp`).
-- Sem validação visual em `wails dev` nesta rodada.
-- Proposta independente (não li resultados de Antigravity/OpenCode antes de gravar).
-
----
-
-## Nota comparativa (após gravar a própria análise)
-
-Consulta pós-fato às memórias dos outros agentes:
-
-- **Convergência forte** com OpenCode e Antigravity: direita do grid, estado no `ResultGrid`, sidebar colapsar=esconder (não ícone-only), `useDragResize`, polish de tokens.
-- **Diferencial Cursor**: enfatizar conflito com Histórico/Scripts à direita do *workspace* (por isso o dock deve ser escopo-grid); flag de que `useDragResize` não expõe `setSize` (boolean `open` separado).
-- **OpenCode**: ordem de implementação começa por sanear CSS vars (incl. `--font-mono`); bom checklist de polish (hit-area dos handles, focus-visible).
-- **Antigravity**: memória gravada como `wisp-ui-ux-analysis-result` (sem sufixo `-antigravity`) e arquivo `docs/analysis/ui-ux-2026-09-15.md` — nomes fora do contrato da task; conteúdo alinhado no geral.
+> **Generated by:** Cursor Agent (Composer).  
+> **Scope:** analysis and proposal only — **no implementation**.  
+> **Sources:** current code in `frontend/src/` + `wisp-ui-ux-analysis-value-viewer-sidebar-task` memory + `wisp` context in memory-mcp.  
+> **Running app:** not tested via `wails dev` in this round; findings come from structured code/CSS reading.
+> 
+> ---
+> 
+> ## Executive Summary (by Priority)
+> 
+> 1. **P0 — Value viewer docked to the right of the grid** (inside `ResultGrid`, not in the `workspace`): replace the `.grid-edit-overlay` modal with a resizable side panel using `useDragResize`, following the active cell only while the panel is open.
+> 2. **P0 — Collapsible Sidebar (hide, not icon-only)** in `ConsoleTab`: toggle + `localStorage` persistence; reopen via a thin strip / button on the edge. Note: `TableTab`/`SchemaTab` have **no** Sidebar today.
+> 3. **P1 — Visual consistency polish**: CSS tokens vs hardcoded hex, undefined `--accent-color`, execution toolbar density, grid filter at narrow widths, ↗ affordance vs SVGs.
+> 4. **P2 — History/Scripts to the right of the workspace** already compete for horizontal space: the cell inspector must be **grid-scoped** so three panels don't stack on the same axis to the right.
+> 
+> ---
+> 
+> ## Point 1 — Value Viewer: Modal → Side Panel
+> 
+> ### Diagnosis (Current State)
+> 
+> | Piece | Where | Problem |
+> | --- | --- | --- |
+> | Modal | `CellValueViewer.tsx` L29–51 | Center overlay + backdrop; blocks grid reading and requires reopening for another cell |
+> | Mount | `ResultGrid.tsx` L142, L689–695 | `valueViewer` state only populated by the "View value…" menu (L627–637) |
+> | CSS | `App.css` L1486–1494 (`.grid-edit-overlay`), L1575–1640 (`.value-viewer-*`) | Same visual pattern as the UPDATE confirmation popover — "dialog" mode, not "tool" mode |
+> 
+> The comment in the component itself already says "DBeaver-style", but the interaction is a **modal**, not the DBeaver Value/Panels panel.
+> 
+> ### Layout: Left vs Right
+> 
+> **Recommendation: right of the grid canvas (inside `.result-container` / next to `.result-grid-canvas`).**
+> 
+> Why:
+> 
+> - The left of the `workspace` is already taken by the schemas Sidebar (`ConsoleTab.tsx` L755–764).
+> - `ResultGrid` is shared by Console and TableTab (`ConsoleTab.tsx` ~L876; `TableTab.tsx` Data panel). A fix in `ResultGrid` covers both contexts with no prop drilling up to `App.tsx`.
+> - DBeaver/DataGrip pattern: inspector on the **right** of the grid.
+> - History/Scripts already dock to the **right of the workspace** (`.history-panel` ~280px, `App.css` L1101+; mounted in `ConsoleTab.tsx` L895–900). If the viewer were a sibling of `main-panel` in the workspace, opening History + Viewer would cost the user half the screen. A **grid-scoped** dock avoids that stacking.
+> 
+> **Don't recommend left of the grid:** it would compete with the Sidebar in Console and, in TableTab (no Sidebar), create an "orphan" panel without the same visual context.
+> 
+> ### Resizing
+> 
+> Reuse `useDragResize` (`frontend/src/lib/useDragResize.ts`) with `axis: 'x'`, something like `initial: 320`, `min: 220`, `max: 640`, `storageKey: 'wisp:valueViewerWidth'`, `.resize-handle-v` handle between canvas and panel — same sidebar/editor pattern.
+> 
+> **Current hook limitation:** it returns only `{size, onMouseDown}` — it does **not expose `setSize`**. To collapse the panel to 0 without losing the "remembered" width, the future implementation must:
+> 
+> - keep `viewerOpen: boolean` (and optionally `wisp:valueViewerOpen` in `localStorage`), and
+> - apply `width` only when open; on reopen, reuse the hook's `size`.
+> 
+> Don't invent a second drag mechanism.
+> 
+> ### Follow Selection vs Explicit-Open Only
+> 
+> **Hybrid recommendation (DBeaver pattern):**
+> 
+> 1. Panel **closed by default** (or last persisted preference).
+> 2. Open via: the "View value…" menu, **and** a toggle in the grid toolbar (icon/`{}`/"Value") — a ~24–28px mini-bar/rail when closed is optional but matches the user feedback ("side mini-bar").
+> 3. **While open**, update content from the active cell:
+>    - natural source: `gridSelection?.current?.cell` + `onGridSelectionChange` already wired in `ResultGrid.tsx` L125, L593–594;
+>    - map display row → original with `toOriginalRow` (already exists because of the filter, L170–172);
+>    - `NULL` → show the visual literal consistent with the grid (amber / `NULL`), not an ambiguous empty string.
+> 4. **Don't** follow selection with the panel closed (avoids wasted work and re-renders).
+> 5. Double-click to edit (`handleCellClicked` L314–338) stays independent — opening the viewer must not conflict with inline editing.
+> 
+> ### What to Preserve
+> 
+> - `valueFormat.ts`: Auto/Text/JSON/XML, `detectFormat` / `formatValue`.
+> - Line-wrap toggle, Copy (`copyToClipboard`).
+> - Column name in the header.
+> - Remove "Close" as the only path: prefer panel toggle + Esc when focus is in the panel (Esc in the grid already has other meanings — evaluate at implementation time to avoid stealing edit cancellation).
+> 
+> ### Where the State Lives (Project Convention)
+> 
+> - `viewerOpen` state + selection-derived payload: **inside `ResultGrid`** (already concentrates menu, editing, filter).
+> - Refactor `CellValueViewer` to `docked` mode (no overlay), props: `columnName`, `rawValue`, `onClose`/`onToggle`, optionally `compact`.
+> - Avoid lifting state to `ConsoleTab`/`TableTab` (prop drilling > 2 levels).
+> 
+> ### Estimated Effort
+> 
+> | Item | Effort |
+> | --- | --- |
+> | Dock layout + CSS (no overlay) | medium |
+> | Sync with `gridSelection` | low–medium |
+> | Toggle + open/width persistence | low |
+> | Collapsed rail (icon) | low (optional P1) |
+> 
+> ---
+> 
+> ## Point 2 — Minimizable Sidebar
+> 
+> ### Diagnosis
+> 
+> - Sidebar: `Sidebar.tsx` (header L165+, search L175+, tree L187+).
+> - Width: **only** `ConsoleTab.tsx` L135 + L756–764 via `useDragResize` (`wisp:sidebarWidth`, 180–480).
+> - **Correction to the task statement:** `TableTab.tsx` and `SchemaTab.tsx` do **not** use `Sidebar` or `useDragResize`. Collapse applies to Console (and any future Sidebar host).
+> 
+> Today the useful minimum is 180px — still space-hungry on narrow monitors / wide grids; there is no "one-click collapse".
+> 
+> ### Collapsed = Hidden (Not Icon-Only)
+> 
+> **Recommendation: collapse = hide the tree (width ~0 / `display` off), with a control to reopen.**
+> 
+> Why icon-only fails here:
+> 
+> - Content is **text** (schemas/tables + search), not an icon toolbar.
+> - Search (`sidebar-search-input`) and long names don't fit in 48px.
+> - The per-table ↗ button and schema expand/collapse depend on labels.
+> 
+> ### Proposed Interaction
+> 
+> 1. Chevron/"«" button in `sidebar-header` (next to refresh) → collapses.
+> 2. When collapsed: a ~16–20px strip **or** just the vertical handle + a floating "Schemas" button on the left edge of the `workspace` (preference: strip with button, more discoverable).
+> 3. Persist `wisp:sidebarCollapsed` (`'1'|'0'`) in `localStorage`, mirroring the hook / editor-uppercase pattern.
+> 4. On collapse, **don't** destroy the tree's React state (expanded/search/tables) — just hide it; avoids refetching on reopen.
+> 5. Optional shortcut (P2): VS Code-style `Ctrl+B` — only if it doesn't clash with Monaco shortcuts already in use.
+> 
+> ### Where the State Lives
+> 
+> - `collapsed` in `ConsoleTab` (owner of `sidebarResize`), passing `collapsed`/`onToggleCollapse` to `Sidebar` **or** controlling width in the wrapper (`style={{width: collapsed ? 0 : sidebarResize.size, ...}}` + hiding the handle).
+> - `Sidebar` stays "dumb" about resize (already receives `style`) — good for SRP.
+> 
+> ### Effort
+> 
+> Low–medium (UI + persistence; no backend).
+> 
+> ---
+> 
+> ## Point 3 — General UI Review (Polish, Prioritized)
+> 
+> Focus on inconsistencies in what **already exists**, not new features.
+> 
+> | Pri | Finding | Evidence | Effort |
+> | --- | --- | --- | --- |
+> | P1 | `--accent-color` used on the resize-handle but **not** defined in `:root` (`#3b82f6` fallback) | `App.css` L932 vs L5–34 | low |
+> | P1 | Hex hardcoded outside tokens (`#1e1e22`, `#131315`, `#2563eb`, `#4ade80`, `#93c5fd`, status `#10b981`) | value-viewer, grid-edit, badges, tree links | medium |
+> | P1 | Dense execution toolbar: 2–3 visible `<kbd>` per button + batch size | `ConsoleTab.tsx` L781–830; `.kbd-shortcut` | low–medium |
+> | P1 | `toolbar-tab-id` exposes `tabId` in the UI — useful for debug, noise for end users | `ConsoleTab.tsx` L752 | low (hide or title/dev only) |
+> | P2 | Fixed-220px grid filter + badges on the left — wrap/squeeze risk | `App.css` L1559–1567; toolbar L546–567 | low |
+> | P2 | Open-tab affordance: "↗" character vs SVG icons elsewhere | `Sidebar.tsx` L271 | low |
+> | P2 | History/Scripts: fixed width, **no** `useDragResize` (asymmetric vs Sidebar) | `.history-panel` L1101; `ConsoleTab` L895–900 | medium |
+> | P2 | Two stacked chrome strips (`.topbar` + `.toolbar-secondary`) | `ConnectionBar` + Console | medium (careful: no broad redesign) |
+> | P3 | TableTab meta still in `<table class="columns-table">` — fine for metadata; align typography/padding with grid tokens | `TableTab.tsx` L298+ | low |
+> | P3 | Empty states mix inline `style={{fontSize…}}` | `ResultGrid.tsx` L528 | low |
+> 
+> **Consciously out of scope:** full redesign, Tailwind/MUI, meta virtualization, new table-property panels.
+> 
+> ---
+> 
+> ## Suggested Implementation Order (When Approved)
+> 
+> 1. `CellValueViewer` dock + selection sync + toggle (closes the user's literal feedback).
+> 2. Sidebar collapse in Console.
+> 3. P1 package of tokens/toolbar/`tabId`.
+> 4. Optional P2 (History/Scripts resize, viewer rail).
+> 
+> ---
+> 
+> ## Risks / Invariants
+> 
+> - Don't break inline editing / UPDATE confirmation overlay (keep it modal — it's a destructive flow, overlay makes sense).
+> - Respect the filter: always `toOriginalRow` when reading the selection's value.
+> - No new CSS framework; only `:root` variables + existing classes.
+> - Per-tab/grid local state — don't globalize in `App.tsx`.
+> 
+> ---
+> 
+> ## Limitations of This Analysis
+> 
+> - Memory-mcp: `get_memory` was rejected once in the environment; `search_memory` worked (task + `wisp` context).
+> - No visual validation in `wails dev` this round.
+> - Independent proposal (didn't read the Antigravity/OpenCode results before writing).
+> 
+> ---
+> 
+> ## Comparative Note (After Writing My Own Analysis)
+> 
+> Post-hoc check of the other agents' memories:
+> 
+> - **Strong convergence** with OpenCode and Antigravity: right of the grid, state in `ResultGrid`, sidebar collapse=hide (not icon-only), `useDragResize`, token polish.
+> - **Cursor differentiator**: stressing the conflict with History/Scripts to the right of the *workspace* (hence the dock must be grid-scoped); flagging that `useDragResize` doesn't expose `setSize` (separate `open` boolean).
+> - **OpenCode**: implementation order starts by sanitizing CSS vars (incl. `--font-mono`); good polish checklist (handle hit-areas, focus-visible).
+> - **Antigravity**: memory saved as `wisp-ui-ux-analysis-result` (no `-antigravity` suffix) and file `docs/analysis/ui-ux-2026-09-15.md` — names outside the task contract; content broadly aligned.

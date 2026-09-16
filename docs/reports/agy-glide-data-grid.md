@@ -1,77 +1,77 @@
-# Relatório de Implementação do Glide Data Grid — Wisp
+# Glide Data Grid Implementation Report — Wisp
 
-**Data:** 2026-09-14  
-**Responsável:** Antigravity (agy)  
-**Contexto:** Substituição da tabela HTML simples do grid de resultados pelo Glide Data Grid virtualizado (`@glideapps/glide-data-grid`), mantendo a mesma interface de props e alta performance com milhares de linhas.
+**Date:** 2026-09-14  
+**Owner:** Antigravity (agy)  
+**Context:** Replacement of the plain HTML results table with the virtualized Glide Data Grid (`@glideapps/glide-data-grid`), keeping the same props interface and high performance with thousands of rows.
 
 ---
 
-## 1. Arquivos Alterados
+## 1. Changed Files
 
 1. **`frontend/package.json`**:
-   - Adicionadas as dependências `@glideapps/glide-data-grid` e dependências peer locais (`lodash`, `marked`, `react-responsive-carousel`, `@types/lodash`).
-   - 100% offline (sem requisições externas ou CDN).
+   - Added the `@glideapps/glide-data-grid` dependency and local peer dependencies (`lodash`, `marked`, `react-responsive-carousel`, `@types/lodash`).
+   - 100% offline (no external requests or CDN).
 2. **`frontend/.npmrc`**:
-   - Criado com `legacy-peer-deps=true` para compatibilidade entre React 19 e peer dependencies do ecossistema.
+   - Created with `legacy-peer-deps=true` for compatibility between React 19 and ecosystem peer dependencies.
 3. **`frontend/src/components/ResultGrid.tsx`**:
-   - Substituída a renderização `<table>` HTML pelo componente `<DataEditor>` do `@glideapps/glide-data-grid`.
-   - Mantida exatamente a mesma interface de props (`columns: string[], rows: any[][]`). Nenhuma alteração foi necessária em `App.tsx`.
-   - Mantido o Empty State amigável quando `columns.length === 0`.
-   - Mantida a barra de estatísticas (`rows.length` linhas × `columns.length` colunas).
+   - Replaced the HTML `<table>` rendering with the `<DataEditor>` component from `@glideapps/glide-data-grid`.
+   - Kept exactly the same props interface (`columns: string[], rows: any[][]`). No changes were needed in `App.tsx`.
+   - Kept the friendly Empty State when `columns.length === 0`.
+   - Kept the statistics bar (`rows.length` rows × `columns.length` columns).
 4. **`frontend/src/App.css`**:
-   - Adicionada a classe `.result-grid-canvas` (`flex: 1; min-height: 0; min-width: 0; position: relative; width: 100%; height: 100%; overflow: hidden; background: var(--bg-grid);`) para fornecer as dimensões e bounding box ideais para o canvas do Glide Data Grid.
+   - Added the `.result-grid-canvas` class (`flex: 1; min-height: 0; min-width: 0; position: relative; width: 100%; height: 100%; overflow: hidden; background: var(--bg-grid);`) to provide the ideal dimensions and bounding box for the Glide Data Grid canvas.
 
 ---
 
-## 2. Decisões de Implementação
+## 2. Implementation Decisions
 
-### Mapeamento de Tema Escuro
-O tema customizado (`darkTheme: Partial<Theme>`) foi mapeado diretamente a partir das CSS custom properties de `App.css`:
-- `bgCell`: `#131315` (fundo das células de dados)
+### Dark Theme Mapping
+The custom theme (`darkTheme: Partial<Theme>`) was mapped directly from the CSS custom properties in `App.css`:
+- `bgCell`: `#131315` (data cell background)
 - `bgCellMedium`: `#18181c`
-- `bgHeader`: `#1f1f23` (cabeçalho das colunas)
+- `bgHeader`: `#1f1f23` (column header)
 - `bgHeaderHasFocus`: `#27272a`
 - `bgHeaderHovered`: `#2a2a30`
-- `borderColor`: `#242428` (linhas de grade sutis)
+- `borderColor`: `#242428` (subtle grid lines)
 - `horizontalBorderColor`: `#1a1a1e`
 - `headerBottomBorderColor`: `#3f3f46`
-- `textDark`: `#f4f4f5` (cor principal do texto)
-- `textHeader`: `#a1a1aa` (títulos das colunas)
-- `accentColor`: `#2563eb` e `accentLight`: `rgba(37, 99, 235, 0.2)` (foco e seleções)
-- `fontFamily` & `baseFontStyle`: `ui-monospace, "Cascadia Code", "Fira Code", monospace` com tamanho `12px`
+- `textDark`: `#f4f4f5` (primary text color)
+- `textHeader`: `#a1a1aa` (column titles)
+- `accentColor`: `#2563eb` and `accentLight`: `rgba(37, 99, 235, 0.2)` (focus and selections)
+- `fontFamily` & `baseFontStyle`: `ui-monospace, "Cascadia Code", "Fira Code", monospace` at `12px`
 
-### Tratamento Visual de Valores `NULL`
-No callback `getCellContent`:
-Quando a célula possui `val === null` ou `val === undefined`:
-- Retorna célula com `data: 'NULL'`, `displayData: 'NULL'`
-- Aplica `themeOverride`:
-  - `textDark: '#d97706'` (tom âmbar alinhado com `--accent-amber`)
+### Visual Treatment of `NULL` Values
+In the `getCellContent` callback:
+When a cell holds `val === null` or `val === undefined`:
+- Returns a cell with `data: 'NULL'`, `displayData: 'NULL'`
+- Applies a `themeOverride`:
+  - `textDark: '#d97706'` (amber tone matching `--accent-amber`)
   - `baseFontStyle: 'italic 12px ui-monospace, monospace'`
-Dessa forma, valores `NULL` são destacados visualmente direto no canvas, idêntico à intenção original do design.
+This way, `NULL` values are highlighted visually right on the canvas, matching the original design intent.
 
-### Coluna de Índice Fixa
-Utilizado o suporte nativo do Glide Data Grid via prop:
+### Fixed Index Column
+Used Glide Data Grid's native support via the prop:
 `rowMarkers="number"`
-Isso cria a coluna de índice fixa à esquerda com numeração iniciando em 1 (1, 2, 3...), sem necessidade de criar colunas sintéticas na matriz de dados.
+This creates the fixed index column on the left numbered from 1 (1, 2, 3...), with no need to create synthetic columns in the data matrix.
 
-### Colunas Redimensionáveis
-Implementado state local `columnWidths: Record<string, number>` e callback `onColumnResize`:
-- Ao redimensionar uma coluna, a nova largura é salva no state local.
-- Largura inicial calculada dinamicamente com base no tamanho do nome da coluna (mínimo 120px, máximo 320px).
+### Resizable Columns
+Implemented local state `columnWidths: Record<string, number>` and an `onColumnResize` callback:
+- When a column is resized, the new width is saved to local state.
+- Initial width is computed dynamically from the column name length (minimum 120px, maximum 320px).
 
 ---
 
-## 3. Impacto no Tamanho do Bundle
+## 3. Bundle Size Impact
 
-Conforme a regra crítica do projeto contra bundles inflados (memória `monaco-editor-exports-map-vite`), medimos os assets de produção em `dist/assets`:
+Per the project's critical rule against bloated bundles (`monaco-editor-exports-map-vite` memory), we measured the production assets in `dist/assets`:
 
-### Antes da instalação do Glide Data Grid:
+### Before installing Glide Data Grid:
 - `editor.worker-...js`: 267 kB
 - `index-...css`: 92 kB
 - `index-...js`: 2.8 MB
 - **Total:** ~3.16 MB
 
-### Depois da instalação do Glide Data Grid:
+### After installing Glide Data Grid:
 - `editor.worker-DIDyqMcf.js`: 272.76 kB
 - `index-C-ColBSv.css`: 106.55 kB
 - `data-grid-overlay-editor-CPXHxapU.js`: 3.56 kB
@@ -79,29 +79,29 @@ Conforme a regra crítica do projeto contra bundles inflados (memória `monaco-e
 - `index-CjmyfphP.js`: 3,214.61 kB (3.21 MB)
 - **Total:** ~3.61 MB
 
-**Acréscimo total:** ~450 kB (perfeitamente dentro do limite esperado de <1MB, sem puxar chunks desnecessários).
+**Total increase:** ~450 kB (well within the expected limit of <1MB, without pulling unnecessary chunks).
 
 ---
 
-## 4. Validação dos 3 Passos Obrigatórios
+## 4. Validation of the 3 Mandatory Steps
 
-### Passo 1: Verificação de Tipos TypeScript
+### Step 1: TypeScript Type Check
 ```bash
 cd /home/matheusdutra/Projects/wisp/frontend && npx tsc --noEmit
 ```
-- **Resultado:** Código de saída 0. Zero erros de compilação/tipagem.
+- **Result:** Exit code 0. Zero compile/type errors.
 
-### Passo 2: Build do Frontend (Vite)
+### Step 2: Frontend Build (Vite)
 ```bash
 npm run build
 ```
-- **Resultado:** Código de saída 0. Build completado em 5.87s.
+- **Result:** Exit code 0. Build completed in 5.87s.
 
-### Passo 3: Build do Wails
+### Step 3: Wails Build
 ```bash
 cd /home/matheusdutra/Projects/wisp && wails build -tags webkit2_41
 ```
-- **Saída:**
+- **Output:**
 ```text
 Wails CLI v2.16.0
 # Building target: linux/amd64
@@ -112,11 +112,11 @@ Wails CLI v2.16.0
   • Packaging application: Done.
 Built '/home/matheusdutra/Projects/wisp/build/bin/wisp' in 10.775s.
 ```
-- **Resultado:** Código de saída 0. Executável nativo gerado com sucesso.
+- **Result:** Exit code 0. Native executable built successfully.
 
 ---
 
-## 5. Limitações e Próximos Passos
+## 5. Limitations and Next Steps
 
-- **Edição Inline de Células no Grid:** Atualmente o grid opera como visualizador de resultados de alta performance (`read-only`). Edição inline com verificação de PK via catálogo (ADR 0004) poderá ser conectada via `onCellEdited` quando essa feature for iniciada.
-- **Tipos Customizados de Células (JSON viewer / Arrays):** Valores complexos são atualmente serializados para string legível (`JSON.stringify`).
+- **Inline Cell Editing in the Grid:** The grid currently works as a high-performance results viewer (`read-only`). Inline editing with catalog-based PK verification (ADR 0004) can be wired via `onCellEdited` once that feature is started.
+- **Custom Cell Types (JSON viewer / Arrays):** Complex values are currently serialized to a readable string (`JSON.stringify`).
