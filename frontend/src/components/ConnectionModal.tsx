@@ -30,7 +30,12 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
     const [pgDatabase, setPgDatabase] = useState('postgres');
     const [pgUser, setPgUser] = useState('postgres');
     const [pgPassword, setPgPassword] = useState('');
-    const [pgSslMode, setPgSslMode] = useState('disable');
+    // Padrão 'prefer' (tenta TLS, cai pra sem-TLS se o servidor não
+    // suportar) em vez de 'disable' — achado de auditoria de segurança:
+    // 'disable' como padrão facilita esquecer de habilitar TLS numa conexão
+    // remota nova (localhost não é afetado, TLS não faz diferença ali).
+    // Nunca quebra conexão já salva — só muda o padrão de conexões NOVAS.
+    const [pgSslMode, setPgSslMode] = useState('prefer');
 
     const [savedList, setSavedList] = useState<store.SavedConnection[]>([]);
     const [error, setError] = useState('');
