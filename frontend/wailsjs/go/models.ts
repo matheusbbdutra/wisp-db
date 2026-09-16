@@ -159,6 +159,24 @@ export namespace main {
 	        this.DurationMs = source["DurationMs"];
 	    }
 	}
+	export class UpdateInfo {
+	    CurrentVersion: string;
+	    LatestVersion: string;
+	    HTMLURL: string;
+	    HasUpdate: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.CurrentVersion = source["CurrentVersion"];
+	        this.LatestVersion = source["LatestVersion"];
+	        this.HTMLURL = source["HTMLURL"];
+	        this.HasUpdate = source["HasUpdate"];
+	    }
+	}
 
 }
 

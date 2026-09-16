@@ -6,6 +6,7 @@ import ConsoleTab, {type ConsoleTabHandle} from './components/ConsoleTab';
 import TableTab from './components/TableTab';
 import SchemaTab from './components/SchemaTab';
 import RoutineTab from './components/RoutineTab';
+import UpdateChecker from './components/UpdateChecker';
 
 interface ConsoleTabState {
     kind: 'console';
@@ -222,6 +223,7 @@ function App() {
                 <button className="tab-add" title="Nova aba" onClick={handleAddTab}>
                     +
                 </button>
+                <UpdateChecker />
             </div>
 
             {tabs.map(tab => (

@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -107,6 +109,87 @@ func (a *App) beforeClose(ctx context.Context) bool {
 func (a *App) ConfirmQuit() {
 	a.canClose = true
 	runtime.Quit(a.ctx)
+}
+
+// wispReleasesAPI é a lista de releases do repositório (não .../releases/
+// latest!) — bug real evitado antes de implementar: o endpoint "latest" do
+// GitHub IGNORA releases marcadas como prerelease e devolve 404 quando não
+// existe nenhuma release estável ainda (confirmado batendo na API real
+// durante o desenvolvimento desta feature) — todas as releases do Wisp até
+// agora são prerelease (v0.1.0-beta.N). A lista comum já vem ordenada da
+// mais recente pra mais antiga, então o primeiro item é sempre o que
+// interessa.
+const wispReleasesAPI = "https://api.github.com/repos/matheusbbdutra/wisp-db/releases"
+
+// UpdateInfo é o resultado do CheckForUpdate — só aviso, nunca baixa nem
+// substitui o binário sozinho (Wails não tem updater nativo, diferente do
+// autoUpdater do Electron/updater do Tauri).
+type UpdateInfo struct {
+	CurrentVersion string
+	LatestVersion  string
+	HTMLURL        string
+	HasUpdate      bool
+}
+
+type githubRelease struct {
+	TagName string `json:"tag_name"`
+	HTMLURL string `json:"html_url"`
+}
+
+// CheckForUpdate consulta a API pública do GitHub (sem autenticação, sem
+// credencial nenhuma envolvida) e compara com AppVersion (version.go).
+// Comparação é só igualdade de string (não semver-aware) — suficiente pro
+// escopo v1 "só aviso": qualquer tag diferente da embutida no binário conta
+// como "tem atualização", already coberto pelo caso real (nunca fica pra
+// trás demais entre checagens manuais). Timeout curto pra não travar a UI
+// se a rede estiver ruim/indisponível (uso 100% opcional, nunca bloqueia
+// nenhum fluxo do app).
+func (a *App) CheckForUpdate() (*UpdateInfo, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, wispReleasesAPI, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("consultando releases do GitHub: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GitHub respondeu %d", resp.StatusCode)
+	}
+
+	var releases []githubRelease
+	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
+		return nil, fmt.Errorf("lendo resposta do GitHub: %w", err)
+	}
+	if len(releases) == 0 {
+		return &UpdateInfo{CurrentVersion: AppVersion, LatestVersion: AppVersion, HasUpdate: false}, nil
+	}
+
+	latest := releases[0]
+	return &UpdateInfo{
+		CurrentVersion: AppVersion,
+		LatestVersion:  latest.TagName,
+		HTMLURL:        latest.HTMLURL,
+		HasUpdate:      latest.TagName != AppVersion,
+	}, nil
+}
+
+// OpenReleaseURL abre a página da release no navegador padrão do sistema
+// (nunca dentro da própria janela do Wisp). Restrito a https://github.com/
+// — nunca abre uma URL arbitrária vinda de outro lugar, só a que o próprio
+// CheckForUpdate acabou de devolver.
+func (a *App) OpenReleaseURL(rawURL string) error {
+	if !strings.HasPrefix(rawURL, "https://github.com/") {
+		return fmt.Errorf("URL fora do domínio esperado")
+	}
+	runtime.BrowserOpenURL(a.ctx, rawURL)
+	return nil
 }
 
 // --- Bindings expostos ao frontend (Wails IPC) ---

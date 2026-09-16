@@ -6,6 +6,10 @@ export function CancelQuery(arg1) {
   return window['go']['main']['App']['CancelQuery'](arg1);
 }
 
+export function CheckForUpdate() {
+  return window['go']['main']['App']['CheckForUpdate']();
+}
+
 export function ConfirmQuit() {
   return window['go']['main']['App']['ConfirmQuit']();
 }
@@ -88,6 +92,10 @@ export function ListTables(arg1, arg2) {
 
 export function ListTriggers(arg1, arg2, arg3) {
   return window['go']['main']['App']['ListTriggers'](arg1, arg2, arg3);
+}
+
+export function OpenReleaseURL(arg1) {
+  return window['go']['main']['App']['OpenReleaseURL'](arg1);
 }
 
 export function PickSQLiteFile() {

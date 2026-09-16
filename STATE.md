@@ -579,6 +579,48 @@ mesmo com o `LEFT JOIN` no meio.
 `go build`/`go vet`/`tsc --noEmit`/`vitest run` (27 testes)/
 `npm run build` limpos. Nada commitado ainda desta feature.
 
+## ✅ Verificador de atualização (2026-09-15) — Phase 3 completo
+Item 5 do Phase 3, último item da leva original combinada com o usuário
+pós-beta.1. **Fecha o Phase 3 inteiro.**
+
+**Bug real evitado antes de escrever qualquer código**: bati na API real do
+GitHub durante o design e descobri que `/repos/.../releases/latest`
+**exclui prereleases e devolve 404** quando não há nenhuma release
+estável — TODAS as releases do Wisp até agora são prerelease
+(`v0.1.0-beta.1/2/3`), então esse endpoint sempre daria 404. Usei
+`/repos/.../releases` (a lista, mais recente primeiro) e peguei o
+primeiro item.
+
+**Implementação**: `version.go` novo (`AppVersion` const, atualizado à
+mão a cada release — sem infra de ldflags/build-time ainda, mesmo padrão
+manual do `VERSION` em `packaging/deb/build.sh`). `CheckForUpdate`
+(`app.go`) consulta a API pública (sem credencial nenhuma), timeout de 8s,
+compara por igualdade de string (não semver-aware, suficiente pro escopo
+"só aviso"). `OpenReleaseURL` abre a release no navegador padrão do
+sistema (`runtime.BrowserOpenURL`), restrito a `https://github.com/` —
+nunca uma URL arbitrária. Frontend: botão "Verificar atualização" na
+barra de abas (`UpdateChecker.tsx`) — **manual só**, nunca checa sozinho
+no startup (decisão consciente: app não deve depender de rede pra abrir).
+
+**Verificado contra a API real do GitHub** via Claude in Chrome: com a
+versão real embutida (`v0.1.0-beta.3`), reportou corretamente "você já
+está na versão mais recente"; troquei temporariamente pra uma versão
+falsa mais antiga (`v0.0.9-test`) pra confirmar visualmente o banner
+"Nova versão disponível: v0.1.0-beta.3 · Ver release" e revertidi depois.
+
+`go build`/`go vet`/`go test ./...`/`tsc --noEmit`/`vitest run` (27
+testes)/`npm run build` limpos. Nada commitado ainda desta feature.
+
+**Phase 3 está completo**: itens 1-5 do `docs/ROADMAP.md` implementados e
+verificados nesta sessão (índices/FKs/views, visor de valor + filtro +
+busca + sidebar colapsável, EXPLAIN, INSERT/DELETE, verificador de
+atualização) — mais o extra de autocomplete de alias que não estava na
+lista original mas foi pedido pelo usuário no meio do caminho.
+
+**Restam apenas os itens de polish visual** documentados nas 3 análises
+de UX (`docs/analysis/ui-ux-2026-09-15-*.md`) — sem prazo definido, o
+usuário decide quando (ou se) retomar.
+
 ## Última atualização
 2026-09-15 (fim de sessão) — Autocomplete completo (v1+v2), uppercase automático, pretty-print SQL, copiar especial no grid e **edição inline de células** (item 7, concluído nesta sessão com 4 bugs reais de causa raiz corrigidos — ver seção "Edição inline de células" acima), todos implementados via delegação ao OpenCode + revisão/depuração minha antes de aceitar.
 

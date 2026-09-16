@@ -6,6 +6,8 @@ import {db} from '../models';
 
 export function CancelQuery(arg1:string):Promise<void>;
 
+export function CheckForUpdate():Promise<main.UpdateInfo>;
+
 export function ConfirmQuit():Promise<void>;
 
 export function Connect(arg1:string,arg2:string,arg3:string):Promise<void>;
@@ -47,6 +49,8 @@ export function ListScripts():Promise<Array<store.SavedScript>>;
 export function ListTables(arg1:string,arg2:string):Promise<Array<db.Table>>;
 
 export function ListTriggers(arg1:string,arg2:string,arg3:string):Promise<Array<db.Trigger>>;
+
+export function OpenReleaseURL(arg1:string):Promise<void>;
 
 export function PickSQLiteFile():Promise<string>;
 
