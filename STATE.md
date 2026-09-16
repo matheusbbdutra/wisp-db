@@ -541,6 +541,44 @@ limpos. Nada commitado ainda desta feature.
 só aviso). Fora da fila ativa: polish visual restante das 3 análises de
 UX (tabId exposto, hit-area dos handles, `:focus-visible`, etc.).
 
+## ✅ Autocomplete resolve alias de tabela (2026-09-15)
+Gap real apontado pelo usuário: em query com JOIN/alias
+(`FROM customers c JOIN order_items o ON ...`), digitar `c.` caía na lista
+genérica em vez de sugerir as colunas de `customers` — o narrowing por
+ponto (`resolveDotContext`, `SqlEditor.tsx`) só reconhecia nome de
+schema/tabela literal, nunca um alias.
+
+**Fix**: novo `frontend/src/lib/extractTableAliases.ts` — extrai
+`FROM/JOIN tabela [AS] alias` da query INTEIRA (não só da linha atual, já
+que o FROM pode estar em outra linha) via inspeção de string, mesmo
+espírito sem-parser-SQL de `detectSingleTable.ts`. `resolveDotContext`
+agora consulta esse mapa quando o identificador antes do ponto não bate
+com schema/tabela literal.
+
+**Bug real achado pelo próprio teste unitário que escrevi**: a fronteira
+de cláusula não considerava os modificadores de JOIN (`LEFT`/`INNER`/
+`OUTER`/`FULL`/`CROSS`/`NATURAL`/`LATERAL`) — em `"FROM customers c LEFT
+JOIN..."`, o chunk extraído virava `"customers c LEFT"` (3 tokens, não
+batia no padrão tabela+alias) só porque `LEFT` antecede o próximo `JOIN`
+mas não faz parte da cláusula `FROM` atual. Corrigido incluindo esses
+modificadores na fronteira do lookahead. 9 testes novos em
+`extractTableAliases.test.ts` (incluindo esse caso), todos passando.
+
+**Limitação aceita**: só reconhece um alias por `FROM`/`JOIN` (não separa
+lista por vírgula do JOIN implícito antigo, `FROM a, b` — estilo raro,
+usar JOIN explícito); subquery como fonte (`FROM (SELECT...) alias`) não
+é reconhecida, a entrada é só omitida do mapa sem erro.
+
+**Verificado contra Postgres real** via Claude in Chrome: query com
+`customers c LEFT JOIN order_items o ON ...`, `c.` sugeriu
+`email/id/name/profile/updated_at` (colunas reais de `public.customers`),
+`o.` sugeriu `customer_id/item_seq/order_id/product/quantity` (colunas
+reais de `public.order_items`) — os dois aliases resolvidos corretamente
+mesmo com o `LEFT JOIN` no meio.
+
+`go build`/`go vet`/`tsc --noEmit`/`vitest run` (27 testes)/
+`npm run build` limpos. Nada commitado ainda desta feature.
+
 ## Última atualização
 2026-09-15 (fim de sessão) — Autocomplete completo (v1+v2), uppercase automático, pretty-print SQL, copiar especial no grid e **edição inline de células** (item 7, concluído nesta sessão com 4 bugs reais de causa raiz corrigidos — ver seção "Edição inline de células" acima), todos implementados via delegação ao OpenCode + revisão/depuração minha antes de aceitar.
 

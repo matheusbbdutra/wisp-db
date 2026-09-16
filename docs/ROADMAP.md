@@ -14,6 +14,7 @@ See `docs/ARCHITECTURE.md` and the ADRs in `docs/adr/` for the rationale behind 
 - ✅ Two-tier schema cache, TTL + manual/DDL invalidation.
 - ✅ Persisted query history, UI panel.
 - ✅ Monaco autocomplete via the schema cache — completed 2026-09-15 (schemas, tables, columns, keywords, per-dialect functions, dot-narrowing).
+- ✅ Autocomplete v3 (2026-09-15): table-alias resolution — `frontend/src/lib/extractTableAliases.ts` extracts `FROM/JOIN table [AS] alias` from the whole query (string inspection, same no-parser approach as `detectSingleTable.ts`), so typing `c.` after `FROM customers c JOIN ...` now suggests `customers`' columns instead of falling back to the generic list. Verified against Postgres real via Claude in Chrome, including through a `LEFT JOIN`.
 - ✅ SQL formatting (pretty-print) — completed 2026-09-15: a "Format" button in `ConsoleTab.tsx`'s toolbar via the `sql-formatter` lib (see ADR 0005).
 
 ## Phase 2.5 — Multi-console and organization ✅ complete (2026-09-15)

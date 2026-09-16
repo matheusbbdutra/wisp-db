@@ -17,6 +17,7 @@ import 'monaco-editor/editor/contrib/suggest/browser/suggestController.js';
 import type {db} from '../../wailsjs/go/models';
 import editorWorker from 'monaco-editor/editor/editor.worker?worker';
 import {isCtrlHeld} from '../lib/modifierKeyTracker';
+import {extractTableAliases} from '../lib/extractTableAliases';
 
 // Registro manual do SQL em vez de importar o "basic-languages" agregado
 // (que nesta versão do monaco-editor puxa TODAS as linguagens suportadas
@@ -249,6 +250,21 @@ function resolveDotContext(
     if (schemaTables.length > 0) return {kind: 'schema-tables', tables: schemaTables};
     const namedTables = catalog.filter(t => t.Name?.toLowerCase() === ident);
     if (namedTables.length > 0) return {kind: 'table-columns', tables: namedTables};
+
+    // Alias de tabela (FROM/JOIN tabela [AS] alias) — ex. "SELECT c.nome
+    // FROM customers c JOIN orders o ON ..." → "c." deve sugerir as colunas
+    // de customers, não cair na lista genérica. Extrai da query INTEIRA
+    // (não só da linha atual), já que FROM/JOIN pode estar em outra linha.
+    const aliases = extractTableAliases(model.getValue());
+    const aliased = aliases.get(ident);
+    if (aliased) {
+        const aliasTables = catalog.filter(t => {
+            const nameMatches = t.Name?.toLowerCase() === aliased.table.toLowerCase();
+            if (!nameMatches) return false;
+            return aliased.schema === null || t.Schema?.toLowerCase() === aliased.schema.toLowerCase();
+        });
+        if (aliasTables.length > 0) return {kind: 'table-columns', tables: aliasTables};
+    }
     return null;
 }
 
