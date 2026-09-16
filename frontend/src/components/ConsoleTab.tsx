@@ -1,4 +1,5 @@
 import {useState, useRef, useEffect, useImperativeHandle, forwardRef} from 'react';
+import {useTranslation} from 'react-i18next';
 // Lib pronta de formatação SQL (ver ADR 0005) — formata o editor inteiro,
 // sem parser próprio no Wisp.
 import {format} from 'sql-formatter';
@@ -7,6 +8,7 @@ import {SaveScript, UpdateScript, CancelQuery, ListScripts} from '../../wailsjs/
 import {RunQuery, FetchRows, Disconnect, ListSchemas, IntrospectSchemaTables, IntrospectTable} from '../lib/tabApi';
 import type {db} from '../../wailsjs/go/models';
 import {detectSingleTable, type SingleTableRef} from '../lib/detectSingleTable';
+import i18n from '../i18n';
 import SqlEditor, {AUTO_UPPERCASE_STORAGE_KEY, readAutoUppercasePreference} from './SqlEditor';
 import ResultGrid, {type EditContext} from './ResultGrid';
 import Sidebar from './Sidebar';
@@ -92,11 +94,11 @@ function readLastScript(): {id: string; name: string} | null {
 // Sem tabela única detectável (JOIN, DDL, etc.), cai pro texto truncado.
 function makeResultLabel(text: string, seq: number): string {
     const trimmed = text.trim();
-    if (!trimmed) return `Resultado ${seq}`;
+    if (!trimmed) return i18n.t('consoleTab.resultLabel', {seq});
     const ref = detectSingleTable(trimmed);
     if (ref) return ref.schema ? `${ref.schema}.${ref.table}` : ref.table;
     const firstLine = trimmed.split('\n')[0]?.trim();
-    if (!firstLine) return `Resultado ${seq}`;
+    if (!firstLine) return i18n.t('consoleTab.resultLabel', {seq});
     return firstLine.length > 40 ? `${firstLine.slice(0, 40)}…` : firstLine;
 }
 
@@ -127,6 +129,7 @@ export interface ConsoleTabHandle {
 // para suportar múltiplas abas: cada instância tem seu próprio tabId, que já
 // é a chave de isolamento no backend (Session Manager, ver internal/session).
 const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabId, hidden, onConnectedChange, onOpenTable, onOpenSchema, restoreLastScriptOnMount}, ref) {
+    const {t} = useTranslation();
     // Editor começa vazio — "SELECT * FROM customers" era resquício de teste
     // (nenhuma base do usuário tem essa tabela por padrão).
     const [query, setQuery] = useState('');
@@ -162,7 +165,7 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
         });
     }
     const [connected, setConnected] = useState(false);
-    const [status, setStatus] = useState('desconectado');
+    const [status, setStatus] = useState(() => t('consoleTab.disconnected'));
     // Abas de resultado (ver ResultTabState acima) — uma por execução.
     const [resultTabs, setResultTabs] = useState<ResultTabState[]>([]);
     const [activeResultId, setActiveResultId] = useState<string | null>(null);
@@ -210,12 +213,12 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
     // "Executar" fica sempre clicável quando conectado (enfileira mais uma
     // execução, ver handleRun) — "Cancelar" só interrompe a que está
     // rodando de verdade agora (a fila garante que só uma roda por vez).
-    const anyRunning = resultTabs.some(t => t.status === 'running' || t.status === 'queued');
-    const activeResult = resultTabs.find(t => t.id === activeResultId) ?? null;
+    const anyRunning = resultTabs.some(tab => tab.status === 'running' || tab.status === 'queued');
+    const activeResult = resultTabs.find(tab => tab.id === activeResultId) ?? null;
     const activeFetching = activeResult?.fetching ?? false;
 
-    function updateResultTab(id: string, updater: (t: ResultTabState) => ResultTabState) {
-        setResultTabs(prev => prev.map(t => (t.id === id ? updater(t) : t)));
+    function updateResultTab(id: string, updater: (tab: ResultTabState) => ResultTabState) {
+        setResultTabs(prev => prev.map(tab => (tab.id === id ? updater(tab) : tab)));
     }
 
     async function handleConnected(connectionId: string, connName?: string, activeDriver?: string) {
@@ -223,7 +226,7 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
         onConnectedChange(true);
         setConnectionId(connectionId);
         setDriver(activeDriver);
-        setStatus(connName ? `conectado: ${connName}` : 'conectado');
+        setStatus(connName ? t('consoleTab.connectedNamed', {name: connName}) : t('consoleTab.connected'));
         // Catálogo completo pro autocomplete (ListSchemas + uma query batched
         // por schema via IntrospectSchemaTables — nunca mais um IntrospectTable
         // por tabela). Barato: o schema cache do backend (TTL 15min) evita
@@ -249,7 +252,7 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
           // query digitada logo após conectar fica "na fila" sem explicação
           // — o usuário não tem como saber que está atrás do carregamento
           // do catálogo, não de outra query dele mesmo.
-          setStatus(prev => `${prev} — carregando catálogo para autocomplete…`);
+          setStatus(prev => t('consoleTab.loadingCatalog', {status: prev}));
           await withQueue(`${tabId}:query`, async () => {
             const schemas = await ListSchemas(tabId);
             const detailed: db.Table[] = [];
@@ -266,26 +269,26 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                 setCatalog([...detailed]);
             }
           });
-          setStatus(connName ? `conectado: ${connName}` : 'conectado');
+          setStatus(connName ? t('consoleTab.connectedNamed', {name: connName}) : t('consoleTab.connected'));
         } catch (err) {
             // Não falha a conexão por causa do catálogo de autocomplete, mas
             // não engole o erro — autocomplete sem dados fica silencioso pro
             // usuário, então pelo menos loga pra investigação futura.
             console.error('erro ao carregar catálogo para autocomplete:', err);
             setCatalog([]);
-            setStatus(connName ? `conectado: ${connName}` : 'conectado');
+            setStatus(connName ? t('consoleTab.connectedNamed', {name: connName}) : t('consoleTab.connected'));
         }
     }
 
     function handleError(err: string) {
-        setStatus(`erro: ${err}`);
+        setStatus(t('consoleTab.error', {error: err}));
     }
 
     async function handleDisconnect() {
         await Disconnect(tabId);
         setConnected(false);
         onConnectedChange(false);
-        setStatus('desconectado');
+        setStatus(t('consoleTab.disconnected'));
         setResultTabs([]);
         setActiveResultId(null);
         setCatalog([]);
@@ -305,7 +308,7 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
         if (driver === 'sqlite') {
             return 'main';
         }
-        const schemas = [...new Set(catalog.filter(t => t.Name === table).map(t => t.Schema))];
+        const schemas = [...new Set(catalog.filter(entry => entry.Name === table).map(entry => entry.Schema))];
         if (schemas.length === 1) {
             return schemas[0];
         }
@@ -328,7 +331,7 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
     async function tryComputeEditContext(id: string, ref: SingleTableRef, resultColumns: string[], exhausted: boolean) {
         const schema = resolveEditSchema(ref.schema, ref.table);
         if (!schema) {
-            updateResultTab(id, t => ({...t, editContext: null, readOnlyNotice: `Tabela "${ref.table}" existe em mais de um schema — grade somente leitura.`}));
+            updateResultTab(id, tab => ({...tab, editContext: null, readOnlyNotice: t('consoleTab.readOnlyMultiSchema', {table: ref.table})}));
             return;
         }
         let full: db.Table | null = null;
@@ -336,18 +339,18 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
             full = await IntrospectTable(tabId, schema, ref.table);
         } catch {
             if (exhausted) {
-                updateResultTab(id, t => ({...t, editContext: null, readOnlyNotice: `Não foi possível verificar a chave primária de ${schema}.${ref.table} — grade somente leitura.`}));
+                updateResultTab(id, tab => ({...tab, editContext: null, readOnlyNotice: t('consoleTab.readOnlyPkCheck', {schema, table: ref.table})}));
             }
             return;
         }
         const cols = full?.Columns ?? [];
         if (cols.length === 0) {
-            updateResultTab(id, t => ({...t, editContext: null, readOnlyNotice: `Tabela ${schema}.${ref.table} não encontrada no catálogo — grade somente leitura.`}));
+            updateResultTab(id, tab => ({...tab, editContext: null, readOnlyNotice: t('consoleTab.readOnlyNotFound', {schema, table: ref.table})}));
             return;
         }
         const pkColumns = cols.filter(c => c.IsPrimaryKey).map(c => c.Name);
         if (pkColumns.length === 0) {
-            updateResultTab(id, t => ({...t, editContext: null, readOnlyNotice: `Tabela ${schema}.${ref.table} sem chave primária — grade somente leitura.`}));
+            updateResultTab(id, tab => ({...tab, editContext: null, readOnlyNotice: t('consoleTab.readOnlyNoPk', {schema, table: ref.table})}));
             return;
         }
         const byName = new Map(cols.map(c => [c.Name, c]));
@@ -360,23 +363,23 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
             return !!c && !c.IsGenerated && !c.IsPrimaryKey;
         });
         if (editableColumns.length === 0) {
-            updateResultTab(id, t => ({...t, editContext: null, readOnlyNotice: `Nenhuma coluna editável em ${schema}.${ref.table} (só expressões ou colunas geradas) — grade somente leitura.`}));
+            updateResultTab(id, tab => ({...tab, editContext: null, readOnlyNotice: t('consoleTab.readOnlyNoEditable', {schema, table: ref.table})}));
             return;
         }
-        updateResultTab(id, t => ({...t, editContext: {schema, table: ref.table, pkColumns, editableColumns, allColumns: cols}, readOnlyNotice: null}));
+        updateResultTab(id, tab => ({...tab, editContext: {schema, table: ref.table, pkColumns, editableColumns, allColumns: cols}, readOnlyNotice: null}));
     }
 
     async function fetchBatchFor(id: string, currentRows: any[][], replace: boolean) {
-        updateResultTab(id, t => ({...t, fetching: true}));
+        updateResultTab(id, tab => ({...tab, fetching: true}));
         try {
             const batch = await FetchRows(tabId, batchSize);
             const combined = replace ? (batch.Rows ?? []) : [...currentRows, ...(batch.Rows ?? [])];
-            updateResultTab(id, t => ({...t, rows: combined, hasMore: batch.HasMore, fetching: false}));
-            setStatus(`ok — ${combined.length} linha(s) carregada(s)${batch.HasMore ? ', mais disponíveis' : ''}`);
+            updateResultTab(id, tab => ({...tab, rows: combined, hasMore: batch.HasMore, fetching: false}));
+            setStatus(t('consoleTab.okRowsLoaded', {count: combined.length, more: batch.HasMore ? t('consoleTab.moreAvailable') : ''}));
             return {rows: combined, hasMore: batch.HasMore};
         } catch (err) {
-            updateResultTab(id, t => ({...t, fetching: false}));
-            setStatus(`erro ao buscar linhas: ${err}`);
+            updateResultTab(id, tab => ({...tab, fetching: false}));
+            setStatus(t('consoleTab.errorFetchRows', {error: err}));
             return {rows: currentRows, hasMore: false};
         }
     }
@@ -395,7 +398,7 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
         // rodava query sem sessão ativa, estourando "nenhuma sessão ativa
         // para tabId".
         if (!connected) {
-            setStatus('erro: nenhuma conexão ativa');
+            setStatus(t('consoleTab.errorNoConnection'));
             return;
         }
         const text = textOverride ?? query;
@@ -424,18 +427,18 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
             // comentário em ResultTabState) — qualquer aba anterior perde
             // "carregar mais" no instante em que uma execução nova começa,
             // porque o cursor dela já foi fechado de verdade no backend.
-            const frozen = prev.map(t => (t.hasMore && t.id !== id ? {...t, hasMore: false} : t));
+            const frozen = prev.map(tab => (tab.hasMore && tab.id !== id ? {...tab, hasMore: false} : tab));
             if (reusable) {
-                return frozen.map(t => (t.id === id ? freshTab : t));
+                return frozen.map(tab => (tab.id === id ? freshTab : tab));
             }
             const next = [...frozen, freshTab];
             if (next.length <= MAX_RESULT_TABS) return next;
             // Descarta as mais antigas já terminadas (done/error) antes de
             // qualquer uma rodando/na fila — nunca descarta trabalho em voo.
-            const removable = next.filter(t => t.status === 'done' || t.status === 'error');
+            const removable = next.filter(tab => tab.status === 'done' || tab.status === 'error');
             const toDrop = next.length - MAX_RESULT_TABS;
-            const dropIds = new Set(removable.slice(0, toDrop).map(t => t.id));
-            return next.filter(t => !dropIds.has(t.id));
+            const dropIds = new Set(removable.slice(0, toDrop).map(tab => tab.id));
+            return next.filter(tab => !dropIds.has(tab.id));
         });
         setActiveResultId(id);
 
@@ -447,26 +450,26 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
         // implementa a fila: clicar Executar de novo com uma já rodando só
         // adiciona ao fim da fila, sem bloquear a UI nem colidir na conexão.
         await withQueue(`${tabId}:query`, async () => {
-            updateResultTab(id, t => ({...t, status: 'running'}));
+            updateResultTab(id, tab => ({...tab, status: 'running'}));
             try {
                 const meta = await RunQuery(tabId, text);
                 const resultColumns = meta.Columns ?? [];
-                updateResultTab(id, t => ({...t, columns: resultColumns, durationMs: meta.DurationMs}));
+                updateResultTab(id, tab => ({...tab, columns: resultColumns, durationMs: meta.DurationMs}));
                 const fetched = await fetchBatchFor(id, [], true);
                 // Detecção de tabela única após o fetch (sequencial, nunca
                 // Promise.all — mesma regra de conexão single-conn do
                 // handleConnected). Sem match, o grid segue read-only sem aviso.
                 const ref = detectSingleTable(text);
-                updateResultTab(id, t => ({...t, editSourceRef: ref}));
+                updateResultTab(id, tab => ({...tab, editSourceRef: ref}));
                 if (ref) {
                     await tryComputeEditContext(id, ref, resultColumns, !fetched.hasMore);
                 }
-                updateResultTab(id, t => ({...t, status: 'done'}));
+                updateResultTab(id, tab => ({...tab, status: 'done'}));
             } catch (err) {
-                updateResultTab(id, t => ({...t, status: 'error', errorMsg: String(err)}));
-                setStatus(`erro ao executar: ${err}`);
+                updateResultTab(id, tab => ({...tab, status: 'error', errorMsg: String(err)}));
+                setStatus(t('consoleTab.errorRun', {error: err}));
             } finally {
-                setHistoryToken(t => t + 1);
+                setHistoryToken(n => n + 1);
             }
         });
     }
@@ -496,20 +499,20 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
 
     function handleCellSaved(rowIndex: number, colIndex: number, newValue: any) {
         if (!activeResultId) return;
-        updateResultTab(activeResultId, t => ({
-            ...t,
-            rows: t.rows.map((r, i) => (i === rowIndex ? r.map((v, j) => (j === colIndex ? newValue : v)) : r)),
+        updateResultTab(activeResultId, tab => ({
+            ...tab,
+            rows: tab.rows.map((r, i) => (i === rowIndex ? r.map((v, j) => (j === colIndex ? newValue : v)) : r)),
         }));
     }
 
     function handleRowDeleted(rowIndex: number) {
         if (!activeResultId) return;
-        updateResultTab(activeResultId, t => ({...t, rows: t.rows.filter((_, i) => i !== rowIndex)}));
+        updateResultTab(activeResultId, tab => ({...tab, rows: tab.rows.filter((_, i) => i !== rowIndex)}));
     }
 
     function handleRowInserted(row: any[]) {
         if (!activeResultId) return;
-        updateResultTab(activeResultId, t => ({...t, rows: [...t.rows, row]}));
+        updateResultTab(activeResultId, tab => ({...tab, rows: [...tab.rows, row]}));
     }
 
     async function handleCancel() {
@@ -518,7 +521,7 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
 
     function handleCloseResultTab(id: string) {
         setResultTabs(prev => {
-            const next = prev.filter(t => t.id !== id);
+            const next = prev.filter(tab => tab.id !== id);
             if (activeResultId === id) {
                 setActiveResultId(next.length > 0 ? next[next.length - 1].id : null);
             }
@@ -559,7 +562,7 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
             return;
         }
         if (target.kind === 'schema') {
-            const match = catalog.find(t => t.Schema.toLowerCase() === target.schema.toLowerCase());
+            const match = catalog.find(entry => entry.Schema.toLowerCase() === target.schema.toLowerCase());
             if (!match) return;
             onOpenSchema(connectionId, match.Schema);
             return;
@@ -567,10 +570,10 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
         const {schema, table} = target;
         let match: db.Table | undefined;
         if (schema) {
-            match = catalog.find(t => t.Schema.toLowerCase() === schema.toLowerCase() && t.Name.toLowerCase() === table.toLowerCase());
+            match = catalog.find(entry => entry.Schema.toLowerCase() === schema.toLowerCase() && entry.Name.toLowerCase() === table.toLowerCase());
         } else {
-            const candidates = catalog.filter(t => t.Name.toLowerCase() === table.toLowerCase());
-            match = candidates.length === 1 ? candidates[0] : candidates.find(t => t.Schema === 'public');
+            const candidates = catalog.filter(entry => entry.Name.toLowerCase() === table.toLowerCase());
+            match = candidates.length === 1 ? candidates[0] : candidates.find(entry => entry.Schema === 'public');
         }
         if (!match) return;
         onOpenTable(connectionId, match.Schema, match.Name);
@@ -593,7 +596,7 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
             try {
                 await UpdateScript(activeScriptId, activeScriptName, query);
                 lastSavedQueryRef.current = query;
-                setScriptsToken(t => t + 1);
+                setScriptsToken(n => n + 1);
             } finally {
                 setSavingScript(false);
             }
@@ -616,7 +619,7 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
             lastSavedQueryRef.current = query;
             rememberLastScript(id, name);
             setShowSaveForm(false);
-            setScriptsToken(t => t + 1);
+            setScriptsToken(n => n + 1);
         } finally {
             setSavingScript(false);
         }
@@ -650,7 +653,7 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                 const name = closeSaveNameInput.trim();
                 if (!name) return;
                 await SaveScript(name, query);
-                setScriptsToken(t => t + 1);
+                setScriptsToken(n => n + 1);
             }
             lastSavedQueryRef.current = query;
             resolveCloseConfirm(true);
@@ -705,7 +708,7 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
         try {
             setQuery(format(query, {language: dialect}));
         } catch (err) {
-            setStatus(`erro ao formatar: ${err}`);
+            setStatus(t('consoleTab.errorFormat', {error: err}));
         }
     }
 
@@ -726,7 +729,7 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                         <input
                             className="input-control"
                             autoFocus
-                            placeholder="Nome do script"
+                            placeholder={t('consoleTab.scriptNamePlaceholder')}
                             value={saveNameInput}
                             onChange={e => setSaveNameInput(e.target.value)}
                             onKeyDown={e => {
@@ -735,10 +738,10 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                             }}
                         />
                         <button className="btn btn-success" onClick={handleConfirmSaveNew} disabled={savingScript || !saveNameInput.trim()}>
-                            Confirmar
+                            {t('consoleTab.confirm')}
                         </button>
                         <button className="btn btn-secondary" onClick={() => setShowSaveForm(false)}>
-                            Cancelar
+                            {t('consoleTab.cancel')}
                         </button>
                     </span>
                 ) : (
@@ -746,52 +749,51 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                         className="btn btn-secondary"
                         onClick={handleSaveClick}
                         disabled={savingScript || !query.trim()}
-                        title={activeScriptId ? `Sobrescrever script "${activeScriptName}"` : 'Salvar como novo script nomeado'}
+                        title={activeScriptId ? t('consoleTab.overwriteScriptTitle', {name: activeScriptName}) : t('consoleTab.saveAsNewTitle')}
                     >
-                        {activeScriptId ? `Salvar "${activeScriptName}"` : 'Salvar script'}
+                        {activeScriptId ? t('consoleTab.saveScriptNamed', {name: activeScriptName}) : t('consoleTab.saveScript')}
                     </button>
                 )}
                 {activeScriptId && (
-                    <button className="btn btn-secondary" onClick={handleNewScript} title="Desvincular do script atual (próximo Salvar cria um novo)">
-                        Novo
+                    <button className="btn btn-secondary" onClick={handleNewScript} title={t('consoleTab.newScriptTitle')}>
+                        {t('consoleTab.new')}
                     </button>
                 )}
                 <button
                     className={`btn btn-secondary ${showScripts ? 'active' : ''}`}
                     onClick={() => setShowScripts(v => !v)}
-                    title="Mostrar/ocultar scripts salvos"
+                    title={t('consoleTab.scriptsToggleTitle')}
                 >
-                    Scripts
+                    {t('consoleTab.scripts')}
                 </button>
                 <button
                     className={`btn btn-secondary ${showHistory ? 'active' : ''}`}
                     onClick={() => setShowHistory(v => !v)}
-                    title="Mostrar/ocultar histórico de queries"
+                    title={t('consoleTab.historyToggleTitle')}
                 >
-                    Histórico
+                    {t('consoleTab.history')}
                 </button>
                 <button
                     className="btn btn-secondary"
                     onClick={handleFormatQuery}
                     disabled={!query.trim()}
-                    title="Formatar o SQL do editor (pretty-print)"
+                    title={t('consoleTab.formatTitle')}
                 >
-                    Formatar
+                    {t('consoleTab.format')}
                 </button>
-                <label className="auto-uppercase-toggle" title="Converter keywords SQL para maiúsculas automaticamente ao digitar">
+                <label className="auto-uppercase-toggle" title={t('consoleTab.autoUppercaseTitle')}>
                     <input
                         type="checkbox"
                         checked={autoUppercase}
                         onChange={e => handleAutoUppercaseChange(e.target.checked)}
                     />
-                    Uppercase automático
+                    {t('consoleTab.autoUppercase')}
                 </label>
-                <span className="toolbar-tab-id" title="ID da sessão ativa">{tabId}</span>
             </div>
 
             <div className="workspace">
                 {sidebarCollapsed ? (
-                    <button className="sidebar-reopen-rail" onClick={toggleSidebarCollapsed} title="Expandir painel de schemas">
+                    <button className="sidebar-reopen-rail" onClick={toggleSidebarCollapsed} title={t('consoleTab.expandSidebarTitle')}>
                         ›
                     </button>
                 ) : (
@@ -805,7 +807,7 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                             onCollapse={toggleSidebarCollapsed}
                             style={{width: sidebarResize.size, flex: '0 0 auto'}}
                         />
-                        <div className="resize-handle resize-handle-v" onMouseDown={sidebarResize.onMouseDown} title="Arrastar para redimensionar" />
+                        <div className="resize-handle resize-handle-v" onMouseDown={sidebarResize.onMouseDown} title={t('consoleTab.resizeTitle')} />
                     </>
                 )}
 
@@ -823,53 +825,53 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                             onOpenIdentifier={handleOpenIdentifier}
                         />
                     </div>
-                    <div className="resize-handle resize-handle-h" onMouseDown={editorResize.onMouseDown} title="Arrastar para redimensionar" />
+                    <div className="resize-handle resize-handle-h" onMouseDown={editorResize.onMouseDown} title={t('consoleTab.resizeTitle')} />
                     <div className="editor-actions">
                         <div className="editor-actions-left">
-                            <button className="btn btn-success" onClick={() => handleRun()} disabled={!connected} title="Executar (Ctrl+Enter) — reaproveita a aba de resultado ativa. Selecione um trecho e use Ctrl+Shift+Enter pra rodar só ele.">
+                            <button className="btn btn-success" onClick={() => handleRun()} disabled={!connected} title={t('consoleTab.runTitle')}>
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                                     <polygon points="5 3 19 12 5 21 5 3" />
                                 </svg>
-                                Executar
+                                {t('consoleTab.run')}
                                 <kbd className="kbd-shortcut">Ctrl+Enter</kbd>
-                                <kbd className="kbd-shortcut" title="Executar seleção ou statement atual">Ctrl+Shift+Enter</kbd>
+                                <kbd className="kbd-shortcut" title={t('consoleTab.runSelectionTitle')}>Ctrl+Shift+Enter</kbd>
                             </button>
-                            <button className="btn btn-secondary" onClick={() => handleRun(undefined, true)} disabled={!connected} title="Executar numa aba de resultado nova, sem substituir a atual (Ctrl+Alt+Enter)">
+                            <button className="btn btn-secondary" onClick={() => handleRun(undefined, true)} disabled={!connected} title={t('consoleTab.runNewTabTitle')}>
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                     <path d="M12 5v14M5 12h14" />
                                 </svg>
-                                Nova aba
+                                {t('consoleTab.newResultTab')}
                                 <kbd className="kbd-shortcut">Ctrl+Alt+Enter</kbd>
                             </button>
                             <button
                                 className="btn btn-secondary"
                                 onClick={() => handleRun(explainQuery(query, driver), true)}
                                 disabled={!connected || !query.trim()}
-                                title="Mostra o plano de execução (EXPLAIN) numa aba nova — nunca EXPLAIN ANALYZE, pra não executar de verdade uma query de escrita só de olhar o plano."
+                                title={t('consoleTab.explainTitle')}
                             >
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                     <path d="M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4M9 3v6h6M9 3l11 11" />
                                 </svg>
-                                Explain
+                                {t('consoleTab.explain')}
                             </button>
                             {anyRunning && (
-                                <button className="btn btn-danger" onClick={handleCancel} title="Cancelar a consulta em andamento agora">
+                                <button className="btn btn-danger" onClick={handleCancel} title={t('consoleTab.cancelQueryTitle')}>
                                     <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                                         <rect x="4" y="4" width="16" height="16" rx="2" />
                                     </svg>
-                                    Cancelar
+                                    {t('consoleTab.cancelQuery')}
                                 </button>
                             )}
 
                             {activeResult?.durationMs != null && (
-                                <span className="duration-badge" title="Tempo de execução no servidor (não inclui o tempo de buscar as linhas)">
+                                <span className="duration-badge" title={t('consoleTab.durationTitle')}>
                                     {activeResult.durationMs} ms
                                 </span>
                             )}
                         </div>
                         <div className="editor-actions-right">
-                            <label className="batch-size-field" title="Quantidade de linhas buscada por vez (padrão 200, como o 'fetch size' do DBeaver)">
-                                Buscar
+                            <label className="batch-size-field" title={t('consoleTab.batchSizeTitle')}>
+                                {t('consoleTab.fetch')}
                                 <input
                                     type="number"
                                     min={1}
@@ -891,33 +893,33 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                                     }}
                                     disabled={activeFetching}
                                 />
-                                por vez
+                                {t('consoleTab.atATime')}
                             </label>
                         </div>
                     </div>
 
                     {resultTabs.length > 0 && (
                         <div className="result-tab-bar" role="tablist">
-                            {resultTabs.map(t => (
+                            {resultTabs.map(resultTab => (
                                 <button
-                                    key={t.id}
+                                    key={resultTab.id}
                                     role="tab"
-                                    aria-selected={t.id === activeResultId}
-                                    className={`result-tab-pill ${t.id === activeResultId ? 'active' : ''} result-tab-${t.status}`}
-                                    onClick={() => setActiveResultId(t.id)}
-                                    title={t.queryText}
+                                    aria-selected={resultTab.id === activeResultId}
+                                    className={`result-tab-pill ${resultTab.id === activeResultId ? 'active' : ''} result-tab-${resultTab.status}`}
+                                    onClick={() => setActiveResultId(resultTab.id)}
+                                    title={resultTab.queryText}
                                 >
-                                    <span className={`result-tab-dot result-tab-dot-${t.status}`} />
-                                    <span className="result-tab-label">{t.label}</span>
-                                    {t.status === 'queued' && <span className="result-tab-hint">na fila</span>}
-                                    {t.status === 'running' && <span className="result-tab-hint">rodando…</span>}
+                                    <span className={`result-tab-dot result-tab-dot-${resultTab.status}`} />
+                                    <span className="result-tab-label">{resultTab.label}</span>
+                                    {resultTab.status === 'queued' && <span className="result-tab-hint">{t('consoleTab.queued')}</span>}
+                                    {resultTab.status === 'running' && <span className="result-tab-hint">{t('consoleTab.running')}</span>}
                                     <span
                                         className="result-tab-close"
                                         onClick={e => {
                                             e.stopPropagation();
-                                            handleCloseResultTab(t.id);
+                                            handleCloseResultTab(resultTab.id);
                                         }}
-                                        title="Fechar este resultado"
+                                        title={t('consoleTab.closeResultTitle')}
                                     >
                                         ×
                                     </span>
@@ -927,7 +929,7 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                     )}
 
                     {activeResult && activeResult.status === 'error' && (
-                        <div className="result-error-banner">Erro: {activeResult.errorMsg}</div>
+                        <div className="result-error-banner">{t('consoleTab.errorBanner', {error: activeResult.errorMsg})}</div>
                     )}
 
                     <ResultGrid
@@ -944,9 +946,9 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                     {activeResult?.hasMore && (
                         <div className="load-more-bar">
                             <button className="btn btn-secondary" onClick={handleLoadMore} disabled={activeFetching}>
-                                {activeFetching ? 'Carregando…' : `Carregar mais ${batchSize}`}
+                                {activeFetching ? t('consoleTab.loading') : t('consoleTab.loadMore', {count: batchSize})}
                             </button>
-                            <span className="load-more-hint">Mais linhas disponíveis no resultado.</span>
+                            <span className="load-more-hint">{t('consoleTab.loadMoreHint')}</span>
                         </div>
                     )}
                 </main>
@@ -964,17 +966,17 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                     <div className="modal-container" onClick={e => e.stopPropagation()} style={{maxWidth: 420}}>
                         <div className="modal-header">
                             <div className="modal-title-group">
-                                <h2 className="modal-title">Fechar aba sem salvar?</h2>
-                                <span className="modal-subtitle">O SQL desta aba tem alterações não salvas.</span>
+                                <h2 className="modal-title">{t('consoleTab.closeUnsavedTitle')}</h2>
+                                <span className="modal-subtitle">{t('consoleTab.closeUnsavedSubtitle')}</span>
                             </div>
-                            <button className="modal-close-btn" onClick={() => resolveCloseConfirm(false)} title="Cancelar">✕</button>
+                            <button className="modal-close-btn" onClick={() => resolveCloseConfirm(false)} title={t('consoleTab.cancel')}>✕</button>
                         </div>
                         <div className="modal-body">
                             {!activeScriptId && (
                                 <input
                                     className="input-control"
                                     autoFocus
-                                    placeholder="Nome do script"
+                                    placeholder={t('consoleTab.scriptNamePlaceholder')}
                                     value={closeSaveNameInput}
                                     onChange={e => setCloseSaveNameInput(e.target.value)}
                                     onKeyDown={e => {
@@ -984,18 +986,18 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                             )}
                             <div className="modal-actions" style={{marginTop: 12, display: 'flex', gap: 8, justifyContent: 'flex-end'}}>
                                 <button className="btn btn-secondary" onClick={() => resolveCloseConfirm(false)}>
-                                    Cancelar
+                                    {t('consoleTab.cancel')}
                                 </button>
                                 <button className="btn btn-secondary" onClick={() => resolveCloseConfirm(true)}>
-                                    Fechar sem salvar
+                                    {t('consoleTab.closeWithoutSaving')}
                                 </button>
                                 <button
                                     className="btn btn-success"
                                     onClick={handleCloseSaveAndClose}
                                     disabled={closeSaving || (!activeScriptId && !closeSaveNameInput.trim())}
-                                    title={activeScriptId ? `Sobrescrever script "${activeScriptName}"` : 'Salvar como novo script'}
+                                    title={activeScriptId ? t('consoleTab.overwriteScriptTitle', {name: activeScriptName}) : t('consoleTab.saveAsNewCloseTitle')}
                                 >
-                                    {activeScriptId ? `Salvar "${activeScriptName}" e fechar` : 'Salvar e fechar'}
+                                    {activeScriptId ? t('consoleTab.saveAndCloseNamed', {name: activeScriptName}) : t('consoleTab.saveAndClose')}
                                 </button>
                             </div>
                         </div>

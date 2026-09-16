@@ -1,4 +1,5 @@
 import {useEffect, useState} from 'react';
+import {useTranslation} from 'react-i18next';
 import {ListSavedConnections} from '../../wailsjs/go/main/App';
 import {ConnectSaved} from '../lib/tabApi';
 import type {store} from '../../wailsjs/go/models';
@@ -19,6 +20,7 @@ export default function ConnectionBar({
     tabId, connected, status,
     onDisconnect, onConnected, onError,
 }: Props) {
+    const {t} = useTranslation();
     const [saved, setSaved] = useState<store.SavedConnection[]>([]);
     const [selectedId, setSelectedId] = useState<string>('');
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -84,10 +86,10 @@ export default function ConnectionBar({
                             value={selectedId}
                             onChange={e => setSelectedId(e.target.value)}
                             disabled={connected || saved.length === 0}
-                            title="Selecione uma conexão salva"
+                            title={t('connectionBar.selectTitle')}
                         >
                             {saved.length === 0 ? (
-                                <option value="">(Nenhuma conexão cadastrada)</option>
+                                <option value="">{t('connectionBar.noConnections')}</option>
                             ) : (
                                 saved.map(c => (
                                     <option key={c.ID} value={c.ID}>
@@ -103,37 +105,37 @@ export default function ConnectionBar({
                             className="btn btn-primary"
                             onClick={handleConnect}
                             disabled={connecting || saved.length === 0}
-                            title={saved.length === 0 ? 'Cadastre uma conexão primeiro' : 'Conectar à fonte selecionada'}
+                            title={saved.length === 0 ? t('connectionBar.connectDisabledTitle') : t('connectionBar.connectTitle')}
                         >
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 <path d="M12 2v8M4.93 10.93l1.41 1.41M2 18h2M20 18h2M19.07 10.93l-1.41 1.41M22 22H2M15 15l4 4M9 15l-4 4" />
                             </svg>
-                            {connecting ? 'Conectando...' : 'Conectar'}
+                            {connecting ? t('connectionBar.connecting') : t('connectionBar.connect')}
                         </button>
                     ) : (
                         <button
                             className="btn btn-disconnect"
                             onClick={onDisconnect}
-                            title="Desconectar sessão ativa"
+                            title={t('connectionBar.disconnectTitle')}
                         >
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 <line x1="18" y1="6" x2="6" y2="18" />
                                 <line x1="6" y1="6" x2="18" y2="18" />
                             </svg>
-                            Desconectar
+                            {t('connectionBar.disconnect')}
                         </button>
                     )}
 
                     <button
                         className="btn btn-secondary"
                         onClick={() => setIsModalOpen(true)}
-                        title="Criar nova conexão ou gerenciar as existentes"
+                        title={t('connectionBar.manageTitle')}
                     >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <line x1="12" y1="5" x2="12" y2="19" />
                             <line x1="5" y1="12" x2="19" y2="12" />
                         </svg>
-                        Gerenciar Conexões
+                        {t('connectionBar.manage')}
                     </button>
 
                     {isConnected && selectedConn && (
@@ -143,7 +145,7 @@ export default function ConnectionBar({
                         </div>
                     )}
 
-                    <div className="status-badge" title="Status da sessão atual">
+                    <div className="status-badge" title={t('connectionBar.statusTitle')}>
                         <span className={`status-dot ${isConnected ? 'connected' : isError ? 'error' : ''}`} />
                         <span>{status}</span>
                     </div>

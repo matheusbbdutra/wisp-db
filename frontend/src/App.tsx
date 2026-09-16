@@ -1,4 +1,5 @@
 import {useState, useRef, useEffect} from 'react';
+import {useTranslation} from 'react-i18next';
 import './App.css';
 import {Disconnect, ConfirmQuit} from '../wailsjs/go/main/App';
 import {EventsOn} from '../wailsjs/runtime/runtime';
@@ -7,6 +8,8 @@ import TableTab from './components/TableTab';
 import SchemaTab from './components/SchemaTab';
 import RoutineTab from './components/RoutineTab';
 import UpdateChecker from './components/UpdateChecker';
+import LanguageSwitcher from './components/LanguageSwitcher';
+import i18n from './i18n';
 
 interface ConsoleTabState {
     kind: 'console';
@@ -53,10 +56,11 @@ let tabCounter = 1;
 
 function createTab(): ConsoleTabState {
     const n = tabCounter++;
-    return {kind: 'console', id: `tab-${crypto.randomUUID()}`, title: `Console ${n}`, connected: false};
+    return {kind: 'console', id: `tab-${crypto.randomUUID()}`, title: i18n.t('app.consoleTitle', {n}), connected: false};
 }
 
 function App() {
+    const {t} = useTranslation();
     const [tabs, setTabs] = useState<TabState[]>(() => [createTab()]);
     const [activeId, setActiveId] = useState(() => tabs[0].id);
     // Handles imperativos dos ConsoleTab vivos, pra handleCloseTab poder
@@ -129,7 +133,7 @@ function App() {
     }
 
     function handleConnectedChange(tabId: string, connected: boolean) {
-        setTabs(prev => prev.map(t => (t.id === tabId ? {...t, connected} : t)));
+        setTabs(prev => prev.map(tab => (tab.id === tabId ? {...tab, connected} : tab)));
     }
 
     async function handleCloseTab(tabId: string) {
@@ -137,7 +141,7 @@ function App() {
             return;
         }
 
-        const tab = tabs.find(t => t.id === tabId);
+        const tab = tabs.find(item => item.id === tabId);
         if (tab?.kind === 'console') {
             const handle = consoleRefs.current.get(tabId);
             if (handle) {
@@ -153,7 +157,7 @@ function App() {
         }
 
         setTabs(prev => {
-            const remaining = prev.filter(t => t.id !== tabId);
+            const remaining = prev.filter(item => item.id !== tabId);
             if (activeId === tabId && remaining.length > 0) {
                 setActiveId(remaining[remaining.length - 1].id);
             }
@@ -209,7 +213,7 @@ function App() {
                         {tabs.length > 1 && (
                             <button
                                 className="tab-close"
-                                title="Fechar aba"
+                                title={t('app.closeTab')}
                                 onClick={e => {
                                     e.stopPropagation();
                                     handleCloseTab(tab.id);
@@ -220,10 +224,11 @@ function App() {
                         )}
                     </div>
                 ))}
-                <button className="tab-add" title="Nova aba" onClick={handleAddTab}>
+                <button className="tab-add" title={t('app.newTab')} onClick={handleAddTab}>
                     +
                 </button>
                 <UpdateChecker />
+                <LanguageSwitcher />
             </div>
 
             {tabs.map(tab => (

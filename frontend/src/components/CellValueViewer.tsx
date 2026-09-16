@@ -1,4 +1,5 @@
 import {useMemo, useState} from 'react';
+import {useTranslation} from 'react-i18next';
 import {detectFormat, formatValue, type ValueFormat} from '../lib/valueFormat';
 import {copyToClipboard} from '../lib/gridCopyFormats';
 
@@ -19,6 +20,7 @@ interface Props {
 // `cell` de `gridSelection`); formato (Auto/Texto/JSON/XML), quebra de linha
 // e copiar continuam os mesmos de antes.
 export default function CellValueViewer({cell, width, onResizeMouseDown, onClose}: Props) {
+    const {t} = useTranslation();
     const [format, setFormat] = useState<ValueFormat>('auto');
     const [wrap, setWrap] = useState(true);
     const [copied, setCopied] = useState(false);
@@ -35,29 +37,29 @@ export default function CellValueViewer({cell, width, onResizeMouseDown, onClose
 
     return (
         <>
-            <div className="resize-handle resize-handle-v" onMouseDown={onResizeMouseDown} title="Arrastar para redimensionar" />
-            <div className="value-viewer-dock" style={{width}} role="complementary" aria-label="Visor de valor da célula">
+            <div className="resize-handle resize-handle-v" onMouseDown={onResizeMouseDown} title={t('cellValueViewer.resizeTitle')} />
+            <div className="value-viewer-dock" style={{width}} role="complementary" aria-label={t('cellValueViewer.ariaLabel')}>
                 <div className="value-viewer-header">
-                    <span className="grid-context-menu-group-label">{cell ? cell.columnName : 'Valor'}</span>
+                    <span className="grid-context-menu-group-label">{cell ? cell.columnName : t('cellValueViewer.fallbackTitle')}</span>
                     <div className="value-viewer-controls">
-                        <select value={format} onChange={e => setFormat(e.target.value as ValueFormat)} title="Formato de exibição" disabled={!cell}>
-                            <option value="auto">Auto ({detected})</option>
-                            <option value="text">Texto</option>
-                            <option value="json">JSON</option>
-                            <option value="xml">XML</option>
+                        <select value={format} onChange={e => setFormat(e.target.value as ValueFormat)} title={t('cellValueViewer.formatTitle')} disabled={!cell}>
+                            <option value="auto">{t('cellValueViewer.formatAuto', {detected})}</option>
+                            <option value="text">{t('cellValueViewer.formatText')}</option>
+                            <option value="json">{t('cellValueViewer.formatJson')}</option>
+                            <option value="xml">{t('cellValueViewer.formatXml')}</option>
                         </select>
                         <label className="value-viewer-wrap-toggle">
                             <input type="checkbox" checked={wrap} onChange={e => setWrap(e.target.checked)} />
-                            Quebra de linha
+                            {t('cellValueViewer.wrap')}
                         </label>
-                        <button className="btn btn-secondary" onClick={handleCopy} disabled={!cell}>{copied ? 'Copiado!' : 'Copiar'}</button>
-                        <button className="btn btn-secondary" onClick={onClose} title="Fechar visor de valor">✕</button>
+                        <button className="btn btn-secondary" onClick={handleCopy} disabled={!cell}>{copied ? t('cellValueViewer.copied') : t('cellValueViewer.copy')}</button>
+                        <button className="btn btn-secondary" onClick={onClose} title={t('cellValueViewer.closeTitle')}>✕</button>
                     </div>
                 </div>
                 {cell ? (
                     <pre className={`value-viewer-content ${wrap ? 'wrap' : 'nowrap'}`}>{formatted}</pre>
                 ) : (
-                    <div className="value-viewer-empty">Selecione uma célula pra ver o valor completo aqui.</div>
+                    <div className="value-viewer-empty">{t('cellValueViewer.empty')}</div>
                 )}
             </div>
         </>

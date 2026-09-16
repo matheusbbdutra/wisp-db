@@ -1,4 +1,5 @@
 import {useEffect, useState} from 'react';
+import {useTranslation} from 'react-i18next';
 import {CheckForUpdate, OpenReleaseURL} from '../../wailsjs/go/main/App';
 
 // Verificador de atualização (Phase 3, item 5 do docs/ROADMAP.md): nunca
@@ -14,6 +15,7 @@ import {CheckForUpdate, OpenReleaseURL} from '../../wailsjs/go/main/App';
 // mostra o resultado, incluindo "já está atualizado" — é a única forma de
 // confirmar que a checagem rodou.
 export default function UpdateChecker() {
+    const {t} = useTranslation();
     const [checking, setChecking] = useState(false);
     const [result, setResult] = useState<{hasUpdate: boolean; latest: string; url: string} | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -43,26 +45,26 @@ export default function UpdateChecker() {
 
     return (
         <div className="update-checker">
-            <button className="update-check-btn" onClick={() => handleCheck()} disabled={checking} title="Consulta a API pública do GitHub — não baixa nem instala nada automaticamente.">
-                {checking ? 'Verificando…' : 'Verificar atualização'}
+            <button className="update-check-btn" onClick={() => handleCheck()} disabled={checking} title={t('updateChecker.checkTitle')}>
+                {checking ? t('updateChecker.checking') : t('updateChecker.check')}
             </button>
             {result && (
                 <div className={`update-result ${result.hasUpdate ? 'update-available' : ''}`}>
                     {result.hasUpdate ? (
                         <>
-                            Nova versão disponível: {result.latest}.{' '}
-                            <button className="update-link" onClick={() => OpenReleaseURL(result.url)}>Ver release</button>
+                            {t('updateChecker.available', {latest: result.latest})}{' '}
+                            <button className="update-link" onClick={() => OpenReleaseURL(result.url)}>{t('updateChecker.viewRelease')}</button>
                         </>
                     ) : (
-                        'Você já está na versão mais recente.'
+                        t('updateChecker.upToDate')
                     )}
-                    <button className="update-dismiss" onClick={() => setResult(null)} title="Fechar">✕</button>
+                    <button className="update-dismiss" onClick={() => setResult(null)} title={t('updateChecker.closeTitle')}>✕</button>
                 </div>
             )}
             {error && (
                 <div className="update-result">
-                    Não foi possível verificar agora ({error}).
-                    <button className="update-dismiss" onClick={() => setError(null)} title="Fechar">✕</button>
+                    {t('updateChecker.error', {error})}
+                    <button className="update-dismiss" onClick={() => setError(null)} title={t('updateChecker.closeTitle')}>✕</button>
                 </div>
             )}
         </div>

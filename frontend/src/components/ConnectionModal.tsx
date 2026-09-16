@@ -1,4 +1,5 @@
 import {useState, useEffect} from 'react';
+import {useTranslation} from 'react-i18next';
 import {SaveConnection, DeleteSavedConnection, PickSQLiteFile, ListSavedConnections, TestConnection} from '../../wailsjs/go/main/App';
 import {ConnectSaved} from '../lib/tabApi';
 import type {store} from '../../wailsjs/go/models';
@@ -12,6 +13,7 @@ interface Props {
 }
 
 export default function ConnectionModal({isOpen, tabId, onClose, onConnected, onConnectionsChanged}: Props) {
+    const {t} = useTranslation();
     const [activeTab, setActiveTab] = useState<'new' | 'manage'>('new');
     const [driver, setDriver] = useState<'sqlite' | 'postgres'>('sqlite');
     const [name, setName] = useState('');
@@ -76,7 +78,7 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                 }
             }
         } catch (err) {
-            setError(`Erro ao selecionar arquivo: ${err}`);
+            setError(t('connectionModal.pickFileError', {error: String(err)}));
         }
     }
 
@@ -84,14 +86,11 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
         if (rawDsnMode) {
             const trimmedDsn = rawDsn.trim();
             if (!trimmedDsn) {
-                setError('Cole a DSN/link de conexão completo.');
+                setError(t('connectionModal.errorRawDsnEmpty'));
                 return null;
             }
             if (driver === 'postgres' && !/^postgres(ql)?:\/\//i.test(trimmedDsn)) {
-                setError(
-                    'DSN do Postgres precisa começar com "postgres://" — formato: ' +
-                    'postgres://usuario:senha@host:porta/banco (ex: postgres://wisp:wisp@localhost:5432/wisp_test).'
-                );
+                setError(t('connectionModal.errorPostgresDsnFormat'));
                 return null;
             }
             return {driver, dsn: trimmedDsn};
@@ -99,7 +98,7 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
 
         if (driver === 'sqlite') {
             if (!sqlitePath.trim()) {
-                setError('Escolha ou digite o caminho de um arquivo de banco SQLite.');
+                setError(t('connectionModal.errorSqlitePath'));
                 return null;
             }
             return {driver: 'sqlite', dsn: sqlitePath.trim()};
@@ -133,7 +132,7 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
         setTesting(true);
         try {
             await TestConnection(built.driver, built.dsn);
-            setTestResult({ok: true, message: 'Conexão bem-sucedida.'});
+            setTestResult({ok: true, message: t('connectionModal.testSuccess')});
         } catch (err) {
             setTestResult({ok: false, message: String(err)});
         } finally {
@@ -149,7 +148,7 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
         setError('');
         const trimmedName = name.trim();
         if (!trimmedName) {
-            setError('Informe um nome amigável para a conexão.');
+            setError(t('connectionModal.errorNameRequired'));
             return;
         }
 
@@ -178,7 +177,7 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                 setActiveTab('manage');
             }
         } catch (err) {
-            setError(`Erro ao conectar — nada foi salvo: ${err}`);
+            setError(t('connectionModal.saveError', {error: String(err)}));
         } finally {
             setSaving(false);
         }
@@ -190,7 +189,7 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
             await loadSaved();
             onConnectionsChanged();
         } catch (err) {
-            setError(`Erro ao remover conexão: ${err}`);
+            setError(t('connectionModal.deleteError', {error: String(err)}));
         }
     }
 
@@ -199,10 +198,10 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
             <div className="modal-container" onClick={e => e.stopPropagation()}>
                 <div className="modal-header">
                     <div className="modal-title-group">
-                        <h2 className="modal-title">Gerenciar Conexões</h2>
-                        <span className="modal-subtitle">Configure ou gerencie suas fontes de dados salvas com segurança</span>
+                        <h2 className="modal-title">{t('connectionModal.title')}</h2>
+                        <span className="modal-subtitle">{t('connectionModal.subtitle')}</span>
                     </div>
-                    <button className="modal-close-btn" onClick={onClose} title="Fechar">✕</button>
+                    <button className="modal-close-btn" onClick={onClose} title={t('connectionModal.closeTitle')}>✕</button>
                 </div>
 
                 <div className="modal-tabs">
@@ -210,13 +209,13 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                         className={`modal-tab-btn ${activeTab === 'new' ? 'active' : ''}`}
                         onClick={() => setActiveTab('new')}
                     >
-                        + Nova Conexão
+                        {t('connectionModal.tabNew')}
                     </button>
                     <button
                         className={`modal-tab-btn ${activeTab === 'manage' ? 'active' : ''}`}
                         onClick={() => setActiveTab('manage')}
                     >
-                        Conexões Salvas ({savedList.length})
+                        {t('connectionModal.tabManage', {count: savedList.length})}
                     </button>
                 </div>
 
@@ -234,7 +233,7 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                 {activeTab === 'new' ? (
                     <div className="modal-body">
                         <div className="form-group">
-                            <label className="form-label">Tipo de Banco (Driver)</label>
+                            <label className="form-label">{t('connectionModal.driverLabel')}</label>
                             <div className="driver-selector-pills">
                                 <button
                                     type="button"
@@ -242,7 +241,7 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                                     onClick={() => {setDriver('sqlite'); setTestResult(null);}}
                                 >
                                     <span className="driver-pill-title">SQLite</span>
-                                    <span className="driver-pill-desc">Arquivo local (.db, .sqlite)</span>
+                                    <span className="driver-pill-desc">{t('connectionModal.sqliteDesc')}</span>
                                 </button>
                                 <button
                                     type="button"
@@ -250,18 +249,18 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                                     onClick={() => {setDriver('postgres'); setTestResult(null);}}
                                 >
                                     <span className="driver-pill-title">PostgreSQL</span>
-                                    <span className="driver-pill-desc">Servidor de banco relacional</span>
+                                    <span className="driver-pill-desc">{t('connectionModal.postgresDesc')}</span>
                                 </button>
                             </div>
                         </div>
 
                         <div className="form-group">
-                            <label className="form-label">Nome da Conexão *</label>
+                            <label className="form-label">{t('connectionModal.nameLabel')}</label>
                             <input
                                 className="input-control modal-input"
                                 value={name}
                                 onChange={e => setName(e.target.value)}
-                                placeholder="Ex: Produção, Local Dev, Chinook..."
+                                placeholder={t('connectionModal.namePlaceholder')}
                                 autoFocus
                             />
                         </div>
@@ -272,38 +271,38 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                                 className="raw-dsn-toggle"
                                 onClick={() => {setRawDsnMode(v => !v); setTestResult(null); setError('');}}
                             >
-                                {rawDsnMode ? '← Voltar a preencher campos separados' : 'Prefere colar a DSN/link de conexão direto? →'}
+                                {rawDsnMode ? t('connectionModal.rawDsnBack') : t('connectionModal.rawDsnToggle')}
                             </button>
                         </div>
 
                         {rawDsnMode ? (
                             <div className="form-group">
                                 <label className="form-label">
-                                    DSN de Conexão Completa *
+                                    {t('connectionModal.rawDsnLabel')}
                                 </label>
                                 <input
                                     className="input-control modal-input"
                                     value={rawDsn}
                                     onChange={e => setRawDsn(e.target.value)}
                                     placeholder={driver === 'sqlite'
-                                        ? '/caminho/para/banco.db'
-                                        : 'postgres://usuario:senha@host:5432/banco?sslmode=disable'}
+                                        ? t('connectionModal.rawDsnPlaceholderSqlite')
+                                        : t('connectionModal.rawDsnPlaceholderPostgres')}
                                 />
                                 <span className="form-hint">
                                     {driver === 'sqlite'
-                                        ? 'Caminho absoluto do arquivo SQLite.'
-                                        : 'Link completo de conexão — usuário e senha com caracteres especiais devem estar url-encoded.'}
+                                        ? t('connectionModal.rawDsnHintSqlite')
+                                        : t('connectionModal.rawDsnHintPostgres')}
                                 </span>
                             </div>
                         ) : driver === 'sqlite' ? (
                             <div className="form-group">
-                                <label className="form-label">Arquivo de Banco SQLite *</label>
+                                <label className="form-label">{t('connectionModal.sqliteFileLabel')}</label>
                                 <div className="file-picker-field">
                                     <input
                                         className="input-control modal-input file-path-input"
                                         value={sqlitePath}
                                         onChange={e => setSqlitePath(e.target.value)}
-                                        placeholder="Nenhum arquivo selecionado ou digite o caminho..."
+                                        placeholder={t('connectionModal.sqliteFilePlaceholder')}
                                     />
                                     <button
                                         type="button"
@@ -313,24 +312,24 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
                                         </svg>
-                                        Procurar arquivo...
+                                        {t('connectionModal.browseFile')}
                                     </button>
                                 </div>
-                                <span className="form-hint">Use o seletor nativo ou digite o caminho manualmente.</span>
+                                <span className="form-hint">{t('connectionModal.sqliteFileHint')}</span>
                             </div>
                         ) : (
                             <div className="postgres-form-grid">
                                 <div className="form-group col-span-8">
-                                    <label className="form-label">Host *</label>
+                                    <label className="form-label">{t('connectionModal.hostLabel')}</label>
                                     <input
                                         className="input-control modal-input"
                                         value={pgHost}
                                         onChange={e => setPgHost(e.target.value)}
-                                        placeholder="localhost ou db.exemplo.com"
+                                        placeholder={t('connectionModal.hostPlaceholder')}
                                     />
                                 </div>
                                 <div className="form-group col-span-4">
-                                    <label className="form-label">Porta *</label>
+                                    <label className="form-label">{t('connectionModal.portLabel')}</label>
                                     <input
                                         className="input-control modal-input"
                                         value={pgPort}
@@ -339,7 +338,7 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                                     />
                                 </div>
                                 <div className="form-group col-span-12">
-                                    <label className="form-label">Banco de Dados (Database) *</label>
+                                    <label className="form-label">{t('connectionModal.databaseLabel')}</label>
                                     <input
                                         className="input-control modal-input"
                                         value={pgDatabase}
@@ -348,7 +347,7 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                                     />
                                 </div>
                                 <div className="form-group col-span-6">
-                                    <label className="form-label">Usuário *</label>
+                                    <label className="form-label">{t('connectionModal.userLabel')}</label>
                                     <input
                                         className="input-control modal-input"
                                         value={pgUser}
@@ -357,7 +356,7 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                                     />
                                 </div>
                                 <div className="form-group col-span-6">
-                                    <label className="form-label">Senha</label>
+                                    <label className="form-label">{t('connectionModal.passwordLabel')}</label>
                                     <input
                                         type="password"
                                         className="input-control modal-input"
@@ -367,15 +366,15 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                                     />
                                 </div>
                                 <div className="form-group col-span-12">
-                                    <label className="form-label">Modo SSL</label>
+                                    <label className="form-label">{t('connectionModal.sslLabel')}</label>
                                     <select
                                         className="input-control modal-select"
                                         value={pgSslMode}
                                         onChange={e => setPgSslMode(e.target.value)}
                                     >
-                                        <option value="disable">disable (desativado / local)</option>
-                                        <option value="require">require (exigir TLS/SSL)</option>
-                                        <option value="prefer">prefer (tentar SSL se disponível)</option>
+                                        <option value="disable">{t('connectionModal.sslDisable')}</option>
+                                        <option value="require">{t('connectionModal.sslRequire')}</option>
+                                        <option value="prefer">{t('connectionModal.sslPrefer')}</option>
                                     </select>
                                 </div>
                             </div>
@@ -389,16 +388,16 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
 
                         <div className="modal-footer">
                             <button type="button" className="btn btn-secondary" onClick={onClose} disabled={saving}>
-                                Cancelar
+                                {t('connectionModal.cancel')}
                             </button>
                             <button
                                 type="button"
                                 className="btn btn-secondary"
                                 onClick={handleTest}
                                 disabled={saving || testing}
-                                title="Testa a conexão sem salvar nada"
+                                title={t('connectionModal.testTitle')}
                             >
-                                {testing ? 'Testando...' : 'Testar conexão'}
+                                {testing ? t('connectionModal.testing') : t('connectionModal.test')}
                             </button>
                             <button
                                 type="button"
@@ -406,7 +405,7 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                                 onClick={() => handleSave(false)}
                                 disabled={saving || testing}
                             >
-                                {saving ? 'Salvando...' : 'Salvar'}
+                                {saving ? t('connectionModal.saving') : t('connectionModal.save')}
                             </button>
                             <button
                                 type="button"
@@ -417,7 +416,7 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                     <path d="M12 2v8M4.93 10.93l1.41 1.41M2 18h2M20 18h2M19.07 10.93l-1.41 1.41M22 22H2M15 15l4 4M9 15l-4 4" />
                                 </svg>
-                                {saving ? 'Conectando...' : 'Salvar e Conectar'}
+                                {saving ? t('connectionModal.connecting') : t('connectionModal.saveAndConnect')}
                             </button>
                         </div>
                     </div>
@@ -425,14 +424,14 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                     <div className="modal-body">
                         {savedList.length === 0 ? (
                             <div className="modal-empty-state">
-                                <p>Nenhuma conexão salva encontrada.</p>
+                                <p>{t('connectionModal.emptySaved')}</p>
                                 <button
                                     type="button"
                                     className="btn btn-primary"
                                     onClick={() => setActiveTab('new')}
                                     style={{marginTop: '12px'}}
                                 >
-                                    + Criar Primeira Conexão
+                                    {t('connectionModal.createFirst')}
                                 </button>
                             </div>
                         ) : (
@@ -453,15 +452,15 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                                                     onClose();
                                                 }}
                                             >
-                                                Conectar
+                                                {t('connectionModal.connect')}
                                             </button>
                                             <button
                                                 type="button"
                                                 className="btn btn-danger btn-sm"
                                                 onClick={() => handleDelete(c.ID)}
-                                                title="Excluir conexão salva"
+                                                title={t('connectionModal.deleteTitle')}
                                             >
-                                                Excluir
+                                                {t('connectionModal.delete')}
                                             </button>
                                         </div>
                                     </div>
@@ -470,7 +469,7 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                         )}
                         <div className="modal-footer" style={{marginTop: '20px'}}>
                             <button type="button" className="btn btn-secondary" onClick={onClose}>
-                                Fechar
+                                {t('connectionModal.close')}
                             </button>
                         </div>
                     </div>

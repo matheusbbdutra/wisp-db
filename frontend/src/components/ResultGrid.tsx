@@ -1,4 +1,5 @@
 import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
+import {useTranslation} from 'react-i18next';
 import DataEditor, {
     CellClickedEventArgs,
     CompactSelection,
@@ -166,6 +167,7 @@ function isCellInRange(col: number, row: number, range: {x: number; y: number; w
 // tema escuro consistente com o Wisp, colunas redimensionáveis, índice de linha nativo
 // e destaque visual âmbar para valores NULL.
 export default function ResultGrid({columns, rows, tabId, editContext, readOnlyNotice, onCellSaved, onRowDeleted, onRowInserted, onStatus, onCopied}: Props) {
+    const {t} = useTranslation();
     const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
     const [gridSelection, setGridSelection] = useState<GridSelection | undefined>(undefined);
     const [menu, setMenu] = useState<MenuState | null>(null);
@@ -483,18 +485,18 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
                 // Checagem otimista falhou: outro processo alterou a linha
                 // entre o fetch e o save — avisa e reverte (não toca em rows,
                 // então a célula volta ao valor antigo sozinha).
-                onStatus?.(`aviso: a linha foi alterada por outro processo — valor não salvo (0 linhas afetadas)`);
+                onStatus?.(t('resultGrid.warnOptimisticUpdate'));
             } else {
                 onCellSaved?.(pendingEdit.row, pendingEdit.col, pendingEdit.newValue);
-                onStatus?.(`ok — célula atualizada (${affected} linha(s))`);
+                onStatus?.(t('resultGrid.okCellUpdated', {count: affected}));
             }
             setPendingEdit(null);
         } catch (err) {
-            onStatus?.(`erro ao salvar célula: ${err}`);
+            onStatus?.(t('resultGrid.errorSaveCell', {error: err}));
         } finally {
             setSavingEdit(false);
         }
-    }, [pendingEdit, editContext, savingEdit, rows, pkIndexes, tabId, onCellSaved, onStatus]);
+    }, [pendingEdit, editContext, savingEdit, rows, pkIndexes, tabId, onCellSaved, onStatus, t]);
 
     const cancelPendingDelete = useCallback(() => {
         if (!savingDelete) setPendingDelete(null);
@@ -511,18 +513,18 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
                 // Mesma checagem otimista do UpdateCell: a linha já não
                 // existia mais (outro processo apagou antes) — avisa em vez
                 // de assumir sucesso.
-                onStatus?.(`aviso: a linha já não existia mais — nada apagado (0 linhas afetadas)`);
+                onStatus?.(t('resultGrid.warnOptimisticDelete'));
             } else {
                 onRowDeleted?.(pendingDelete.row);
-                onStatus?.(`ok — linha apagada (${affected} linha(s))`);
+                onStatus?.(t('resultGrid.okRowDeleted', {count: affected}));
             }
             setPendingDelete(null);
         } catch (err) {
-            onStatus?.(`erro ao apagar linha: ${err}`);
+            onStatus?.(t('resultGrid.errorDeleteRow', {error: err}));
         } finally {
             setSavingDelete(false);
         }
-    }, [pendingDelete, editContext, savingDelete, rows, pkIndexes, tabId, onRowDeleted, onStatus]);
+    }, [pendingDelete, editContext, savingDelete, rows, pkIndexes, tabId, onRowDeleted, onStatus, t]);
 
     // Abre o formulário de nova linha com um campo vazio por coluna
     // não-gerada — PK inclusa (o usuário pode precisar informar uma PK
@@ -557,7 +559,7 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
             insertValues.push(coerceInsertValue(col?.Type ?? '', text));
         }
         if (insertColumns.length === 0) {
-            setInsertError('Preencha ao menos uma coluna.');
+            setInsertError(t('resultGrid.fillOneColumn'));
             return;
         }
         setSavingInsert(true);
@@ -573,14 +575,14 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
             const valueByName = new Map(insertColumns.map((name, i) => [name, insertValues[i]]));
             const row = columns.map(name => (valueByName.has(name) ? valueByName.get(name) : null));
             onRowInserted?.(row);
-            onStatus?.('ok — linha inserida');
+            onStatus?.(t('resultGrid.okRowInserted'));
             setInsertForm(null);
         } catch (err) {
             setInsertError(String(err));
         } finally {
             setSavingInsert(false);
         }
-    }, [insertForm, editContext, savingInsert, tabId, columns, onRowInserted, onStatus]);
+    }, [insertForm, editContext, savingInsert, tabId, columns, onRowInserted, onStatus, t]);
 
     // Captura a posição do mouse na fase de captura (roda antes do handler
     // interno do grid), porque CellClickedEventArgs só traz coordenadas
@@ -728,11 +730,8 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
         return (
             <div className="result-container">
                 <div className="result-empty">
-                    <svg className="result-empty-icon" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M3 3h18v18H3zM3 9h18M3 15h18M9 3v18" />
-                    </svg>
-                    <span>Nenhum resultado para exibir.</span>
-                    <span style={{fontSize: '11px', opacity: 0.7}}>Execute uma consulta SQL para visualizar os dados aqui.</span>
+                    <span>{t('resultGrid.empty')}</span>
+                    <span>{t('resultGrid.emptyHint')}</span>
                 </div>
             </div>
         );
@@ -752,35 +751,37 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
         <div className="result-container">
             <div className="result-toolbar">
                 <div className="result-stats">
-                    <span>Resultados:</span>
+                    <span>{t('resultGrid.results')}</span>
                     <span className="result-stat-badge">
-                        {filteredIndices ? `${rowCount} de ${rows.length}` : rows.length} {rowCount === 1 ? 'linha' : 'linhas'}
+                        {filteredIndices
+                            ? t('resultGrid.rowFiltered', {count: rowCount, shown: rowCount, total: rows.length})
+                            : t('resultGrid.row', {count: rows.length})}
                     </span>
-                    <span className="result-stat-badge">{columns.length} {columns.length === 1 ? 'coluna' : 'colunas'}</span>
+                    <span className="result-stat-badge">{t('resultGrid.column', {count: columns.length})}</span>
                     {editContext && (
-                        <span className="result-stat-badge result-editable-badge" title={`Edição inline habilitada via PK (${editContext.pkColumns.join(', ')})`}>
-                            editável
+                        <span className="result-stat-badge result-editable-badge" title={t('resultGrid.editableTitle', {pks: editContext.pkColumns.join(', ')})}>
+                            {t('resultGrid.editable')}
                         </span>
                     )}
                 </div>
                 <input
                     className="result-filter-input"
                     type="text"
-                    placeholder="Filtro rápido (qualquer coluna)…"
+                    placeholder={t('resultGrid.filterPlaceholder')}
                     value={filterText}
                     onChange={e => setFilterText(e.target.value)}
-                    title="Filtra as linhas já carregadas por substring — não refaz a busca no servidor."
+                    title={t('resultGrid.filterTitle')}
                 />
                 <button
                     className={`btn btn-secondary ${valuePanelOpen ? 'active' : ''}`}
                     onClick={() => (valuePanelOpen ? closeValuePanel() : openValuePanel())}
-                    title="Mostrar/ocultar o visor de valor da célula selecionada"
+                    title={t('resultGrid.valueToggleTitle')}
                 >
-                    Valor
+                    {t('resultGrid.value')}
                 </button>
                 {editContext && (
-                    <button className="btn btn-secondary" onClick={openInsertForm} title="Inserir uma linha nova nesta tabela">
-                        + Nova linha
+                    <button className="btn btn-secondary" onClick={openInsertForm} title={t('resultGrid.insertRowTitle')}>
+                        {t('resultGrid.insertRow')}
                     </button>
                 )}
             </div>
@@ -842,7 +843,7 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
                 {menu && (
                     <div ref={menuRef} className="grid-context-menu" style={menuStyle} role="menu">
                         <button className="grid-context-menu-item" onClick={() => handleCopyCell(menu.col, menu.row)}>
-                            Copiar célula
+                            {t('resultGrid.copyCell')}
                         </button>
                         <button
                             className="grid-context-menu-item"
@@ -860,11 +861,11 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
                                 setMenu(null);
                             }}
                         >
-                            Ver valor…
+                            {t('resultGrid.viewValue')}
                         </button>
                         {!target && (
                             <button className="grid-context-menu-item" onClick={() => handleCopyRow(menu.row)}>
-                                Copiar linha
+                                {t('resultGrid.copyRow')}
                             </button>
                         )}
                         {!target && editContext && rowHasPkValues(menu.row) && (
@@ -875,50 +876,50 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
                                     setMenu(null);
                                 }}
                             >
-                                Excluir linha…
+                                {t('resultGrid.deleteRow')}
                             </button>
                         )}
                         {target && (
                             <button className="grid-context-menu-item" onClick={() => handleCopySelection(target)}>
-                                Copiar seleção
+                                {t('resultGrid.copySelection')}
                             </button>
                         )}
                         <div className="grid-context-menu-separator" />
-                        <div className="grid-context-menu-group-label">Copiar como</div>
+                        <div className="grid-context-menu-group-label">{t('resultGrid.copyAs')}</div>
                         <button className="grid-context-menu-item" onClick={() => handleCopyAs('csv', targetHeader, targetMatrix)}>
-                            CSV
+                            {t('resultGrid.csv')}
                         </button>
                         <button className="grid-context-menu-item" onClick={() => handleCopyAs('sql', targetHeader, targetMatrix)}>
-                            INSERT SQL
+                            {t('resultGrid.insertSql')}
                         </button>
                         <button className="grid-context-menu-item" onClick={() => handleCopyAs('md', targetHeader, targetMatrix)}>
-                            Markdown
+                            {t('resultGrid.markdown')}
                         </button>
                     </div>
                 )}
                 {pendingEdit && (
                     <div className="grid-edit-overlay" onMouseDown={e => { if (e.target === e.currentTarget) cancelPendingEdit(); }}>
-                        <div className="grid-edit-popover" role="dialog" aria-label="Confirmar atualização">
-                            <div className="grid-context-menu-group-label">Confirmar atualização</div>
+                        <div className="grid-edit-popover" role="dialog" aria-label={t('resultGrid.confirmUpdateAria')}>
+                            <div className="grid-context-menu-group-label">{t('resultGrid.confirmUpdate')}</div>
                             <div className="grid-edit-field">
-                                <span className="grid-edit-label">Célula</span>
-                                <span className="grid-edit-value">{pendingEdit.columnName} (linha {pendingEdit.row + 1})</span>
+                                <span className="grid-edit-label">{t('resultGrid.cell')}</span>
+                                <span className="grid-edit-value">{t('resultGrid.cellLine', {column: pendingEdit.columnName, row: pendingEdit.row + 1})}</span>
                             </div>
                             <div className="grid-edit-field">
-                                <span className="grid-edit-label">De</span>
+                                <span className="grid-edit-label">{t('resultGrid.from')}</span>
                                 <span className="grid-edit-value">{displayValue(pendingEdit.oldValue)}</span>
                             </div>
                             <div className="grid-edit-field">
-                                <span className="grid-edit-label">Para</span>
+                                <span className="grid-edit-label">{t('resultGrid.to')}</span>
                                 <span className="grid-edit-value">{displayValue(pendingEdit.newValue)}</span>
                             </div>
                             <code className="grid-edit-preview">{pendingEdit.preview}</code>
                             <div className="grid-edit-actions">
                                 <button className="btn btn-success" onClick={confirmPendingEdit} disabled={savingEdit}>
-                                    {savingEdit ? 'Salvando…' : 'Confirmar'}
+                                    {savingEdit ? t('resultGrid.saving') : t('resultGrid.confirm')}
                                 </button>
                                 <button className="btn btn-secondary" onClick={cancelPendingEdit} disabled={savingEdit}>
-                                    Cancelar
+                                    {t('resultGrid.cancel')}
                                 </button>
                             </div>
                         </div>
@@ -926,17 +927,17 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
                 )}
                 {pendingDelete && editContext && (
                     <div className="grid-edit-overlay" onMouseDown={e => { if (e.target === e.currentTarget) cancelPendingDelete(); }}>
-                        <div className="grid-edit-popover" role="dialog" aria-label="Confirmar exclusão">
-                            <div className="grid-context-menu-group-label">Confirmar exclusão</div>
+                        <div className="grid-edit-popover" role="dialog" aria-label={t('resultGrid.confirmDeleteAria')}>
+                            <div className="grid-context-menu-group-label">{t('resultGrid.confirmDelete')}</div>
                             <code className="grid-edit-preview">
                                 {buildDeletePreview(editContext.schema, editContext.table, editContext.pkColumns, pkIndexes.map(i => (rows[pendingDelete.row] ?? [])[i]))}
                             </code>
                             <div className="grid-edit-actions">
                                 <button className="btn btn-danger" onClick={confirmPendingDelete} disabled={savingDelete}>
-                                    {savingDelete ? 'Apagando…' : 'Excluir'}
+                                    {savingDelete ? t('resultGrid.deleting') : t('resultGrid.delete')}
                                 </button>
                                 <button className="btn btn-secondary" onClick={cancelPendingDelete} disabled={savingDelete}>
-                                    Cancelar
+                                    {t('resultGrid.cancel')}
                                 </button>
                             </div>
                         </div>
@@ -944,9 +945,9 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
                 )}
                 {insertForm && editContext && (
                     <div className="grid-edit-overlay" onMouseDown={e => { if (e.target === e.currentTarget) cancelInsertForm(); }}>
-                        <div className="grid-edit-popover insert-form-popover" role="dialog" aria-label="Nova linha">
-                            <div className="grid-context-menu-group-label">Nova linha em {editContext.schema}.{editContext.table}</div>
-                            <div className="insert-form-hint">Deixe em branco pra deixar o banco preencher (DEFAULT/auto-incremento).</div>
+                        <div className="grid-edit-popover insert-form-popover" role="dialog" aria-label={t('resultGrid.newRow')}>
+                            <div className="grid-context-menu-group-label">{t('resultGrid.newRowTitle', {schema: editContext.schema, table: editContext.table})}</div>
+                            <div className="insert-form-hint">{t('resultGrid.insertHint')}</div>
                             {Object.keys(insertForm).map(name => (
                                 <div className="grid-edit-field" key={name}>
                                     <span className="grid-edit-label">{name}</span>
@@ -961,10 +962,10 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
                             {insertError && <div className="insert-form-error">{insertError}</div>}
                             <div className="grid-edit-actions">
                                 <button className="btn btn-success" onClick={confirmInsert} disabled={savingInsert}>
-                                    {savingInsert ? 'Inserindo…' : 'Inserir'}
+                                    {savingInsert ? t('resultGrid.inserting') : t('resultGrid.insert')}
                                 </button>
                                 <button className="btn btn-secondary" onClick={cancelInsertForm} disabled={savingInsert}>
-                                    Cancelar
+                                    {t('resultGrid.cancel')}
                                 </button>
                             </div>
                         </div>

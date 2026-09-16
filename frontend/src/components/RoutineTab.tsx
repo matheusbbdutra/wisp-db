@@ -1,3 +1,4 @@
+import {useTranslation} from 'react-i18next';
 import SqlEditor from './SqlEditor';
 
 interface Props {
@@ -13,11 +14,12 @@ interface Props {
 // ListFunctions (uma query batched por tabela/schema, ver
 // internal/db.PostgresDriver), então não há nada a buscar aqui, só exibir.
 export default function RoutineTab({kind, name, definition, hidden}: Props) {
+    const {t} = useTranslation();
     return (
         <div className="table-tab" hidden={hidden}>
             <div className="toolbar-secondary">
                 <span className="table-tab-title" title={name}>
-                    {kind === 'trigger' ? 'Trigger' : 'Função'}: {name}
+                    {kind === 'trigger' ? t('routineTab.trigger') : t('routineTab.function')}: {name}
                 </span>
             </div>
             <div className="ddl-editor-pane">

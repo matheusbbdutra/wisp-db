@@ -1,4 +1,5 @@
 import {useEffect, useState} from 'react';
+import {useTranslation} from 'react-i18next';
 import {ListScripts, UpdateScript, DeleteScript} from '../../wailsjs/go/main/App';
 import type {store} from '../../wailsjs/go/models';
 
@@ -19,6 +20,7 @@ function formatTime(updatedAt: any): string {
 }
 
 export default function ScriptsPanel({activeScriptId, onSelectScript, refreshToken}: Props) {
+    const {t} = useTranslation();
     const [scripts, setScripts] = useState<store.SavedScript[]>([]);
     const [loading, setLoading] = useState(false);
     const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -56,16 +58,16 @@ export default function ScriptsPanel({activeScriptId, onSelectScript, refreshTok
     return (
         <aside className="history-panel">
             <div className="sidebar-header">
-                <span className="sidebar-heading">Scripts salvos</span>
-                <button className="sidebar-refresh-btn" onClick={loadScripts} disabled={loading} title="Recarregar scripts">
-                    {loading ? 'Carregando…' : 'Atualizar'}
+                <span className="sidebar-heading">{t('scriptsPanel.heading')}</span>
+                <button className="sidebar-refresh-btn" onClick={loadScripts} disabled={loading} title={t('scriptsPanel.refreshTitle')}>
+                    {loading ? t('scriptsPanel.loading') : t('scriptsPanel.refresh')}
                 </button>
             </div>
 
             <div className="history-list">
                 {scripts.length === 0 && !loading && (
                     <div className="sidebar-empty" style={{padding: '16px 8px'}}>
-                        <span>Nenhum script salvo ainda.</span>
+                        <span>{t('scriptsPanel.empty')}</span>
                     </div>
                 )}
 
@@ -74,7 +76,7 @@ export default function ScriptsPanel({activeScriptId, onSelectScript, refreshTok
                         <li
                             key={script.ID}
                             className={`history-item ${script.ID === activeScriptId ? 'active' : ''}`}
-                            title="Clique para abrir no editor"
+                            title={t('scriptsPanel.itemTitle')}
                         >
                             {renamingId === script.ID ? (
                                 <input
@@ -98,7 +100,7 @@ export default function ScriptsPanel({activeScriptId, onSelectScript, refreshTok
                                         setRenamingId(script.ID);
                                         setRenameInput(script.Name);
                                     }}
-                                    title="Duplo clique para renomear"
+                                    title={t('scriptsPanel.renameTitle')}
                                 >
                                     {script.Name}
                                 </div>
@@ -112,9 +114,9 @@ export default function ScriptsPanel({activeScriptId, onSelectScript, refreshTok
                                         e.stopPropagation();
                                         handleDelete(script.ID);
                                     }}
-                                    title="Excluir script"
+                                    title={t('scriptsPanel.deleteTitle')}
                                 >
-                                    Excluir
+                                    {t('scriptsPanel.delete')}
                                 </button>
                             </div>
                         </li>

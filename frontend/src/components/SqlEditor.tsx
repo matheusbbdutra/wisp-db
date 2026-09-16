@@ -6,6 +6,7 @@ import {useEffect, useRef} from 'react';
 // próprio — ver docs/ARCHITECTURE.md: "sem parser SQL customizado".
 import * as monaco from 'monaco-editor/editor/editor.api';
 import {conf as sqlConf, language as sqlLanguage} from 'monaco-editor/languages/definitions/sql/sql';
+import i18n from '../i18n';
 // Import de efeito colateral: registra o SuggestController como contribuição
 // do editor. Sem isso, registerCompletionItemProvider (abaixo) só guarda os
 // providers num registro global — nenhum editor tem o widget/gatilho que
@@ -137,7 +138,7 @@ function buildKeywordSuggestions(range: MonacoRange): monaco.languages.Completio
     return SQL_KEYWORDS.map(keyword => ({
         label: keyword,
         kind: monaco.languages.CompletionItemKind.Keyword,
-        detail: 'keyword',
+        detail: i18n.t('sqlEditor.detailKeyword'),
         insertText: keyword,
         range: range as monaco.IRange,
     }));
@@ -169,7 +170,7 @@ function buildSchemaSuggestions(catalog: db.Table[], range: MonacoRange): monaco
     return distinctSchemas(catalog).map(schema => ({
         label: schema,
         kind: monaco.languages.CompletionItemKind.Module,
-        detail: 'schema',
+        detail: i18n.t('sqlEditor.detailSchema'),
         insertText: schema,
         range: range as monaco.IRange,
     }));
@@ -198,7 +199,7 @@ function buildTableSuggestions(catalog: db.Table[], range: MonacoRange, onlyTabl
             out.push({
                 label: qualified,
                 kind: monaco.languages.CompletionItemKind.Class,
-                detail: 'tabela',
+                detail: i18n.t('sqlEditor.detailTable'),
                 insertText: qualified,
                 range: range as monaco.IRange,
             });

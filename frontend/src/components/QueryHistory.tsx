@@ -1,4 +1,5 @@
 import {useEffect, useState} from 'react';
+import {useTranslation} from 'react-i18next';
 import {GetQueryHistory} from '../../wailsjs/go/main/App';
 import type {store} from '../../wailsjs/go/models';
 
@@ -28,6 +29,7 @@ function formatTime(executedAt: any): string {
 }
 
 export default function QueryHistory({onSelectQuery, refreshToken}: Props) {
+    const {t} = useTranslation();
     const [entries, setEntries] = useState<store.QueryHistoryEntry[]>([]);
     const [loading, setLoading] = useState(false);
 
@@ -48,16 +50,16 @@ export default function QueryHistory({onSelectQuery, refreshToken}: Props) {
     return (
         <aside className="history-panel">
             <div className="sidebar-header">
-                <span className="sidebar-heading">Histórico</span>
-                <button className="sidebar-refresh-btn" onClick={loadHistory} disabled={loading} title="Recarregar histórico">
-                    {loading ? 'Carregando…' : 'Atualizar'}
+                <span className="sidebar-heading">{t('queryHistory.heading')}</span>
+                <button className="sidebar-refresh-btn" onClick={loadHistory} disabled={loading} title={t('queryHistory.refreshTitle')}>
+                    {loading ? t('queryHistory.loading') : t('queryHistory.refresh')}
                 </button>
             </div>
 
             <div className="history-list">
                 {entries.length === 0 && !loading && (
                     <div className="sidebar-empty" style={{padding: '16px 8px'}}>
-                        <span>Nenhuma query executada ainda.</span>
+                        <span>{t('queryHistory.empty')}</span>
                     </div>
                 )}
 
@@ -67,7 +69,7 @@ export default function QueryHistory({onSelectQuery, refreshToken}: Props) {
                             key={entry.ID}
                             className="history-item"
                             onClick={() => onSelectQuery(entry.QueryText)}
-                            title="Clique para carregar no editor"
+                            title={t('queryHistory.itemTitle')}
                         >
                             <div className="history-summary">{summarize(entry.QueryText)}</div>
                             <div className="history-meta">

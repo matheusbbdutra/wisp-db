@@ -1,4 +1,5 @@
 import {useEffect, useRef, useState} from 'react';
+import {useTranslation} from 'react-i18next';
 import {ConnectSaved, Disconnect, RunQuery, FetchRows, IntrospectTable, GetTableDDL, ListTriggers, ListFunctions, ListIndexes, ListForeignKeys} from '../lib/tabApi';
 import type {db} from '../../wailsjs/go/models';
 import SqlEditor from './SqlEditor';
@@ -27,8 +28,9 @@ interface Props {
 // salvo da origem, nunca reusa a sessão do console (ver CLAUDE.md:
 // 1 tabId = 1 conexão dedicada). Disconnect centralizado em App.tsx.
 export default function TableTab({tabId, connectionId, schema, table, hidden, onConnectedChange, onOpenRoutine}: Props) {
+    const {t} = useTranslation();
     const [connected, setConnected] = useState(false);
-    const [status, setStatus] = useState('conectando…');
+    const [status, setStatus] = useState(() => t('tableTab.statusConnecting'));
     const [subTab, setSubTab] = useState<SubTab>('dados');
 
     // Colunas reais da tabela (via IntrospectTable, antes de qualquer cursor
@@ -61,6 +63,16 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
     // maiúsculas ou palavra reservada não quebram o SELECT).
     const qualified = schema === 'main' ? `"${table}"` : `"${schema}"."${table}"`;
 
+    const subTabLabel: Record<SubTab, string> = {
+        dados: t('tableTab.subDados'),
+        colunas: t('tableTab.subColunas'),
+        indices: t('tableTab.subIndices'),
+        fks: t('tableTab.subFks'),
+        ddl: t('tableTab.subDdl'),
+        triggers: t('tableTab.subTriggers'),
+        funcoes: t('tableTab.subFuncoes'),
+    };
+
     // Mount: conecta a sessão própria e já carrega a sub-aba Dados.
     // Sequencial, nunca Promise.all — a sessão usa uma única conexão
     // dedicada, que não suporta uso concorrente (mesma regra do ConsoleTab).
@@ -89,7 +101,7 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
                     await ConnectSaved(tabId, connectionId);
                 } catch (err) {
                     if (cancelled) return;
-                    setStatus(`erro: ${err}`);
+                    setStatus(t('tableTab.statusError', {error: err}));
                     setDadosError(String(err));
                     return;
                 }
@@ -102,7 +114,7 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
                 }
                 setConnected(true);
                 onConnectedChange(true);
-                setStatus(`conectado: ${schema}.${table}`);
+                setStatus(t('tableTab.statusConnected', {schema, table}));
                 try {
                     const full = await IntrospectTable(tabId, schema, table);
                     if (cancelled) return;
@@ -130,13 +142,13 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
         const cols = tableColumnsRef.current;
         if (cols.length === 0) {
             setEditContext(null);
-            setReadOnlyNotice(`Tabela ${schema}.${table} não encontrada no catálogo — grade somente leitura.`);
+            setReadOnlyNotice(t('tableTab.readOnlyNotFound', {schema, table}));
             return;
         }
         const pkColumns = cols.filter(c => c.IsPrimaryKey).map(c => c.Name);
         if (pkColumns.length === 0) {
             setEditContext(null);
-            setReadOnlyNotice(`Tabela ${schema}.${table} sem chave primária — grade somente leitura.`);
+            setReadOnlyNotice(t('tableTab.readOnlyNoPk', {schema, table}));
             return;
         }
         const byName = new Map(cols.map(c => [c.Name, c]));
@@ -146,7 +158,7 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
         });
         if (editableColumns.length === 0) {
             setEditContext(null);
-            setReadOnlyNotice(`Nenhuma coluna editável em ${schema}.${table} (só expressões ou colunas geradas) — grade somente leitura.`);
+            setReadOnlyNotice(t('tableTab.readOnlyNoEditable', {schema, table}));
             return;
         }
         setEditContext({schema, table, pkColumns, editableColumns, allColumns: cols});
@@ -183,7 +195,7 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
                 setRows(prev => [...prev, ...(batch.Rows ?? [])]);
                 setHasMore(batch.HasMore);
             } catch (err) {
-                setStatus(`erro ao buscar linhas: ${err}`);
+                setStatus(t('tableTab.errorFetchRows', {error: err}));
             } finally {
                 setFetching(false);
             }
@@ -248,7 +260,7 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
     return (
         <div className="table-tab" hidden={hidden}>
             <div className="toolbar-secondary">
-                <span className="table-tab-title" title={`Tabela ${schema}.${table}`}>{table}</span>
+                <span className="table-tab-title" title={t('tableTab.title', {schema, table})}>{table}</span>
                 <div className="table-subbar" role="tablist">
                     {(['dados', 'colunas', 'indices', 'fks', 'ddl', 'triggers', 'funcoes'] as SubTab[]).map(s => (
                         <button
@@ -259,11 +271,11 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
                             disabled={metaLoading && subTab !== s}
                             onClick={() => handleSelectSub(s)}
                         >
-                            {s === 'dados' ? 'Dados' : s === 'colunas' ? 'Colunas' : s === 'indices' ? 'Índices' : s === 'fks' ? 'FKs' : s === 'ddl' ? 'DDL' : s === 'triggers' ? 'Triggers' : 'Funções'}
+                            {subTabLabel[s]}
                         </button>
                     ))}
                 </div>
-                <div className="status-badge" title="Status da sessão desta aba">
+                <div className="status-badge" title={t('tableTab.statusTitle')}>
                     <span className={`status-dot ${connected ? 'connected' : isError ? 'error' : ''}`} />
                     <span>{status}</span>
                 </div>
@@ -272,7 +284,7 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
             {subTab === 'dados' && (
                 <div className="table-dados-pane">
                     {dadosError && !dadosLoaded ? (
-                        <div className="meta-empty">Erro ao carregar dados: {dadosError}</div>
+                        <div className="meta-empty">{t('tableTab.loadDataError', {error: dadosError})}</div>
                     ) : (
                         <>
                             <ResultGrid
@@ -289,9 +301,9 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
                             {hasMore && (
                                 <div className="load-more-bar">
                                     <button className="btn btn-secondary" onClick={handleLoadMore} disabled={fetching}>
-                                        {fetching ? 'Carregando…' : `Carregar mais ${BATCH_SIZE}`}
+                                        {fetching ? t('tableTab.loading') : t('tableTab.loadMore', {count: BATCH_SIZE})}
                                     </button>
-                                    <span className="load-more-hint">Mais linhas disponíveis no resultado.</span>
+                                    <span className="load-more-hint">{t('tableTab.loadMoreHint')}</span>
                                 </div>
                             )}
                         </>
@@ -302,17 +314,17 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
             {subTab === 'colunas' && (
                 <div className="table-meta-pane">
                     {tableColumns.length === 0 && (
-                        <div className="meta-empty">Não foi possível carregar as colunas desta tabela.</div>
+                        <div className="meta-empty">{t('tableTab.columnsLoadError')}</div>
                     )}
                     {tableColumns.length > 0 && (
                         <table className="columns-table">
                             <thead>
                                 <tr>
-                                    <th>Nome</th>
-                                    <th>Tipo</th>
-                                    <th>Nulo?</th>
-                                    <th>PK</th>
-                                    <th>Gerada</th>
+                                    <th>{t('tableTab.colName')}</th>
+                                    <th>{t('tableTab.colType')}</th>
+                                    <th>{t('tableTab.colNullable')}</th>
+                                    <th>{t('tableTab.colPk')}</th>
+                                    <th>{t('tableTab.colGenerated')}</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -320,9 +332,9 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
                                     <tr key={c.Name}>
                                         <td>{c.Name}</td>
                                         <td>{c.Type}</td>
-                                        <td>{c.Nullable ? 'sim' : 'não'}</td>
+                                        <td>{c.Nullable ? t('tableTab.yes') : t('tableTab.no')}</td>
                                         <td>{c.IsPrimaryKey ? '🔑' : ''}</td>
-                                        <td>{c.IsGenerated ? 'sim' : ''}</td>
+                                        <td>{c.IsGenerated ? t('tableTab.yes') : ''}</td>
                                     </tr>
                                 ))}
                             </tbody>
@@ -333,18 +345,18 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
 
             {subTab === 'indices' && (
                 <div className="table-meta-pane">
-                    {metaLoading && indices === null && <div className="meta-empty">Carregando índices…</div>}
-                    {metaError && indices === null && <div className="meta-empty">Erro ao carregar índices: {metaError}</div>}
+                    {metaLoading && indices === null && <div className="meta-empty">{t('tableTab.loadingIndexes')}</div>}
+                    {metaError && indices === null && <div className="meta-empty">{t('tableTab.loadIndexesError', {error: metaError})}</div>}
                     {indices !== null && indices.length === 0 && (
-                        <div className="meta-empty">Nenhum índice explícito nesta tabela.</div>
+                        <div className="meta-empty">{t('tableTab.emptyIndexes')}</div>
                     )}
                     {indices !== null && indices.length > 0 && (
                         <table className="columns-table">
                             <thead>
                                 <tr>
-                                    <th>Nome</th>
-                                    <th>Colunas</th>
-                                    <th>Único</th>
+                                    <th>{t('tableTab.colName')}</th>
+                                    <th>{t('tableTab.idxColumns')}</th>
+                                    <th>{t('tableTab.idxUnique')}</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -352,7 +364,7 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
                                     <tr key={idx.Name} title={idx.Definition}>
                                         <td>{idx.Name}</td>
                                         <td>{(idx.Columns ?? []).join(', ')}</td>
-                                        <td>{idx.Unique ? 'sim' : 'não'}</td>
+                                        <td>{idx.Unique ? t('tableTab.yes') : t('tableTab.no')}</td>
                                     </tr>
                                 ))}
                             </tbody>
@@ -363,18 +375,18 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
 
             {subTab === 'fks' && (
                 <div className="table-meta-pane">
-                    {metaLoading && foreignKeys === null && <div className="meta-empty">Carregando foreign keys…</div>}
-                    {metaError && foreignKeys === null && <div className="meta-empty">Erro ao carregar foreign keys: {metaError}</div>}
+                    {metaLoading && foreignKeys === null && <div className="meta-empty">{t('tableTab.loadingFks')}</div>}
+                    {metaError && foreignKeys === null && <div className="meta-empty">{t('tableTab.loadFksError', {error: metaError})}</div>}
                     {foreignKeys !== null && foreignKeys.length === 0 && (
-                        <div className="meta-empty">Nenhuma foreign key nesta tabela.</div>
+                        <div className="meta-empty">{t('tableTab.emptyFks')}</div>
                     )}
                     {foreignKeys !== null && foreignKeys.length > 0 && (
                         <table className="columns-table">
                             <thead>
                                 <tr>
-                                    <th>Nome</th>
-                                    <th>Colunas</th>
-                                    <th>Referência</th>
+                                    <th>{t('tableTab.colName')}</th>
+                                    <th>{t('tableTab.fkColumns')}</th>
+                                    <th>{t('tableTab.fkReference')}</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -393,8 +405,8 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
 
             {subTab === 'ddl' && (
                 <div className="table-meta-pane">
-                    {metaLoading && ddl === null && <div className="meta-empty">Carregando DDL…</div>}
-                    {metaError && ddl === null && <div className="meta-empty">Erro ao carregar DDL: {metaError}</div>}
+                    {metaLoading && ddl === null && <div className="meta-empty">{t('tableTab.loadingDdl')}</div>}
+                    {metaError && ddl === null && <div className="meta-empty">{t('tableTab.loadDdlError', {error: metaError})}</div>}
                     {ddl !== null && (
                         <div className="ddl-editor-pane">
                             <SqlEditor value={ddl} onChange={() => {}} onRunRequested={() => {}} readOnly />
@@ -405,21 +417,21 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
 
             {subTab === 'triggers' && (
                 <div className="table-meta-pane">
-                    {metaLoading && triggers === null && <div className="meta-empty">Carregando triggers…</div>}
-                    {metaError && triggers === null && <div className="meta-empty">Erro ao carregar triggers: {metaError}</div>}
+                    {metaLoading && triggers === null && <div className="meta-empty">{t('tableTab.loadingTriggers')}</div>}
+                    {metaError && triggers === null && <div className="meta-empty">{t('tableTab.loadTriggersError', {error: metaError})}</div>}
                     {triggers !== null && triggers.length === 0 && (
-                        <div className="meta-empty">Nenhum trigger nesta tabela.</div>
+                        <div className="meta-empty">{t('tableTab.emptyTriggers')}</div>
                     )}
                     {triggers !== null && triggers.length > 0 && (
                         <ul className="meta-name-list">
-                            {triggers.map(t => (
+                            {triggers.map(trigger => (
                                 <li
-                                    key={t.Name}
+                                    key={trigger.Name}
                                     className="meta-name-item"
-                                    onClick={() => onOpenRoutine('trigger', t.Name, t.Definition)}
-                                    title={`Abrir definição de ${t.Name} em aba própria`}
+                                    onClick={() => onOpenRoutine('trigger', trigger.Name, trigger.Definition)}
+                                    title={t('tableTab.openRoutineTitle', {name: trigger.Name})}
                                 >
-                                    {t.Name}
+                                    {trigger.Name}
                                 </li>
                             ))}
                         </ul>
@@ -429,24 +441,24 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
 
             {subTab === 'funcoes' && (
                 <div className="table-meta-pane">
-                    {metaLoading && funcoes === null && <div className="meta-empty">Carregando funções…</div>}
-                    {metaError && funcoes === null && <div className="meta-empty">Erro ao carregar funções: {metaError}</div>}
+                    {metaLoading && funcoes === null && <div className="meta-empty">{t('tableTab.loadingFunctions')}</div>}
+                    {metaError && funcoes === null && <div className="meta-empty">{t('tableTab.loadFunctionsError', {error: metaError})}</div>}
                     {funcoes !== null && funcoes.length === 0 && (
                         <div className="meta-empty">
-                            Nenhuma função encontrada neste schema.
-                            <span className="meta-hint">SQLite não possui funções de usuário — neste caso a lista é sempre vazia.</span>
+                            {t('tableTab.emptyFunctions')}
+                            <span className="meta-hint">{t('tableTab.emptyFunctionsHint')}</span>
                         </div>
                     )}
                     {funcoes !== null && funcoes.length > 0 && (
                         <ul className="meta-name-list">
-                            {funcoes.map(f => (
+                            {funcoes.map(fn => (
                                 <li
-                                    key={f.Name}
+                                    key={fn.Name}
                                     className="meta-name-item"
-                                    onClick={() => onOpenRoutine('function', f.Name, f.Definition)}
-                                    title={`Abrir definição de ${f.Name} em aba própria`}
+                                    onClick={() => onOpenRoutine('function', fn.Name, fn.Definition)}
+                                    title={t('tableTab.openRoutineTitle', {name: fn.Name})}
                                 >
-                                    {f.Name}
+                                    {fn.Name}
                                 </li>
                             ))}
                         </ul>
