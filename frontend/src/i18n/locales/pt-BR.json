@@ -330,5 +330,10 @@
     "loadFunctionsError": "Erro ao carregar funções: {{error}}",
     "emptyFunctions": "Nenhuma função encontrada neste schema.",
     "emptyFunctionsHint": "SQLite não possui funções de usuário — neste caso a lista é sempre vazia."
+  },
+  "errorBoundary": {
+    "title": "Algo deu errado",
+    "description": "O erro foi registrado no log local. Recarregar normalmente recupera a janela.",
+    "reload": "Recarregar"
   }
 }

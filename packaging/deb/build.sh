@@ -17,7 +17,7 @@ PKGNAME="wisp"
 # ~beta1 (não -beta1): convenção de versionamento Debian pra pre-release —
 # "~" ordena ANTES da versão final na comparação dpkg (0.1.0~beta1 < 0.1.0),
 # hífen seria interpretado como separador do debian_revision.
-VERSION="0.1.0~beta6"
+VERSION="0.1.0~beta7"
 ARCH="amd64"
 MAINTAINER="Matheus Dutra <matheusbbdutra@gmail.com>"
 DEB_FILE="${PKGNAME}_${VERSION}_${ARCH}.deb"

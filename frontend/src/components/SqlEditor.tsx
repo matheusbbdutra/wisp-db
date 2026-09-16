@@ -177,7 +177,7 @@ function buildSchemaSuggestions(catalog: db.Table[], range: MonacoRange): monaco
     }));
 }
 
-function buildTableSuggestions(catalog: db.Table[], range: MonacoRange, onlyTables?: db.Table[]): monaco.languages.CompletionItem[] {
+function buildTableSuggestions(catalog: db.Table[], range: MonacoRange, onlyTables?: db.Table[], sortPrefix = ''): monaco.languages.CompletionItem[] {
     const source = onlyTables ?? catalog;
     const singleSchema = new Set(catalog.map(t => t.Schema)).size <= 1;
     const seen = new Set<string>();
@@ -192,6 +192,7 @@ function buildTableSuggestions(catalog: db.Table[], range: MonacoRange, onlyTabl
             kind: monaco.languages.CompletionItemKind.Class,
             detail: table.Schema,
             insertText: table.Name,
+            sortText: `${sortPrefix}${table.Name}`,
             range: range as monaco.IRange,
         });
         const qualified = `${table.Schema}.${table.Name}`;
@@ -202,6 +203,7 @@ function buildTableSuggestions(catalog: db.Table[], range: MonacoRange, onlyTabl
                 kind: monaco.languages.CompletionItemKind.Class,
                 detail: i18n.t('sqlEditor.detailTable'),
                 insertText: qualified,
+                sortText: `${sortPrefix}${qualified}`,
                 range: range as monaco.IRange,
             });
         }
@@ -209,26 +211,73 @@ function buildTableSuggestions(catalog: db.Table[], range: MonacoRange, onlyTabl
     return out;
 }
 
-function buildColumnSuggestions(catalog: db.Table[], range: MonacoRange, onlyTables?: db.Table[]): monaco.languages.CompletionItem[] {
+// dedupKey inclui schema+tabela (não só o nome da coluna): a versão anterior
+// deduplicava só por nome, então duas tabelas com coluna homônima em schemas
+// diferentes (comum: "id", "created_at") faziam a coluna da tabela errada
+// "vencer" e aparecer como se fosse da tabela que o usuário está de fato
+// consultando — bug real relatado pelo usuário (2026-09-16).
+function buildColumnSuggestions(catalog: db.Table[], range: MonacoRange, onlyTables?: db.Table[], sortPrefix = ''): monaco.languages.CompletionItem[] {
     const source = onlyTables ?? catalog;
-    const seen = new Set<string>();
+    const seenNames = new Set<string>();
+    const seenKeys = new Set<string>();
     const out: monaco.languages.CompletionItem[] = [];
     for (const table of source) {
         for (const col of table.Columns ?? []) {
             if (!col?.Name) continue;
-            const key = col.Name.toLowerCase();
-            if (seen.has(key)) continue;
-            seen.add(key);
+            const dedupKey = onlyTables ? `${table.Schema}.${table.Name}.${col.Name}`.toLowerCase() : col.Name.toLowerCase();
+            const seenSet = onlyTables ? seenKeys : seenNames;
+            if (seenSet.has(dedupKey)) continue;
+            seenSet.add(dedupKey);
             out.push({
                 label: col.Name,
                 kind: monaco.languages.CompletionItemKind.Field,
                 detail: `${table.Schema}.${table.Name} · ${col.Type}`,
                 insertText: col.Name,
+                sortText: `${sortPrefix}${col.Name}`,
                 range: range as monaco.IRange,
             });
         }
     }
     return out;
+}
+
+// Resolve as tabelas do catálogo que a query já referencia via FROM/JOIN
+// (com ou sem alias) — mesmo mapa que resolveDotContext usa pra "alias.".
+// Usado no fallback (sem ponto) pra priorizar/escopar tabela e coluna às
+// tabelas realmente em jogo na query, em vez do catálogo inteiro sem
+// distinção (bug real: em bancos com muitos schemas/tabelas, colunas e
+// tabelas de outras partes do catálogo afogavam as relevantes).
+function resolveQueryTables(query: string, catalog: db.Table[]): db.Table[] {
+    const aliases = extractTableAliases(query);
+    const seen = new Set<string>();
+    const out: db.Table[] = [];
+    for (const {schema, table} of aliases.values()) {
+        for (const candidate of catalog) {
+            const nameMatches = candidate.Name?.toLowerCase() === table.toLowerCase();
+            if (!nameMatches) continue;
+            if (schema !== null && candidate.Schema?.toLowerCase() !== schema.toLowerCase()) continue;
+            const key = `${candidate.Schema}.${candidate.Name}`.toLowerCase();
+            if (seen.has(key)) continue;
+            seen.add(key);
+            out.push(candidate);
+        }
+    }
+    return out;
+}
+
+// Logo após FROM/JOIN (primeiro token, antes de qualquer ponto/alias), só
+// schema ou tabela fazem sentido gramaticalmente — nunca coluna. Sem essa
+// distinção, uma coluna homônima (ou parecida o bastante pro fuzzy-match do
+// Monaco) de QUALQUER tabela de QUALQUER schema competia de igual pra igual
+// com a tabela certa e podia aparecer no lugar dela — bug real relatado
+// pelo usuário (2026-09-16): "FROM s_solicitacao" mostrando uma coluna de
+// outro schema em vez da tabela. Mesma inspeção de string sem parser SQL
+// (ver docs/ARCHITECTURE.md) — limitação aceita: só detecta quando FROM/JOIN
+// está na MESMA linha do cursor (igual resolveDotContext/extractTableAliases
+// já assumem para o narrowing por ponto).
+function isAfterFromOrJoin(model: monaco.editor.ITextModel, lineNumber: number, wordStartColumn: number): boolean {
+    const prefix = model.getLineContent(lineNumber).slice(0, wordStartColumn - 1);
+    return /\b(?:from|join)\s+$/i.test(prefix);
 }
 
 type DotContext =
@@ -295,10 +344,26 @@ monaco.languages.registerCompletionItemProvider('sql', {
         if (dot?.kind === 'table-columns') {
             return {suggestions: buildColumnSuggestions(catalog, range, dot.tables)};
         }
+        // Logo após FROM/JOIN: só schema/tabela — nunca coluna (ver
+        // isAfterFromOrJoin acima).
+        if (isAfterFromOrJoin(textModel, position.lineNumber, word.startColumn)) {
+            return {
+                suggestions: [
+                    ...buildSchemaSuggestions(catalog, range),
+                    ...buildTableSuggestions(catalog, range),
+                ],
+            };
+        }
+        // Sem ponto e fora de FROM/JOIN: prioriza tabela/coluna já
+        // referenciada no FROM/JOIN da query (com sortText '0'), mantendo o
+        // catálogo inteiro como fallback de menor prioridade ('1') — nada é
+        // escondido, só reordenado.
+        const queryTables = catalog.length > 0 ? resolveQueryTables(textModel.getValue(), catalog) : [];
         const suggestions: monaco.languages.CompletionItem[] = [
             ...buildSchemaSuggestions(catalog, range),
-            ...buildTableSuggestions(catalog, range),
-            ...buildColumnSuggestions(catalog, range),
+            ...(queryTables.length > 0 ? buildColumnSuggestions(catalog, range, queryTables, '0') : []),
+            ...buildTableSuggestions(catalog, range, undefined, '1'),
+            ...buildColumnSuggestions(catalog, range, undefined, '1'),
             ...buildKeywordSuggestions(range),
             ...buildFunctionSuggestions(driver, range),
         ];

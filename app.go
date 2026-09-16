@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"wisp/internal/db"
+	"wisp/internal/errlog"
 	"wisp/internal/schemacache"
 	"wisp/internal/session"
 	"wisp/internal/store"
@@ -58,6 +60,10 @@ func (a *App) startup(ctx context.Context) {
 		return
 	}
 
+	if err := errlog.Init(dbDir); err != nil {
+		fmt.Printf("wisp: não foi possível abrir log local: %v\n", err)
+	}
+
 	v, err := vault.Open()
 	if err != nil {
 		fmt.Printf("wisp: não foi possível abrir credential vault: %v\n", err)
@@ -82,6 +88,7 @@ func (a *App) shutdown(ctx context.Context) {
 	if a.store != nil {
 		a.store.Close()
 	}
+	_ = errlog.Close()
 }
 
 // beforeClose intercepts window closure (registered in main.go via
@@ -756,4 +763,12 @@ func (a *App) PickSQLiteFile() (string, error) {
 			},
 		},
 	})
+}
+
+// ReportFrontendError records an uncaught frontend error (React ErrorBoundary,
+// window.onerror or unhandledrejection — see frontend/src/lib/errorReporting.ts) in the
+// same local log used for Go-side panics (internal/errlog). Nothing is sent anywhere:
+// this only persists locally for the user to review later in a "Report problem" flow.
+func (a *App) ReportFrontendError(source string, message string, stack string) {
+	errlog.Error("frontend-"+source, message, slog.String("stack", errlog.Scrub(stack)))
 }

@@ -1,5 +1,118 @@
 # STATE — Wisp
 
+## 🚧 Em andamento (2026-09-16): captura local de erros (base para "Reportar problema")
+Decisão do usuário: em vez de Sentry (rejeitado — risco de vazar DSN/query
+mesmo com DSN client-side não sendo segredo em si) e em vez de abrir issue
+automática no GitHub (rejeitado — exigiria token de escrita real embutido
+no binário público, abusável), a captura fica 100% local; reportar é ação
+manual do usuário depois (URL pré-preenchida de issue, ele revisa e
+submete — ainda não implementado, é o próximo passo).
+
+**Feito nesta etapa (captura local):**
+- `internal/errlog/errlog.go` (pacote novo): log local em NDJSON (JSON
+  Lines, um objeto por linha — apêndice seguro mesmo se o processo morrer
+  no meio, ao contrário de um array JSON único) via `log/slog` da stdlib
+  (Go 1.26, sem dependência nova). Escreve em `<user config>/wisp/wisp.log`
+  (mesmo diretório do `wisp.db`). Rotação simples por tamanho (5MB →
+  `.log.1`, sobrescrito). `Scrub()` redige DSN (`scheme://user:pass@host`
+  → `scheme://***@host`) e literais SQL entre aspas simples ANTES de
+  persistir — nunca depois.
+- `main.go`: `recover()` no nível de `main()` loga o panic (via
+  `errlog.Error`) e repropaga — cobre panics síncronos alcançáveis a
+  partir de `wails.Run`/`OnStartup`/etc.; **não cobre** panic em goroutine
+  solta (limitação conhecida, documentada no comentário).
+- `app.go`: `errlog.Init(dbDir)` no `startup`, `errlog.Close()` no
+  `shutdown`; novo método bindado `ReportFrontendError(source, message,
+  stack)` para o frontend reportar erro não tratado.
+- Frontend: `lib/errorReporting.ts` (`window.onerror` +
+  `unhandledrejection` → `ReportFrontendError`) instalado uma vez em
+  `main.tsx`; `components/ErrorBoundary.tsx` (classe React, único jeito de
+  capturar erro de render) envolvendo `<App/>` em `main.tsx`, com fallback
+  visual (`errorBoundary.*` em `en.json`/`pt-BR.json`, CSS em `App.css`
+  `.error-boundary`).
+- `frontend/wailsjs/**` regenerado via `wails generate module` (inclui o
+  binding novo `ReportFrontendError`; diff em `models.ts` é só whitespace,
+  igual ao padrão já visto no commit `b125f5c`).
+
+**Verificado por mim:** `go build ./...`, `go vet ./...`, `go test ./...
+-count=1` (sem cache) passaram, incluindo `internal/errlog/errlog_test.go`
+novo (3 casos: redige credencial de DSN, redige literal entre aspas, não
+toca mensagem sem dado sensível). Verificação manual extra fora dos
+testes automatizados: rodei um `main` descartável chamando
+`errlog.Init`/`errlog.Error`/`errlog.Close` de verdade contra um diretório
+temporário e li o `wisp.log` resultante — confirmei na prática que a
+linha NDJSON sai como esperado e a credencial aparece redigida
+(`postgres://***@host:5432/app`), não em texto puro. `tsc --noEmit`,
+`npm run build` (só avisos conhecidos de dependência) e `npx vitest run`
+(27/27) passaram no frontend.
+
+**Não verificado:** teste manual na janela nativa (React ErrorBoundary
+disparando de verdade num erro de render real, e o Go panic recovery
+disparando de verdade) — só testei a lógica isolada (Scrub + escrita em
+disco), não o fluxo ponta a ponta dentro do app rodando via Wails.
+
+**Próximo passo (não implementado ainda):** UI de "Reportar problema" que
+lê o `wisp.log`, mostra o erro já escrubado pro usuário revisar, e abre
+`github.com/.../issues/new?body=...` no browser — nada é enviado sem o
+usuário ver e confirmar.
+
+---
+
+## ✅ Corrigido (2026-09-16): autocomplete não escopava por tabela em bancos com muitos schemas
+Causa raiz confirmada em `frontend/src/components/SqlEditor.tsx`: fora do
+contexto `alias.` (ponto), o provider do Monaco sempre listava
+tabelas/colunas do **catálogo inteiro**, sem filtrar pelas tabelas já
+referenciadas no `FROM`/`JOIN` da query atual. `buildColumnSuggestions`
+deduplicava só por **nome** de coluna (não por schema+tabela+nome), então
+com colunas homônimas em tabelas diferentes (`id`, `created_at`, etc. —
+comum em bancos com muitos schemas), a coluna da tabela errada "vencia" e
+aparecia como se fosse da tabela relevante — exatamente o bug relatado
+pelo usuário ("traz uma coluna que não tem relação"). No `WHERE` (sem
+alias), as colunas relevantes ficavam afogadas entre centenas de outras
+sem prioridade nenhuma.
+
+**Correção 1:** nova função `resolveQueryTables()` reaproveita
+`extractTableAliases()` (já usado em `resolveDotContext` para `alias.`)
+para resolver as tabelas do FROM/JOIN mesmo sem alias explícito. No
+fallback sem ponto, essas tabelas agora geram sugestões de coluna com
+`sortText` prioritário (`'0'`, dedupe por `schema.tabela.coluna`) e o
+catálogo inteiro continua disponível como fallback de menor prioridade
+(`'1'`) — nada foi escondido, só reordenado. `buildTableSuggestions`
+também ganhou `sortText` para consistência.
+
+**Correção 2 (causa raiz mais grave, confirmada com exemplo real do
+usuário):** logo após `FROM`/`JOIN` (primeiro token, sem ponto/alias
+ainda), o provider misturava tabelas E colunas na mesma lista com a mesma
+prioridade. Exemplo relatado: schema `sigfacil` com tabela
+`s_solicitacao`; ao digitar `FROM s_solicitacao`, aparecia uma **coluna**
+de outro schema (`apache`) em vez da tabela — porque qualquer coluna de
+qualquer tabela/schema que combinasse com o texto digitado competia de
+igual pra igual com a tabela certa. Nova função `isAfterFromOrJoin()`
+detecta esse contexto (mesma inspeção de string sem parser SQL, mesma
+limitação aceita de `resolveDotContext`: só funciona quando FROM/JOIN
+está na mesma linha do cursor) e, quando verdadeiro, a lista fica restrita
+a schema+tabela — nunca coluna.
+
+**Verificado por mim:** `tsc --noEmit`, `npm run build` (só avisos
+conhecidos de dependência), `npx vitest run` (27/27), `go build ./...` e
+`go vet ./...` passaram após as duas correções. **Não verificado:** teste
+manual num banco real com múltiplos schemas (o cenário relatado usa infra
+da empresa do usuário, só reproduz nesse PC — usuário só consegue validar
+numa build de release, não em dev).
+
+**Release preparada a pedido do usuário:** `version.go` → `v0.1.0-beta.7`
+e `packaging/deb/build.sh` (`VERSION="0.1.0~beta7"`), mesmo padrão do
+commit `b125f5c` (beta6). **Eu não empacotei nem publiquei nada** — isso
+é ação visível/de distribuição, fora do meu escopo sem pedido explícito.
+Pra gerar o artefato: `packaging/deb/build.sh` (Debian/Ubuntu 22.04+) ou
+`makepkg` via `packaging/arch/PKGBUILD` (Arch — `pkgver`/`pkgrel` não
+carregam o sufixo beta, não precisou de bump aí). Pendente: usuário
+instala no outro PC e confirma se `FROM sigfacil.s_solicitacao` (e casos
+parecidos) agora sugere schema/tabela certos sem coluna de outro schema
+aparecendo no meio.
+
+---
+
 ## ✅ Concluído (2026-09-16): staging INSERT/DELETE no ResultGrid
 Delegate `20260916T131731-grid-batch-review` (Cursor).
 

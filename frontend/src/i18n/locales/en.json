@@ -330,5 +330,10 @@
     "loadFunctionsError": "Error loading functions: {{error}}",
     "emptyFunctions": "No function found in this schema.",
     "emptyFunctionsHint": "SQLite has no user-defined functions — in that case the list is always empty."
+  },
+  "errorBoundary": {
+    "title": "Something went wrong",
+    "description": "The error was recorded in the local log. Reloading usually recovers the window.",
+    "reload": "Reload"
   }
 }

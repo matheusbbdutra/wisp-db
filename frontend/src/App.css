@@ -1932,3 +1932,34 @@
     -webkit-mask: var(--empty-icon) center / contain no-repeat;
     mask: var(--empty-icon) center / contain no-repeat;
 }
+
+.error-boundary {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    height: 100vh;
+    background: var(--bg-app);
+    color: var(--text-main);
+    text-align: center;
+    padding: 24px;
+}
+
+.error-boundary p {
+    color: var(--text-secondary);
+    max-width: 480px;
+}
+
+.error-boundary button {
+    background: var(--accent-blue);
+    color: var(--text-main);
+    border: none;
+    border-radius: 6px;
+    padding: 8px 16px;
+    cursor: pointer;
+}
+
+.error-boundary button:hover {
+    background: var(--accent-blue-hover);
+}

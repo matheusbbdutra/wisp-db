@@ -60,6 +60,8 @@ export function PickSQLiteFile():Promise<string>;
 
 export function RefreshSchema(arg1:string):Promise<void>;
 
+export function ReportFrontendError(arg1:string,arg2:string,arg3:string):Promise<void>;
+
 export function RunQuery(arg1:string,arg2:string):Promise<main.QueryMetadata>;
 
 export function SaveConnection(arg1:string,arg2:string,arg3:string):Promise<string>;

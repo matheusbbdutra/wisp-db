@@ -114,6 +114,10 @@ export function RefreshSchema(arg1) {
   return window['go']['main']['App']['RefreshSchema'](arg1);
 }
 
+export function ReportFrontendError(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ReportFrontendError'](arg1, arg2, arg3);
+}
+
 export function RunQuery(arg1, arg2) {
   return window['go']['main']['App']['RunQuery'](arg1, arg2);
 }
