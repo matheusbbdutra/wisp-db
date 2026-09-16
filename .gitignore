@@ -9,3 +9,8 @@
 /packaging/arch/pkg/
 /packaging/deb/*.deb
 /dist/
+
+# Logs locais de auditoria de ferramentas (gerados na máquina, sem valor p/ o repo)
+# Decisão S2/S6 (2026-09-16): descartável local, nada a versionar nem documentar além disto.
+/receipts/
+/review-receipts/

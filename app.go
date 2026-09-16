@@ -141,12 +141,11 @@ type githubRelease struct {
 }
 
 // CheckForUpdate queries the public GitHub API (no authentication or credentials
-// involved) and compares against AppVersion (version.go). Comparison uses string
-// equality only (not semver-aware) — sufficient for the v1 "notification only" scope:
-// any tag different from the one embedded in the binary counts as "update available",
-// already covering the real use case (never falling too far behind between manual
-// checks). A short timeout keeps the UI from hanging if the network is poor/unavailable
-// (entirely optional; never blocks any app workflow).
+// involved) and compares against AppVersion (version.go) with semver precedence
+// (see isNewerVersion): only a strictly NEWER tag counts as "update available",
+// so running a build newer than the latest release stays silent instead of
+// nagging. A short timeout keeps the UI from hanging if the network is
+// poor/unavailable (entirely optional; never blocks any app workflow).
 func (a *App) CheckForUpdate() (*UpdateInfo, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
@@ -179,7 +178,7 @@ func (a *App) CheckForUpdate() (*UpdateInfo, error) {
 		CurrentVersion: AppVersion,
 		LatestVersion:  latest.TagName,
 		HTMLURL:        latest.HTMLURL,
-		HasUpdate:      latest.TagName != AppVersion,
+		HasUpdate:      isNewerVersion(latest.TagName, AppVersion),
 	}, nil
 }
 

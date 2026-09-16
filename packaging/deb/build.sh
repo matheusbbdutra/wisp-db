@@ -17,13 +17,21 @@ PKGNAME="wisp"
 # ~beta1 (não -beta1): convenção de versionamento Debian pra pre-release —
 # "~" ordena ANTES da versão final na comparação dpkg (0.1.0~beta1 < 0.1.0),
 # hífen seria interpretado como separador do debian_revision.
-VERSION="0.1.0~beta7"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# VERSION deriva de version.go (fonte única da versão): tira o "v" inicial e
+# mapeia "-beta" pro "~beta" do Debian (ordenação pré-release, ver comentário
+# acima). Bump de versão = editar só version.go.
+APP_VERSION="$(sed -n 's/^const AppVersion = "\(.*\)"$/\1/p' "${REPO_ROOT}/version.go")"
+if [ -z "${APP_VERSION}" ]; then
+  echo "AppVersion não encontrado em ${REPO_ROOT}/version.go" >&2
+  exit 1
+fi
+VERSION="$(printf '%s' "${APP_VERSION}" | sed -e 's/^v//' -e 's/-beta/~beta/' -e 's/~beta\./~beta/')"
 ARCH="amd64"
 MAINTAINER="Matheus Dutra <matheusbbdutra@gmail.com>"
 DEB_FILE="${PKGNAME}_${VERSION}_${ARCH}.deb"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 STAGE_DIR="${SCRIPT_DIR}/stage"
 BINARIO_BUILDADO="${REPO_ROOT}/build/bin/wisp"
 

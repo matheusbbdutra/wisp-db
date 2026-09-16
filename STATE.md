@@ -1,5 +1,61 @@
 # STATE — Wisp
 
+## ✅ Executado (2026-09-16): S1/S2/S3/S5/S6, S4 virou roteiro acima
+Ordem crítico→simples. S3: ResultGrid 1134→311, ConsoleTab 1037→353 (hooks
+useGridFilter/useGridCopy/usePendingBatch/useCellEditing/useEditability/
+useValuePanel/useConnection/useResultExecution/useScriptState + componentes
+pequenos). S5: version.go fonte única + isNewerVersion semver + version_test.go
+(12 casos), build.sh deriva VERSION (`0.1.0~beta7` confirmado). S1: linha
+`// replace` removida (grep 0). S2+S6: receipts/ ignorados. Validado por mim:
+tsc, vite build, vitest 27/27, go build/vet/test, diff --check. Revisão do
+Claude (delegate 20260916T195924): APROVAR — sem divergência de comportamento
+nos pontos críticos; ressalva: ele não rodou builds (bloqueio do harness
+dele), compilação verificada só por mim. Sem commit (não pedido).
+
+## 🐛 Fix (2026-09-16): painel de valor no lado errado após S3
+Causa raiz: na reescrita do ResultGrid, o `CellValueViewer` saiu de dentro
+de `.result-body` (flex row → dock à direita) pra dentro de
+`.result-container` (flex column → caía pra baixo do grid); o overlay de
+edição (`position:absolute`) também perdeu o ancestral `relative`
+(`.result-grid-canvas`). Fix: `GridCanvas` aceita `children` (menu, popover,
+review voltam pra dentro do canvas) e o viewer volta pra dentro do
+`.result-body` — mesmo aninhamento do original. Sem teste mantido: repo não
+tem harness de componente (sem jsdom/testing-library); adicioná-lo só pra
+isso é desproporcional — verificação por tsc/build/vitest + diff estrutural
++ confirmação visual do usuário.
+
+## 💡 Não-bloqueantes pré-existentes (2026-09-16, sem ação)
+a. `restoreLastScript` compara contra `query` do mount (closure obsoleta) —
+confirmado idêntico no original (ConsoleTab HEAD:706-728); corrigir mudaria
+comportamento, fora do escopo do refactor.
+b. `usePendingBatch` mistura staging/preview/execução (SRP) — extração 1:1,
+não agravado; quebrar mais aumenta risco sem ganho atual.
+c. `loadCatalog` usa 4 refs em vez de máquina de estado — extração fiel;
+unificar é refactor comportamental, adiar p/ quando mexer no catálogo.
+
+## 🧪 A validar manualmente (2026-09-16): S4 + regressão do S3
+Roteiro p/ janela nativa (não executável por agente — exige DB real + Webview).
+Pré-requisito: build com as mudanças S1–S3+S5 (beta8 ou dev contra staging).
+
+**A. Autocomplete multi-schema (beta7+, banco real c/ vários schemas):**
+1. `FROM sigfacil.s_solicitacao` → sugere schema/tabela certos, sem coluna de outro schema no meio.
+2. `WHERE` sem alias → colunas das tabelas do FROM/JOIN primeiro.
+3. `alias.` após JOIN → só colunas da tabela do alias.
+
+**B. ErrorBoundary + ReportFrontendError:** forçar erro de render temporário →
+fallback visual + linha NDJSON em `wisp.log` com DSN redigido (`***`), sem query literal.
+
+**C. Panic recovery (main.go):** panic síncrono alcançável → logado em `wisp.log`, processo repropaga (não silencia).
+
+**D. Regressão do refactor S3 (comportamento idêntico):**
+1. Filtrar grid → editar célula filtrada salva na linha REAL; copiar célula/linha/seleção filtrada.
+2. Staging INSERT (rascunho verde) + DELETE (vermelho) → Revisar → Executar; erro inline não limpa pendências.
+3. Console: salvar/sobrescrever script, fechar aba com SQL sujo (3 botões), Explain, load-more, fechar aba de resultado.
+4. Toggle scripts/history/painel de valor; resize sidebar/editor.
+
+**Evidência:** anotar passou/falhou por item + trechos do `wisp.log` (redigidos).
+Se achar bug, abrir spec de fix separada (não misturar aqui).
+
 ## 🚧 Em andamento (2026-09-16): captura local de erros (base para "Reportar problema")
 Decisão do usuário: em vez de Sentry (rejeitado — risco de vazar DSN/query
 mesmo com DSN client-side não sendo segredo em si) e em vez de abrir issue
