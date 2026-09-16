@@ -706,6 +706,47 @@ Registrado em `CLAUDE.md` (seção "Idioma", nova) e `docs/adr/0006-i18n.md`
 **A partir deste commit, meus próprios commits neste projeto passam a ser
 em inglês.**
 
+## 🔜 Checkpoint de próximos passos (2026-09-16, fim de sessão)
+`master` limpo e sincronizado com o remoto (push feito até `1e1d25b`).
+Release `v0.1.0-beta.4` publicada. README (EN + PT-BR) com logo, badges
+(licença/Wails/Go) e RAM idle medida. Política de idioma do projeto
+formalizada em `CLAUDE.md`/`docs/adr/0006-i18n.md`.
+
+**Aviso do usuário pra próxima sessão**: possivelmente vamos delegar mais
+(OpenCode/Codex/Cursor/Antigravity) daqui pra frente pra não estourar
+contexto/orçamento rápido — reforça o padrão já usado a sessão inteira
+(eu desenho o contrato técnico, delego a execução mecânica, reviso antes
+de aceitar) em vez de fazer tudo eu mesmo linha a linha quando o trabalho
+for grande/mecânico.
+
+**Pendências reais em aberto**:
+1. **i18n da UI** — plano aceito (`docs/adr/0006-i18n.md`: i18next +
+   react-i18next, seletor de idioma, detecção por locale do SO), **não
+   implementado**. Envolve ~13 componentes React com strings PT-BR
+   embutidas — candidato natural pra quebrar em lotes delegados (eu
+   desenho o schema de chaves + conecto 1-2 componentes de referência,
+   delego o resto em lotes revisados).
+2. **Comentários Go em inglês** — política definida (`CLAUDE.md`,
+   "Idioma"), comentários novos já nascem em inglês; comentários
+   existentes em PT-BR (a maioria do código atual) ainda não migrados —
+   fica pra leva dedicada futura, também candidato a delegação mecânica
+   em lotes por arquivo/pacote.
+3. **Autocomplete de alias** (feature de `dcb454f`) — usuário ainda não
+   testou com queries grandes reais (prometido "amanhã", ver mensagens
+   anteriores) — sem achado reportado ainda.
+4. **Fase 4+** do ROADMAP: nada com demanda validada ainda (ver seção
+   "Phase 4+" do `docs/ROADMAP.md`, já revisada e cortada nesta sessão —
+   query builder e sync entre dispositivos removidos, DuckDB rebaixado
+   abaixo de MySQL). Não iniciar nada disso sem sinal real de uso.
+5. **Polish visual menor** das 3 análises de UX (tabId exposto na
+   toolbar, hit-area dos resize handles, `:focus-visible` global,
+   segmented control no `.table-subbar`, scrollbars customizadas) — sem
+   prazo, nunca priorizado explicitamente pelo usuário.
+
+**Retomar por**: perguntar ao usuário se o autocomplete de alias passou
+no teste real, e se algum item acima virou prioridade — não escolher
+sozinho por onde continuar.
+
 ## Última atualização
 2026-09-15 (fim de sessão) — Autocomplete completo (v1+v2), uppercase automático, pretty-print SQL, copiar especial no grid e **edição inline de células** (item 7, concluído nesta sessão com 4 bugs reais de causa raiz corrigidos — ver seção "Edição inline de células" acima), todos implementados via delegação ao OpenCode + revisão/depuração minha antes de aceitar.
 
