@@ -1,14 +1,26 @@
-# Wisp
+<div align="center">
+  <img src="../build/appicon.png" width="120" height="120" alt="Logo do Wisp">
 
-Cliente SQL desktop leve e nativo (Go + Wails, Webview + React/Monaco) — buscando a produtividade de um DBeaver sem o consumo de memória de JVM/Electron.
+  # Wisp
 
-📖 [Read in English (README.md)](../README.md)
+  **Cliente SQL desktop leve e nativo** — construído com [Wails](https://wails.io) (backend em Go, frontend Webview nativo + React/Monaco), buscando a produtividade de um DBeaver sem o consumo de memória de JVM/Electron.
+
+  [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](../LICENSE)
+  [![Built with Wails](https://img.shields.io/badge/built%20with-Wails-DF0000?logo=wails&logoColor=white)](https://wails.io)
+  [![Go](https://img.shields.io/badge/Go-1.21%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
+
+  📖 [Read in English](../README.md)
+</div>
+
+---
 
 Ver `docs/ARCHITECTURE.md`, `docs/adr/` e `docs/ROADMAP.md` (em inglês) para as decisões de arquitetura e o plano de fases.
 
 ## Status
 
 Beta inicial (`v0.1.0-beta.x`). Bancos suportados hoje: **PostgreSQL** e **SQLite**. Veja [Releases](https://github.com/matheusbbdutra/wisp-db/releases) pros pacotes `.deb` prontos (Debian 12+/Ubuntu 22.04+).
+
+RAM ociosa com uma conexão ativa, medida (não aspiracional): **~160MB** — é exatamente o ponto de usar nativo (Wails) em vez de Electron.
 
 ## Funcionalidades
 
@@ -55,7 +67,7 @@ cd testdata
 docker compose up -d
 ```
 
-Sobe um Postgres 16 em `localhost:5432` (usuário/senha/db: `wisp`/`wisp`/`wisp_test`, credenciais de teste local, nunca usar em produção) com seed aplicado automaticamente (`postgres-seed.sql`): tabela com PK simples, tabela com PK composta e tabela com coluna gerada — cobre os casos de `docs/adr/0004-inline-edit-safety.md`.
+Sobe um Postgres 16 em `localhost:5432` (usuário/senha/db: `wisp`/`wisp`/`wisp_test`, credenciais de teste local, nunca usar em produção) com seed aplicado automaticamente (`postgres-seed.sql`): três schemas (`public`, `sales`, `reporting`), PK simples, PK composta, coluna gerada, colunas JSON/XML, índices, foreign keys (incluindo entre schemas), triggers, funções e views — cobre os casos de introspecção de `docs/adr/0004-inline-edit-safety.md` além de exploração de schema. O seed só roda na primeira inicialização do container; recrie do zero com `docker compose down -v && docker compose up -d` se precisar reaplicar.
 
 DSN pra usar no gerenciador de conexões: `postgres://wisp:wisp@localhost:5432/wisp_test`
 

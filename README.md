@@ -1,14 +1,26 @@
-# Wisp
+<div align="center">
+  <img src="build/appicon.png" width="120" height="120" alt="Wisp logo">
 
-A lightweight, native desktop SQL client (Go + Wails, Webview + React/Monaco) — aiming for DBeaver-level productivity without the JVM/Electron memory footprint.
+  # Wisp
 
-📖 [Leia em português (README.pt-BR.md)](docs/README.pt-BR.md)
+  **A lightweight, native desktop SQL client** — built with [Wails](https://wails.io) (Go backend, native Webview + React/Monaco frontend), aiming for DBeaver-level productivity without the JVM/Electron memory footprint.
+
+  [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+  [![Built with Wails](https://img.shields.io/badge/built%20with-Wails-DF0000?logo=wails&logoColor=white)](https://wails.io)
+  [![Go](https://img.shields.io/badge/Go-1.21%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
+
+  📖 [Leia em português](docs/README.pt-BR.md)
+</div>
+
+---
 
 See `docs/ARCHITECTURE.md`, `docs/adr/` and `docs/ROADMAP.md` for design decisions and the phased plan.
 
 ## Status
 
 Early beta (`v0.1.0-beta.x`). Supported databases today: **PostgreSQL** and **SQLite**. See [Releases](https://github.com/matheusbbdutra/wisp-db/releases) for prebuilt `.deb` packages (Debian 12+/Ubuntu 22.04+).
+
+Idle RAM with one active connection, measured (not aspirational): **~160MB** — the whole point of going native (Wails) instead of Electron.
 
 ## Features
 
@@ -55,7 +67,7 @@ cd testdata
 docker compose up -d
 ```
 
-Starts a Postgres 16 instance on `localhost:5432` (user/password/db: `wisp`/`wisp`/`wisp_test` — local test credentials, never use in production) with a seed applied automatically (`postgres-seed.sql`): a table with a simple PK, a table with a composite PK, and a table with a generated column — covering the cases from `docs/adr/0004-inline-edit-safety.md`.
+Starts a Postgres 16 instance on `localhost:5432` (user/password/db: `wisp`/`wisp`/`wisp_test` — local test credentials, never use in production) with a seed applied automatically (`postgres-seed.sql`): three schemas (`public`, `sales`, `reporting`), a simple PK, a composite PK, a generated column, JSON/XML columns, indexes, foreign keys (including cross-schema), triggers, functions, and views — covering the introspection cases from `docs/adr/0004-inline-edit-safety.md` plus schema exploration. The seed only runs on the container's first initialization; recreate from scratch with `docker compose down -v && docker compose up -d` if you need to reapply it.
 
 DSN to use in the connection manager: `postgres://wisp:wisp@localhost:5432/wisp_test`
 
