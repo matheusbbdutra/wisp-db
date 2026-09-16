@@ -40,15 +40,15 @@ export function Disconnect(tabId: string): Promise<void> {
 }
 
 export function ListSchemas(tabId: string): Promise<string[]> {
-    return withQueue(tabId, () => App.ListSchemas(tabId));
+    return withQueue(`${tabId}:metadata`, () => App.ListSchemas(tabId));
 }
 
 export function ListTables(tabId: string, schema: string): Promise<db.Table[]> {
-    return withQueue(tabId, () => App.ListTables(tabId, schema));
+    return withQueue(`${tabId}:metadata`, () => App.ListTables(tabId, schema));
 }
 
 export function IntrospectTable(tabId: string, schema: string, table: string): Promise<db.Table> {
-    return withQueue(tabId, () => App.IntrospectTable(tabId, schema, table));
+    return withQueue(`${tabId}:metadata`, () => App.IntrospectTable(tabId, schema, table));
 }
 
 // Equivalente batched de IntrospectTable para o schema inteiro (uma única
@@ -57,7 +57,7 @@ export function IntrospectTable(tabId: string, schema: string, table: string): P
 // do loop de IntrospectTable por tabela, que travava a fila da aba por muito
 // tempo em schemas com centenas de tabelas.
 export function IntrospectSchemaTables(tabId: string, schema: string): Promise<db.Table[]> {
-    return withQueue(tabId, () => App.IntrospectSchemaTables(tabId, schema));
+    return withQueue(`${tabId}:metadata`, () => App.IntrospectSchemaTables(tabId, schema));
 }
 
 export function RunQuery(tabId: string, query: string): Promise<main.QueryMetadata> {

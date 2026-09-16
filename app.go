@@ -204,15 +204,34 @@ func (a *App) connect(tabID string, driverName string, dsn string, connectionID 
 	if err != nil {
 		return err
 	}
-
-	ctx, err := a.sessions.Open(tabID, driver, schemacache.Key(driverName, dsn), connectionID)
+	metadataDriver, err := db.New(db.DriverName(driverName))
 	if err != nil {
+		_ = driver.Close()
+		return err
+	}
+
+	ctx, err := a.sessions.Open(tabID, driver, metadataDriver, schemacache.Key(driverName, dsn), connectionID)
+	if err != nil {
+		_ = driver.Close()
+		_ = metadataDriver.Close()
 		return err
 	}
 	if err := driver.Connect(ctx, dsn); err != nil {
+		_ = metadataDriver.Close()
 		return fmt.Errorf("conectando (tabId=%s): %w", tabID, err)
 	}
+	if err := metadataDriver.Connect(ctx, dsn); err != nil {
+		_ = driver.Close()
+		return fmt.Errorf("conectando conexão de metadados (tabId=%s): %w", tabID, err)
+	}
 	return nil
+}
+
+func metadataDriver(s *session.Session) db.DatabaseDriver {
+	if s.MetadataDriver != nil {
+		return s.MetadataDriver
+	}
+	return s.Driver
 }
 
 // QueryMetadata is the return value of RunQuery: columns/types of the started query and
@@ -358,7 +377,7 @@ func (a *App) ListSchemas(tabID string) ([]string, error) {
 		}
 	}
 
-	schemas, err := s.Driver.ListSchemas(s.Ctx)
+	schemas, err := metadataDriver(s).ListSchemas(s.Ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -390,7 +409,7 @@ func (a *App) ListTables(tabID string, schema string) ([]db.Table, error) {
 		}
 	}
 
-	tables, err := s.Driver.ListTables(s.Ctx, schema)
+	tables, err := metadataDriver(s).ListTables(s.Ctx, schema)
 	if err != nil {
 		return nil, err
 	}
@@ -430,7 +449,7 @@ func (a *App) IntrospectTable(tabID string, schema string, tableName string) (*d
 		}
 	}
 
-	full, err := s.Driver.Introspect(s.Ctx, schema, tableName)
+	full, err := metadataDriver(s).Introspect(s.Ctx, schema, tableName)
 	if err != nil {
 		return nil, err
 	}
@@ -486,7 +505,7 @@ func (a *App) IntrospectSchemaTables(tabID string, schema string) ([]db.Table, e
 		}
 	}
 
-	tables, err := s.Driver.IntrospectSchema(s.Ctx, schema)
+	tables, err := metadataDriver(s).IntrospectSchema(s.Ctx, schema)
 	if err != nil {
 		return nil, err
 	}

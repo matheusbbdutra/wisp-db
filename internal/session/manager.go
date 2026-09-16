@@ -16,6 +16,10 @@ import (
 type Session struct {
 	TabID  string
 	Driver db.DatabaseDriver
+	// MetadataDriver is a second connection used only for schema/table introspection.
+	// Keeping metadata off Driver ensures a slow catalog query never blocks the console's
+	// streaming cursor or native cancellation path.
+	MetadataDriver db.DatabaseDriver
 	// CacheKey stably identifies the connection (driver+DSN) for the schema cache (see
 	// internal/schemacache) — never the plaintext DSN.
 	CacheKey string
@@ -59,7 +63,7 @@ func NewManager() *Manager {
 // (reconnecting the same tab). cacheKey identifies the connection for the schema cache
 // (see internal/schemacache); connectionID is the associated saved connection id, or ""
 // for a direct DSN connection.
-func (m *Manager) Open(tabID string, driver db.DatabaseDriver, cacheKey string, connectionID string) (context.Context, error) {
+func (m *Manager) Open(tabID string, driver db.DatabaseDriver, metadataDriver db.DatabaseDriver, cacheKey string, connectionID string) (context.Context, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -69,11 +73,14 @@ func (m *Manager) Open(tabID string, driver db.DatabaseDriver, cacheKey string, 
 		}
 		existing.baseCancel()
 		_ = existing.Driver.Close()
+		if existing.MetadataDriver != nil {
+			_ = existing.MetadataDriver.Close()
+		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	m.sessions[tabID] = &Session{
-		TabID: tabID, Driver: driver, CacheKey: cacheKey, ConnectionID: connectionID,
+		TabID: tabID, Driver: driver, MetadataDriver: metadataDriver, CacheKey: cacheKey, ConnectionID: connectionID,
 		Ctx: ctx, baseCancel: cancel,
 	}
 	return ctx, nil
@@ -145,5 +152,11 @@ func (m *Manager) Close(tabID string) error {
 	}
 	s.baseCancel()
 	delete(m.sessions, tabID)
-	return s.Driver.Close()
+	err := s.Driver.Close()
+	if s.MetadataDriver != nil {
+		if metadataErr := s.MetadataDriver.Close(); err == nil {
+			err = metadataErr
+		}
+	}
+	return err
 }

@@ -35,6 +35,7 @@ monaco.languages.setMonarchTokensProvider('sql', sqlLanguage);
 // pelo model recebido no provider — cada editor tem seu próprio model.
 const catalogByModel = new Map<monaco.editor.ITextModel, db.Table[]>();
 const driverByModel = new Map<monaco.editor.ITextModel, string | undefined>();
+const catalogLoaderByModel = new Map<monaco.editor.ITextModel, () => Promise<void>>();
 
 type MonacoRange = {
     startLineNumber: number;
@@ -270,9 +271,13 @@ function resolveDotContext(
 }
 
 monaco.languages.registerCompletionItemProvider('sql', {
-    provideCompletionItems(model, position) {
+    async provideCompletionItems(model, position) {
         const textModel = model as monaco.editor.ITextModel;
-        const catalog = catalogByModel.get(textModel) ?? [];
+        let catalog = catalogByModel.get(textModel) ?? [];
+        if (catalog.length === 0) {
+            await catalogLoaderByModel.get(textModel)?.();
+            catalog = catalogByModel.get(textModel) ?? [];
+        }
         const driver = driverByModel.get(textModel);
         const word = model.getWordUntilPosition(position);
         const range: MonacoRange = {
@@ -329,6 +334,7 @@ interface Props {
     // DBeaver pra "Execute SQL Statement in New Tab".
     onRunNewTabRequested?: () => void;
     catalog?: db.Table[];
+    onCatalogNeeded?: () => Promise<void>;
     driver?: string;
     autoUppercase?: boolean;
     // Somente leitura (ex.: visualização de DDL na aba de tabela): bloqueia
@@ -344,7 +350,7 @@ interface Props {
     ) => void;
 }
 
-export default function SqlEditor({value, onChange, onRunRequested, onRunSelectionRequested, onRunNewTabRequested, catalog, driver, autoUppercase = true, readOnly = false, onOpenIdentifier}: Props) {
+export default function SqlEditor({value, onChange, onRunRequested, onRunSelectionRequested, onRunNewTabRequested, catalog, driver, autoUppercase = true, readOnly = false, onOpenIdentifier, onCatalogNeeded}: Props) {
     const containerRef = useRef<HTMLDivElement>(null);
     const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
     const catalogRef = useRef(catalog);
@@ -356,11 +362,13 @@ export default function SqlEditor({value, onChange, onRunRequested, onRunSelecti
     const onRunSelectionRef = useRef(onRunSelectionRequested);
     const onRunNewTabRef = useRef(onRunNewTabRequested);
     const onOpenIdentifierRef = useRef(onOpenIdentifier);
+    const onCatalogNeededRef = useRef(onCatalogNeeded);
     onChangeRef.current = onChange;
     onRunRef.current = onRunRequested;
     onRunSelectionRef.current = onRunSelectionRequested;
     onRunNewTabRef.current = onRunNewTabRequested;
     onOpenIdentifierRef.current = onOpenIdentifier;
+    onCatalogNeededRef.current = onCatalogNeeded;
     // Refs (não estado) pro listener do Monaco, que é registrado uma vez só
     // na montagem e não re-registra a cada render.
     const autoUppercaseRef = useRef(autoUppercase);
@@ -408,6 +416,7 @@ export default function SqlEditor({value, onChange, onRunRequested, onRunSelecti
         if (initialModel) {
             catalogByModel.set(initialModel, catalogRef.current ?? []);
             driverByModel.set(initialModel, driverRef.current);
+            catalogLoaderByModel.set(initialModel, () => onCatalogNeededRef.current?.() ?? Promise.resolve());
         }
 
         editor.onDidChangeModelContent(e => {
@@ -516,6 +525,7 @@ export default function SqlEditor({value, onChange, onRunRequested, onRunSelecti
             if (m) {
                 catalogByModel.delete(m);
                 driverByModel.delete(m);
+                catalogLoaderByModel.delete(m);
             }
             editor.dispose();
         };
@@ -527,6 +537,7 @@ export default function SqlEditor({value, onChange, onRunRequested, onRunSelecti
         if (model) {
             catalogByModel.set(model, catalog ?? []);
             driverByModel.set(model, driver);
+            catalogLoaderByModel.set(model, () => onCatalogNeededRef.current?.() ?? Promise.resolve());
         }
     }, [catalog, driver]);
 

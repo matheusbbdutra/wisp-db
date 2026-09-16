@@ -42,14 +42,14 @@ func TestOpenMesmoTabIdCancelaSessaoAnterior(t *testing.T) {
 	})
 
 	d1 := newTestDriver(t)
-	ctx1, err := m.Open("tab1", d1, "k1", "")
+	ctx1, err := m.Open("tab1", d1, d1, "k1", "")
 	if err != nil {
 		t.Fatalf("primeiro Open: %v", err)
 	}
 
 	d2 := newTestDriver(t)
 	defer d2.Close()
-	if _, err := m.Open("tab1", d2, "k1", ""); err != nil {
+	if _, err := m.Open("tab1", d2, d2, "k1", ""); err != nil {
 		t.Fatalf("segundo Open: %v", err)
 	}
 
@@ -81,7 +81,7 @@ func TestCloseIdempotente(t *testing.T) {
 		}
 	})
 	d := newTestDriver(t)
-	if _, err := m.Open("tab1", d, "k1", ""); err != nil {
+	if _, err := m.Open("tab1", d, d, "k1", ""); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	if err := m.Close("tab1"); err != nil {

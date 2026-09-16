@@ -186,6 +186,7 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
     const [connectionId, setConnectionId] = useState<string | null>(null);
     const catalogCancelledRef = useRef(false);
     const catalogLoadingRef = useRef(false);
+    const catalogReadyRef = useRef(false);
     const catalogConnectionRef = useRef<{id: string; name?: string; driver?: string} | null>(null);
     const pendingQueryCountRef = useRef(0);
     const cancelledQueryIdsRef = useRef(new Set<string>());
@@ -227,7 +228,7 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
     }
 
     async function loadCatalog(connectionId: string, connName?: string) {
-        if (catalogLoadingRef.current) return;
+        if (catalogLoadingRef.current || catalogReadyRef.current) return;
         catalogLoadingRef.current = true;
         catalogCancelledRef.current = false;
         // Let a query submitted immediately after connecting enter the queue first.
@@ -238,22 +239,21 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
         }
         try {
             setStatus(prev => t('consoleTab.loadingCatalog', {status: prev}));
-            await withQueue(`${tabId}:query`, async () => {
+            if (catalogCancelledRef.current || pendingQueryCountRef.current > 0) return;
+            const schemas = await ListSchemas(tabId);
+            const detailed: db.Table[] = [];
+            for (const schema of schemas ?? []) {
                 if (catalogCancelledRef.current || pendingQueryCountRef.current > 0) return;
-                const schemas = await ListSchemas(tabId);
-                const detailed: db.Table[] = [];
-                for (const schema of schemas ?? []) {
-                    if (catalogCancelledRef.current || pendingQueryCountRef.current > 0) return;
-                    try {
-                        const tables = await IntrospectSchemaTables(tabId, schema);
-                        detailed.push(...(tables ?? []));
-                    } catch (schemaErr) {
-                        console.error(`erro ao introspectar schema ${schema} para autocomplete:`, schemaErr);
-                    }
-                    setCatalog([...detailed]);
+                try {
+                    const tables = await IntrospectSchemaTables(tabId, schema);
+                    detailed.push(...(tables ?? []));
+                } catch (schemaErr) {
+                    console.error(`erro ao introspectar schema ${schema} para autocomplete:`, schemaErr);
                 }
-            });
+                setCatalog([...detailed]);
+            }
             if (!catalogCancelledRef.current && catalogConnectionRef.current?.id === connectionId) {
+                catalogReadyRef.current = true;
                 setStatus(connName ? t('consoleTab.connectedNamed', {name: connName}) : t('consoleTab.connected'));
             }
         } catch (err) {
@@ -264,9 +264,6 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
             }
         } finally {
             catalogLoadingRef.current = false;
-            if (catalogCancelledRef.current && pendingQueryCountRef.current === 0 && catalogConnectionRef.current?.id === connectionId) {
-                window.setTimeout(() => void loadCatalog(connectionId, connName), 0);
-            }
         }
     }
 
@@ -277,11 +274,11 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
         setDriver(activeDriver);
         catalogConnectionRef.current = {id: connectionId, name: connName, driver: activeDriver};
         catalogCancelledRef.current = false;
+        catalogReadyRef.current = false;
         setStatus(connName ? t('consoleTab.connectedNamed', {name: connName}) : t('consoleTab.connected'));
-        // Catálogo completo pro autocomplete (ListSchemas + uma query batched
-        // por schema via IntrospectSchemaTables — nunca mais um IntrospectTable
-        // por tabela). Barato: o schema cache do backend (TTL 15min) evita
-        // round-trip ao banco numa reconexão dentro do TTL.
+        // O catálogo completo do autocomplete é carregado sob demanda pelo
+        // editor. Não fazemos introspecção pesada ao conectar: em bancos
+        // grandes isso bloquearia a primeira consulta do usuário.
         //
         // Sequencial POR SCHEMA, nunca Promise.all: a sessão de uma aba usa
         // uma única conexão (*sql.Conn/pgx) dedicada (ver internal/session),
@@ -289,13 +286,6 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
         // chamadas em paralelo colidiam com erro "conn busy" e derrubavam o
         // catálogo inteiro (ver memória wisp-autocomplete-conn-busy-concurrency).
         //
-        // Tudo dentro de withQueue(`${tabId}:query`, ...) — mesma chave de
-        // handleRun/handleLoadMore: sem isso, uma chamada deste loop pode
-        // entrar bem no meio de um RunQuery+FetchRows já em andamento e
-        // quebrar o cursor de streaming aberto — "conn busy" real, mesma
-        // causa raiz corrigida em TableTab.tsx. O carregamento é interrompível
-        // e retomado quando consultas de primeiro plano terminam.
-        void loadCatalog(connectionId, connName);
     }
 
     function handleError(err: string) {
@@ -305,6 +295,7 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
     async function handleDisconnect() {
         catalogCancelledRef.current = true;
         catalogConnectionRef.current = null;
+        catalogReadyRef.current = false;
         await Disconnect(tabId);
         setConnected(false);
         onConnectedChange(false);
@@ -496,9 +487,6 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                 setStatus(t('consoleTab.errorRun', {error: err}));
             } finally {
                 pendingQueryCountRef.current = Math.max(0, pendingQueryCountRef.current - 1);
-                if (pendingQueryCountRef.current === 0 && catalogConnectionRef.current && !catalogLoadingRef.current) {
-                    window.setTimeout(() => void loadCatalog(catalogConnectionRef.current!.id, catalogConnectionRef.current!.name), 0);
-                }
                 setHistoryToken(n => n + 1);
             }
         });
@@ -856,6 +844,7 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                             onRunSelectionRequested={text => handleRun(text)}
                             onRunNewTabRequested={() => handleRun(undefined, true)}
                             catalog={catalog}
+                            onCatalogNeeded={() => connectionId ? loadCatalog(connectionId, catalogConnectionRef.current?.name) : Promise.resolve()}
                             driver={driver}
                             autoUppercase={autoUppercase}
                             onOpenIdentifier={handleOpenIdentifier}
