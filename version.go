@@ -4,4 +4,4 @@ package main
 // atualizar manualmente a cada release, mesmo padrão não automatizado do
 // VERSION em packaging/deb/build.sh (sem infra de ldflags/build-time nesta
 // fase). Usado pelo verificador de atualização (CheckForUpdate, app.go).
-const AppVersion = "v0.1.0-beta.3"
+const AppVersion = "v0.1.0-beta.4"
