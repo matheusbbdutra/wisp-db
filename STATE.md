@@ -621,6 +621,31 @@ lista original mas foi pedido pelo usuário no meio do caminho.
 de UX (`docs/analysis/ui-ux-2026-09-15-*.md`) — sem prazo definido, o
 usuário decide quando (ou se) retomar.
 
+## ✅ Verificador de atualização virou automático (2026-09-15, ajuste a pedido do usuário)
+Usuário perguntou "não tem como ser automático?" depois de eu ter
+implementado só manual. Ajustado: agora checa sozinho ao abrir o app, mas
+**assíncrono e silencioso** — nunca bloqueia a abertura, e só aparece
+alguma coisa na tela quando existe mesmo uma versão nova (nada de popup
+"você já está atualizado" toda vez que abre, isso seria ruído). Falha de
+rede no check automático também fica silenciosa (só o botão manual mostra
+erro). O botão "Verificar atualização" continua existindo pra checagem
+sob demanda, sempre mostra o resultado (incluindo "já está atualizado").
+
+Bug evitado no meio do caminho: o primeiro rascunho tinha
+`onClick={handleCheck}` — passaria o `MouseEvent` do clique como
+argumento `silent` da função (truthy), silenciando o botão manual sem
+querer. Corrigido pra `onClick={() => handleCheck()}` antes de testar.
+
+**Verificado ao vivo nos dois cenários** via Claude in Chrome: com a
+versão real embutida, abrir o app não mostra nada (checagem rodou em
+segundo plano, sem update real); troquei temporariamente pra uma versão
+falsa mais antiga e o banner "Nova versão disponível" apareceu sozinho
+assim que a página carregou, sem precisar clicar em nada — revertido
+depois.
+
+`go build`/`go vet`/`tsc --noEmit`/`vitest run` (27 testes)/
+`npm run build` limpos. Nada commitado ainda desta mudança.
+
 ## Última atualização
 2026-09-15 (fim de sessão) — Autocomplete completo (v1+v2), uppercase automático, pretty-print SQL, copiar especial no grid e **edição inline de células** (item 7, concluído nesta sessão com 4 bugs reais de causa raiz corrigidos — ver seção "Edição inline de células" acima), todos implementados via delegação ao OpenCode + revisão/depuração minha antes de aceitar.
 
