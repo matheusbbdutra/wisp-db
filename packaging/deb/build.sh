@@ -97,9 +97,10 @@ Version: ${VERSION}
 Architecture: ${ARCH}
 Maintainer: ${MAINTAINER}
 Depends: libwebkit2gtk-4.1-0, libgtk-3-0
-Description: Cliente SQL desktop leve e nativo (Go + Wails, PostgreSQL e SQLite)
+Description: Cliente SQL desktop leve e nativo (Go + Wails, PostgreSQL/SQLite/MySQL/MariaDB)
  Wisp é um cliente SQL desktop leve: backend em Go (Wails) com
- interface em React + Monaco Editor, suporte a PostgreSQL e SQLite.
+ interface em React + Monaco Editor, suporte a PostgreSQL, SQLite,
+ MySQL 8+ e MariaDB 10.11+.
  .
  Requer webkit2gtk-4.1 (buildado com a tag webkit2_41); não funciona em
  distros que só oferecem libwebkit2gtk-4.0 (Debian 11 e anteriores,

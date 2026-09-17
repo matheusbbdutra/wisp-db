@@ -55,6 +55,18 @@ leva**: Oracle (CGO viola ADR 0002), MongoDB (interface NoSQL não bate com
    Erro reportado pelo driver é "bad connection" — enganoso, não é a
    conexão morta. Documentado no ADR 0007 e em comentário nos métodos.
 
+## ✅ Polish de docs (2026-09-17): release v0.1.0-beta.9 + estratégia de distribuição
+
+**README.md** atualizado: lista agora Postgres + SQLite + **MySQL 8+ + MariaDB 10.11+** como suportados; menciona `.deb` (Debian/Ubuntu) + `.pkg.tar.zst` (Arch) na seção Status; seção "Testing locally" agora cobre as 3 instâncias de docker (Postgres, MySQL, MariaDB) e explica que `parseTime=true` é obrigatório pro DSN MySQL/MariaDB.
+
+**docs/ROADMAP.md** atualizado: MySQL/MariaDB sai de "fora de ordem" e entra como **Phase 3+ completed** (v0.1.0-beta.9); DuckDB rebaixado de novo (já tinha saido atrás do MySQL, agora vai pra trás do MariaDB também); nova seção **"Cross-distro packaging (current state + roadmap)"** mapeia RPM, AppImage, Flatpak como follow-up (cada um com a condição que justificaria adicionar).
+
+**docs/adr/0008-distribution-strategy.md** novo:
+- Decisão: manter `.deb` + Arch PKG (estado atual, suportado).
+- Tarball `.tar.gz` **rejeitado explicitamente** — binário depende de libs do sistema (`libwebkit2gtk-4.1`, `libgtk-3`, etc.), cada distro tem versões ligeiramente diferentes → ABI mismatch é a regra, "static" não resolve. Documentado como pergunta frequente a rejeitar.
+- RPM, AppImage, Flatpak **mapeados** com o trigger que justificaria cada um ("Fedora/RHEL user real pede", "cross-distro demand grows beyond .deb+Arch", "sandbox becomes stated requirement"). Nenhum implementado neste ADR.
+- Cada um quando implementado deve ganhar seu próprio ADR (`.spec` / `linuxdeploy` invocation / Flatpak manifest) — não retrofitted silenciosamente.
+
 ## ✅ Drivers MySQL/MariaDB + clone de conexão — FEITO (2026-09-17)
 
 **Backend novo:**

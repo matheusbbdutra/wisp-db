@@ -18,7 +18,9 @@ See `docs/ARCHITECTURE.md`, `docs/adr/` and `docs/ROADMAP.md` for design decisio
 
 ## Status
 
-Early beta (`v0.1.0-beta.x`). Supported databases today: **PostgreSQL** and **SQLite**. See [Releases](https://github.com/matheusbbdutra/wisp-db/releases) for prebuilt `.deb` packages (Debian 12+/Ubuntu 22.04+).
+Early beta (`v0.1.0-beta.x`). Supported databases today: **PostgreSQL**, **SQLite**, **MySQL 8+**, and **MariaDB 10.11+**. See [Releases](https://github.com/matheusbbdutra/wisp-db/releases) for prebuilt packages:
+- `.deb` for Debian 12+ / Ubuntu 22.04+
+- `.pkg.tar.zst` for Arch (via `packaging/arch/PKGBUILD`)
 
 Idle RAM with one active connection, measured (not aspirational): **~160MB** — the whole point of going native (Wails) instead of Electron.
 
@@ -60,16 +62,20 @@ sqlite3 testdata/sample.db < testdata/seed.sql
 
 Run `wails dev -tags webkit2_41`, then create a SQLite connection pointing at `testdata/sample.db` from the connection manager.
 
-## Testing locally (Postgres via Docker)
+## Testing locally (Postgres / MySQL / MariaDB via Docker)
 
 ```bash
 cd testdata
 docker compose up -d
 ```
 
-Starts a Postgres 16 instance on `localhost:5432` (user/password/db: `wisp`/`wisp`/`wisp_test` — local test credentials, never use in production) with a seed applied automatically (`postgres-seed.sql`): three schemas (`public`, `sales`, `reporting`), a simple PK, a composite PK, a generated column, JSON/XML columns, indexes, foreign keys (including cross-schema), triggers, functions, and views — covering the introspection cases from `docs/adr/0004-inline-edit-safety.md` plus schema exploration. The seed only runs on the container's first initialization; recreate from scratch with `docker compose down -v && docker compose up -d` if you need to reapply it.
+Starts a Postgres 16 instance on `localhost:5432` (user/password/db: `wisp`/`wisp`/`wisp_test` — local test credentials, never use in production), plus MySQL 8.4 on `localhost:3306` and MariaDB 11 on `localhost:3307` (same `wisp`/`wisp`/`wisp_test` credentials). Each has a seed applied automatically: `postgres-seed.sql` covers three schemas, a simple PK, a composite PK, a generated column, JSON/XML columns, indexes, foreign keys (including cross-schema), triggers, functions, and views; `02-mysql-seed.sql` covers the same scope plus a `reporting` schema with cross-schema FKs. Seeds only run on the container's first initialization; recreate from scratch with `docker compose down -v && docker compose up -d` if you need to reapply.
 
-DSN to use in the connection manager: `postgres://wisp:wisp@localhost:5432/wisp_test`
+DSNs to use in the connection manager:
+- Postgres: `postgres://wisp:wisp@localhost:5432/wisp_test`
+- MySQL / MariaDB: `wisp:wisp@tcp(localhost:3306)/wisp_test?parseTime=true` (port `3307` for MariaDB)
+
+`parseTime=true` is required for MySQL/MariaDB — without it `DATE`/`DATETIME` columns arrive as `[]byte` in the IPC payload and the grid shows unreadable base64.
 
 To tear down: `docker compose down` (from `testdata/`). `docker compose down -v` also removes the data volume.
 
