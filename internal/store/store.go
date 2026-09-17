@@ -67,6 +67,15 @@ type SavedConnection struct {
 	CreatedAt time.Time
 }
 
+// SavedConnectionEdit carries the decrypted DSN for the modal's clone flow — kept as a
+// distinct struct from SavedConnection so the list endpoint (which never decrypts) does
+// not accidentally leak the same shape to consumers that don't need the secret. See
+// GetConnectionForEdit in app.go for the audit rule.
+type SavedConnectionEdit struct {
+	Driver string
+	DSN    string
+}
+
 // SavedScript is a named SQL script that can be edited and reopened (unlike history,
 // which is an automatic execution log).
 type SavedScript struct {

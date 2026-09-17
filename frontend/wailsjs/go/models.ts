@@ -310,6 +310,20 @@ export namespace store {
 		    return a;
 		}
 	}
+	export class SavedConnectionEdit {
+	    Driver: string;
+	    DSN: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SavedConnectionEdit(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Driver = source["Driver"];
+	        this.DSN = source["DSN"];
+	    }
+	}
 	export class SavedScript {
 	    ID: string;
 	    Name: string;

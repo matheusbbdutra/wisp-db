@@ -46,6 +46,10 @@ export function FetchRows(arg1, arg2) {
   return window['go']['main']['App']['FetchRows'](arg1, arg2);
 }
 
+export function GetConnectionForEdit(arg1) {
+  return window['go']['main']['App']['GetConnectionForEdit'](arg1);
+}
+
 export function GetQueryHistory(arg1) {
   return window['go']['main']['App']['GetQueryHistory'](arg1);
 }

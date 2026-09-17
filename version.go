@@ -12,7 +12,7 @@ import (
 // packaging/arch/PKGBUILD tracks it by hand (pkgver intentionally carries no
 // beta suffix — Arch has no "~" ordering convention). Used by the update
 // checker (CheckForUpdate, app.go).
-const AppVersion = "v0.1.0-beta.8"
+const AppVersion = "v0.1.0-beta.9"
 
 // isNewerVersion reports whether latest is a NEWER release than current,
 // comparing with semver precedence (numeric prerelease identifiers compare

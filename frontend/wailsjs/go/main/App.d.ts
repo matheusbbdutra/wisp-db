@@ -26,6 +26,8 @@ export function ExecuteBatch(arg1:string,arg2:Array<db.BatchOp>):Promise<void>;
 
 export function FetchRows(arg1:string,arg2:number):Promise<main.FetchBatch>;
 
+export function GetConnectionForEdit(arg1:string):Promise<store.SavedConnectionEdit>;
+
 export function GetQueryHistory(arg1:number):Promise<Array<store.QueryHistoryEntry>>;
 
 export function GetTableDDL(arg1:string,arg2:string,arg3:string):Promise<string>;

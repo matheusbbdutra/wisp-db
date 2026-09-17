@@ -1,5 +1,122 @@
 # STATE — Wisp
 
+## 🚧 Em andamento (2026-09-16): drivers MySQL/MariaDB + clone de conexão
+Plano em `~/.claude/plans/giggly-scribbling-tome.md`. ADR 0007 aceito
+(`docs/adr/0007-mysql-mariadb-driver.md`): `go-sql-driver/mysql` v1.10.1 puro
+Go + MPL-2.0; MariaDB via mesmo driver; cancelamento via close+reopen do
+`*sql.Conn` (KILL QUERY abandonado — ver ADR 0007 update 2026-09-17 sobre a
+constraint de uma-query-por-conn em `database/sql`). **Recusados nesta
+leva**: Oracle (CGO viola ADR 0002), MongoDB (interface NoSQL não bate com
+`DatabaseDriver` relacional).
+
+**Fundação pronta e validada contra MySQL 8.4 reais**:
+- `go.mod`: `go-sql-driver/mysql v1.10.1` adicionado, build limpo.
+- `testdata/01-init-grants.sql` (cria `reporting` + grant pro `wisp`) e
+  `testdata/02-mysql-seed.sql` (tabelas/triggers/views/funções/seed).
+  Validado end-to-end: `reporting.customers.total` (coluna gerada) = 20.00
+  (=10*2) e 60.00 (=20*3); FK cross-schema `reporting.deals.customer_id`
+  → `wisp_test.customers.id` resolvida; view `open_orders` materializada;
+  `reporting.total_by_region(1)` retorna 0.00 (correto, região 1 sem orders).
+- `testdata/docker-compose.yml`: serviços `mysql:8.4` (porta 3306) e
+  `mariadb:11` (porta 3307) com healthchecks; ambos `Up (healthy)`.
+- Flag `--log-bin-trust-function-creators=1` no MySQL pra permitir
+  CREATE FUNCTION sem privilégio SUPER (erro 1419 do MySQL 8 com binlog).
+
+**Driver MySQL completo e validado end-to-end** (`internal/db/mysql.go`,
+`internal/db/factory.go`):
+- `internal/db/factory.go`: `DriverMySQL` + `DriverMariaDB` (mesma instância).
+- `internal/db/mysql.go`: implementação completa de `DatabaseDriver` —
+  Connect/Close, Execute/ExecuteStreaming/FetchNext/CloseCursor, cancel via
+  close+reopen, ListSchemas/ListTables/Introspect/IntrospectSchema,
+  UpdateCell/InsertRow/DeleteRow/ExecuteBatch (builders locais
+  `buildUpdateCellQueryMySQL` etc. — as builders compartilhadas em
+  `sqlite.go` usam `"` para quoting, MySQL usa backtick),
+  ListIncomingForeignKeys/TableDDL/ListTriggers/ListFunctions/ListIndexes/
+  ListForeignKeys.
+- `internal/db/mysql_test.go`: testes de integração contra MySQL 8.4 real
+  cobrindo todos os caminhos; **6/6 sub-testes passam** (ListSchemas,
+  ListTables, Introspect PK + coluna gerada, Execute/Streaming/cancel,
+  UpdateCell/DeleteRow/Batch/ListIncomingFKs, TableDDL/Triggers/
+  Functions/Indexes/FKs).
+- `go vet ./...` limpo, `go test ./...` passa pra TODOS os pacotes
+  (wisp, internal/db, internal/errlog, internal/session).
+
+**Bugs reais encontrados e corrigidos durante integração** (todos no driver):
+1. `SHOW CREATE TRIGGER` e `SHOW CREATE FUNCTION` retornam **mais colunas**
+   do que eu havia estimado na primeira escrita (7 e 6, não 9 e 8). Corrigido
+   usando `sql.NullString` por posição, com fallback pra coluna 4 se a 3 vier
+   vazia (defensivo contra shift de versão).
+2. `SHOW INDEX FROM` no MySQL 8+ retorna 15 colunas (não 13) — inclui
+   `Visible` e `Expression` adicionadas no MySQL 8.
+3. **Constraint crítica do `database/sql`**: `*sql.Conn` aceita apenas UMA
+   statement em voo. Métodos que fazem `SELECT metadata` e depois `SHOW
+   CREATE <thing>` na mesma conexão (`ListTriggers`, `ListFunctions`)
+   precisam **fechar o cursor** do SELECT antes de rodar a próxima query.
+   Erro reportado pelo driver é "bad connection" — enganoso, não é a
+   conexão morta. Documentado no ADR 0007 e em comentário nos métodos.
+
+## ✅ Drivers MySQL/MariaDB + clone de conexão — FEITO (2026-09-17)
+
+**Backend novo:**
+- `internal/db/mysql.go` — `MySQLDriver` completo (cancelamento via
+  close+reopen; SHOW CREATE TRIGGER/FUNCTION drenando cursor antes da
+  próxima query; SHOW INDEX com 15 colunas; SHOW CREATE TABLE com 2
+  colunas). Validação via teste de integração contra MySQL 8.4 real —
+  6/6 sub-testes passando (ListSchemas, ListTables, Introspect PK + gerada,
+  Execute/Streaming/cancel, UpdateCell/DeleteRow/Batch/ListIncomingFKs,
+  TableDDL/Triggers/Functions/Indexes/FKs).
+- `internal/db/factory.go` — `DriverMySQL`/`DriverMariaDB` (mesma
+  instância, protocolo compartilhado).
+- `internal/store/store.go` — struct `SavedConnectionEdit` (DSN
+  descriptografada) separada de `SavedConnection` (que nunca descriptografa
+  — superfície de exposição reduzida).
+- `app.go` — `GetConnectionForEdit(id) (SavedConnectionEdit, error)` com
+  regra de auditoria no comentário: consumido SÓ pelo ConnectionModal.
+
+**Frontend novo:**
+- `frontend/src/components/ConnectionModal.tsx`:
+  - Pílulas MySQL/MariaDB adicionadas
+  - Form específico (porta 3306, sslmode `preferred/required/skip-verify/false`)
+  - `buildDsn()` constrói `user:pass@tcp(host:port)/db?parseTime=true&tls=...`
+    — `parseTime=true` é default sempre (sem isso colunas DATE/DATETIME viram
+    []byte ilegível no JSON IPC)
+  - Props `cloneSourceId?: string` + `onCloneRequest?: (id) => void`
+  - useEffect que carrega DSN quando `cloneSourceId` muda, força
+    `rawDsnMode=true`, sugere nome `"<original> (cópia)"`
+  - Botão "Clonar" na lista manage (entre Conectar e Excluir)
+- `frontend/src/components/ConnectionBar.tsx`: state `cloneSourceId`,
+  handler que seta o state + abre modal; limpa `cloneSourceId` em todos os
+  pontos de fechamento do modal pra não vazar pra próxima abertura.
+- `frontend/src/i18n/locales/{en,pt-BR}.json`: chaves novas
+  (`mysqlDesc`, `mariadbDesc`, `sslSkipVerify`, `clone`, `cloneTitle`,
+  `errorCloneLoad`, `errorMysqlDatabase`, `rawDsnPlaceholderMysql`,
+  `rawDsnHintMysql`).
+- `frontend/wailsjs/go/**` regenerado via `wails generate module`.
+
+**Verificação ponta-a-ponta:**
+- `go build ./...` limpo
+- `go vet ./...` limpo
+- `go test ./... -count=1` passa em todos os pacotes (wisp, internal/db,
+  internal/errlog, internal/session)
+- `npx tsc --noEmit` limpo
+- `npm run build` limpo (apenas aviso conhecido de bundle > 500KB)
+- `npx vitest run` 27/27 passando
+- `git diff --check` limpo
+
+**Pendente (decisão consciente, parar aqui pra você testar):**
+- Verificação manual na janela nativa (não automatizável): abrir Wisp,
+  criar conexão MySQL/MariaDB via modal, conectar, rodar query, abrir
+  TableTab, clonar conexão mudando IP, validar que tudo funciona.
+- Após teste manual positivo: commit + bump de versão (sugiro
+  v0.1.0-beta.9 — já que beta.8 foi o último).
+
+## ✅ Validado (2026-09-16): `restoreLastScript` não tem bug de closure obsoleta
+Pendência pré-existente do STATE.md (S3): o `getQuery: () => string` em
+`useScriptState.ts:131-155` é uma **função getter**, não um valor capturado
+— cada chamada dentro do `.then(...)` lê o `query` atual do escopo do
+componente. Bug não existe mais no código pós-S3. Anotado como resolvido
+por leitura, sem alteração de código.
+
 ## ✅ Executado (2026-09-16): S1/S2/S3/S5/S6, S4 virou roteiro acima
 Ordem crítico→simples. S3: ResultGrid 1134→311, ConsoleTab 1037→353 (hooks
 useGridFilter/useGridCopy/usePendingBatch/useCellEditing/useEditability/

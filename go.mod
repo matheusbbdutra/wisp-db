@@ -3,6 +3,7 @@ module wisp
 go 1.26.0
 
 require (
+	github.com/go-sql-driver/mysql v1.10.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/wailsapp/wails/v2 v2.16.0
@@ -12,6 +13,7 @@ require (
 )
 
 require (
+	filippo.io/edwards25519 v1.2.0 // indirect
 	git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3 // indirect
 	github.com/bep/debounce v1.2.1 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect

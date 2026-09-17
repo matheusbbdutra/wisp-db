@@ -25,6 +25,9 @@ export default function ConnectionBar({
     const [selectedId, setSelectedId] = useState<string>('');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [connecting, setConnecting] = useState(false);
+    // Quando setado, o ConnectionModal abre com a DSN dessa conexão pré-preenchida
+    // (clone flow). Limpo no onClose do modal pra não vazar pra próxima abertura.
+    const [cloneSourceId, setCloneSourceId] = useState<string | null>(null);
 
     async function refreshSaved() {
         try {
@@ -155,13 +158,22 @@ export default function ConnectionBar({
             <ConnectionModal
                 isOpen={isModalOpen}
                 tabId={tabId}
-                onClose={() => setIsModalOpen(false)}
+                onClose={() => {
+                    setIsModalOpen(false);
+                    setCloneSourceId(null);
+                }}
                 onConnected={(id, name, driver) => {
                     setSelectedId(id);
                     onConnected(id, name, driver);
+                    setCloneSourceId(null);
                     refreshSaved();
                 }}
                 onConnectionsChanged={refreshSaved}
+                cloneSourceId={cloneSourceId ?? undefined}
+                onCloneRequest={(id) => {
+                    setCloneSourceId(id);
+                    setIsModalOpen(true);
+                }}
             />
         </>
     );

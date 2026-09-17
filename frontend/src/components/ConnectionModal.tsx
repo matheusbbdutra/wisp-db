@@ -1,8 +1,10 @@
 import {useState, useEffect} from 'react';
 import {useTranslation} from 'react-i18next';
-import {SaveConnection, DeleteSavedConnection, PickSQLiteFile, ListSavedConnections, TestConnection} from '../../wailsjs/go/main/App';
+import {SaveConnection, DeleteSavedConnection, GetConnectionForEdit, PickSQLiteFile, ListSavedConnections, TestConnection} from '../../wailsjs/go/main/App';
 import {ConnectSaved} from '../lib/tabApi';
 import type {store} from '../../wailsjs/go/models';
+
+type DriverKind = 'sqlite' | 'postgres' | 'mysql' | 'mariadb';
 
 interface Props {
     isOpen: boolean;
@@ -10,12 +12,19 @@ interface Props {
     onClose: () => void;
     onConnected: (connectionId: string, name: string, driver: string) => void;
     onConnectionsChanged: () => void;
+    // When set, the modal opens with the given connection's DSN pre-filled in raw-DSN
+    // mode for the clone flow. The caller (ConnectionBar) is responsible for setting it
+    // and clearing it after the modal closes — the modal itself never modifies it.
+    cloneSourceId?: string;
+    // Fired when the user clicks "Clonar" on a saved connection in the manage tab.
+    // Caller (ConnectionBar) sets cloneSourceId + opens the modal in response.
+    onCloneRequest?: (connectionId: string) => void;
 }
 
-export default function ConnectionModal({isOpen, tabId, onClose, onConnected, onConnectionsChanged}: Props) {
+export default function ConnectionModal({isOpen, tabId, onClose, onConnected, onConnectionsChanged, cloneSourceId, onCloneRequest}: Props) {
     const {t} = useTranslation();
     const [activeTab, setActiveTab] = useState<'new' | 'manage'>('new');
-    const [driver, setDriver] = useState<'sqlite' | 'postgres'>('sqlite');
+    const [driver, setDriver] = useState<DriverKind>('sqlite');
     const [name, setName] = useState('');
 
     // Alterna entre preencher campos estruturados ou colar a DSN/link de
@@ -39,6 +48,19 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
     // Nunca quebra conexão já salva — só muda o padrão de conexões NOVAS.
     const [pgSslMode, setPgSslMode] = useState('prefer');
 
+    // MySQL/MariaDB states — mesmo layout do Postgres, mas porta/SSL/sintaxe DSN
+    // diferentes. MariaDB compartilha o driver (factory retorna o mesmo), então
+    // os campos são idênticos aqui; só muda o nome do driver salvo.
+    const [mysqlHost, setMysqlHost] = useState('localhost');
+    const [mysqlPort, setMysqlPort] = useState('3306');
+    const [mysqlDatabase, setMysqlDatabase] = useState('');
+    const [mysqlUser, setMysqlUser] = useState('root');
+    const [mysqlPassword, setMysqlPassword] = useState('');
+    // MySQL sslmode preferido: 'preferred' (tenta TLS, cai pra sem-TLS) — mesma
+    // justificativa do Postgres 'prefer'. Valores aceitos pelo driver: true,
+    // false, preferred, required, skip-verify.
+    const [mysqlSslMode, setMysqlSslMode] = useState('preferred');
+
     const [savedList, setSavedList] = useState<store.SavedConnection[]>([]);
     const [error, setError] = useState('');
     const [saving, setSaving] = useState(false);
@@ -52,6 +74,33 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
             setTestResult(null);
         }
     }, [isOpen]);
+
+    // Clone flow: when the caller hands us a connection ID, fetch its driver+DSN and
+    // pre-fill the form so the user only edits the fields that actually differ (typically
+    // host/port). The decrypted DSN is only ever shown in raw-DSN mode — keeps the
+    // credential handling simple and consistent with the manual-entry UX.
+    useEffect(() => {
+        if (!isOpen || !cloneSourceId) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const edit = await GetConnectionForEdit(cloneSourceId);
+                if (cancelled) return;
+                setDriver(edit.Driver as DriverKind);
+                setRawDsn(edit.DSN);
+                setRawDsnMode(true);
+                // Sugere nome como "<original> (cópia)" — usado como placeholder
+                // visível, o usuário digita o nome final ao salvar.
+                const src = savedList.find(c => c.ID === cloneSourceId);
+                if (src) setName(`${src.Name} (cópia)`);
+                setError('');
+                setActiveTab('new');
+            } catch (err) {
+                if (!cancelled) setError(t('connectionModal.errorCloneLoad', {error: String(err)}));
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [isOpen, cloneSourceId, savedList, t]);
 
     async function loadSaved() {
         try {
@@ -93,6 +142,9 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                 setError(t('connectionModal.errorPostgresDsnFormat'));
                 return null;
             }
+            // MySQL/MariaDB não têm formato de URL oficial — o raw DSN é o formato
+            // `user:pass@tcp(host:port)/db` do driver. Não dá pra validar com regex
+            // simples sem falso-positivo; deixamos passar e o driver reclama se errado.
             return {driver, dsn: trimmedDsn};
         }
 
@@ -102,6 +154,25 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                 return null;
             }
             return {driver: 'sqlite', dsn: sqlitePath.trim()};
+        }
+
+        if (driver === 'mysql' || driver === 'mariadb') {
+            const host = mysqlHost.trim() || 'localhost';
+            const port = mysqlPort.trim() || '3306';
+            const db = mysqlDatabase.trim();
+            if (!db) {
+                setError(t('connectionModal.errorMysqlDatabase'));
+                return null;
+            }
+            const encUser = encodeURIComponent(mysqlUser.trim() || 'root');
+            const encPass = encodeURIComponent(mysqlPassword);
+            const auth = encPass ? `${encUser}:${encPass}` : encUser;
+            // parseTime=true é OBRIGATÓRIO — sem isso colunas DATE/DATETIME viram
+            // []byte no JSON IPC e ficam ilegíveis no grid (mesma lição documentada
+            // no ADR 0007 pro backend).
+            const ssl = mysqlSslMode || 'preferred';
+            const dsn = `${auth}@tcp(${host}:${port})/${db}?parseTime=true&tls=${ssl}`;
+            return {driver, dsn};
         }
 
         // Postgres
@@ -251,6 +322,22 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                                     <span className="driver-pill-title">PostgreSQL</span>
                                     <span className="driver-pill-desc">{t('connectionModal.postgresDesc')}</span>
                                 </button>
+                                <button
+                                    type="button"
+                                    className={`driver-pill-btn ${driver === 'mysql' ? 'active' : ''}`}
+                                    onClick={() => {setDriver('mysql'); setTestResult(null);}}
+                                >
+                                    <span className="driver-pill-title">MySQL</span>
+                                    <span className="driver-pill-desc">{t('connectionModal.mysqlDesc')}</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    className={`driver-pill-btn ${driver === 'mariadb' ? 'active' : ''}`}
+                                    onClick={() => {setDriver('mariadb'); setTestResult(null);}}
+                                >
+                                    <span className="driver-pill-title">MariaDB</span>
+                                    <span className="driver-pill-desc">{t('connectionModal.mariadbDesc')}</span>
+                                </button>
                             </div>
                         </div>
 
@@ -286,12 +373,16 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                                     onChange={e => setRawDsn(e.target.value)}
                                     placeholder={driver === 'sqlite'
                                         ? t('connectionModal.rawDsnPlaceholderSqlite')
-                                        : t('connectionModal.rawDsnPlaceholderPostgres')}
+                                        : driver === 'postgres'
+                                            ? t('connectionModal.rawDsnPlaceholderPostgres')
+                                            : t('connectionModal.rawDsnPlaceholderMysql')}
                                 />
                                 <span className="form-hint">
                                     {driver === 'sqlite'
                                         ? t('connectionModal.rawDsnHintSqlite')
-                                        : t('connectionModal.rawDsnHintPostgres')}
+                                        : driver === 'postgres'
+                                            ? t('connectionModal.rawDsnHintPostgres')
+                                            : t('connectionModal.rawDsnHintMysql')}
                                 </span>
                             </div>
                         ) : driver === 'sqlite' ? (
@@ -317,7 +408,7 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                                 </div>
                                 <span className="form-hint">{t('connectionModal.sqliteFileHint')}</span>
                             </div>
-                        ) : (
+                        ) : driver === 'postgres' ? (
                             <div className="postgres-form-grid">
                                 <div className="form-group col-span-8">
                                     <label className="form-label">{t('connectionModal.hostLabel')}</label>
@@ -375,6 +466,71 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                                         <option value="disable">{t('connectionModal.sslDisable')}</option>
                                         <option value="require">{t('connectionModal.sslRequire')}</option>
                                         <option value="prefer">{t('connectionModal.sslPrefer')}</option>
+                                    </select>
+                                </div>
+                            </div>
+                        ) : (
+                            // MySQL / MariaDB — mesmo form, sslmode usa os valores do
+                            // go-sql-driver/mysql (preferred em vez de prefer). parseTime=true
+                            // é sempre adicionado ao DSN construído (ADR 0007).
+                            <div className="postgres-form-grid">
+                                <div className="form-group col-span-8">
+                                    <label className="form-label">{t('connectionModal.hostLabel')}</label>
+                                    <input
+                                        className="input-control modal-input"
+                                        value={mysqlHost}
+                                        onChange={e => setMysqlHost(e.target.value)}
+                                        placeholder={t('connectionModal.hostPlaceholder')}
+                                    />
+                                </div>
+                                <div className="form-group col-span-4">
+                                    <label className="form-label">{t('connectionModal.portLabel')}</label>
+                                    <input
+                                        className="input-control modal-input"
+                                        value={mysqlPort}
+                                        onChange={e => setMysqlPort(e.target.value)}
+                                        placeholder="3306"
+                                    />
+                                </div>
+                                <div className="form-group col-span-12">
+                                    <label className="form-label">{t('connectionModal.databaseLabel')}</label>
+                                    <input
+                                        className="input-control modal-input"
+                                        value={mysqlDatabase}
+                                        onChange={e => setMysqlDatabase(e.target.value)}
+                                        placeholder="myapp"
+                                    />
+                                </div>
+                                <div className="form-group col-span-6">
+                                    <label className="form-label">{t('connectionModal.userLabel')}</label>
+                                    <input
+                                        className="input-control modal-input"
+                                        value={mysqlUser}
+                                        onChange={e => setMysqlUser(e.target.value)}
+                                        placeholder="root"
+                                    />
+                                </div>
+                                <div className="form-group col-span-6">
+                                    <label className="form-label">{t('connectionModal.passwordLabel')}</label>
+                                    <input
+                                        type="password"
+                                        className="input-control modal-input"
+                                        value={mysqlPassword}
+                                        onChange={e => setMysqlPassword(e.target.value)}
+                                        placeholder="••••••••"
+                                    />
+                                </div>
+                                <div className="form-group col-span-12">
+                                    <label className="form-label">{t('connectionModal.sslLabel')}</label>
+                                    <select
+                                        className="input-control modal-select"
+                                        value={mysqlSslMode}
+                                        onChange={e => setMysqlSslMode(e.target.value)}
+                                    >
+                                        <option value="false">{t('connectionModal.sslDisable')}</option>
+                                        <option value="preferred">{t('connectionModal.sslPrefer')}</option>
+                                        <option value="required">{t('connectionModal.sslRequire')}</option>
+                                        <option value="skip-verify">{t('connectionModal.sslSkipVerify')}</option>
                                     </select>
                                 </div>
                             </div>
@@ -453,6 +609,14 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                                                 }}
                                             >
                                                 {t('connectionModal.connect')}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                className="btn btn-secondary btn-sm"
+                                                onClick={() => onCloneRequest?.(c.ID)}
+                                                title={t('connectionModal.cloneTitle')}
+                                            >
+                                                {t('connectionModal.clone')}
                                             </button>
                                             <button
                                                 type="button"

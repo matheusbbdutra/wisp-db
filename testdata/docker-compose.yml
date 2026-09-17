@@ -1,6 +1,6 @@
-# Postgres local só para desenvolvimento/teste manual do PostgresDriver
-# (internal/db/postgres.go). Não faz parte do produto — nunca referenciado
-# em build de release.
+# Postgres + MySQL + MariaDB locais só para desenvolvimento/teste manual dos
+# respectivos drivers (internal/db/{postgres,mysql}.go). Não fazem parte do
+# produto — nunca referenciados em build de release.
 services:
   postgres:
     image: postgres:16-alpine
@@ -18,3 +18,49 @@ services:
       interval: 2s
       timeout: 3s
       retries: 10
+
+  mysql:
+    image: mysql:8.4
+    container_name: wisp-mysql-test
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_USER: wisp
+      MYSQL_PASSWORD: wisp
+      MYSQL_DATABASE: wisp_test
+    ports:
+      - "3306:3306"
+    # explicit_defaults_for_timestamp evita warnings do MySQL 8 sobre
+      # TIMESTAMP com comportamento implícito de CURRENT_TIMESTAMP.
+    command:
+      - --explicit_defaults_for_timestamp=1
+      # Permite que usuários sem SUPER criem functions/triggers em ambiente com
+      # binlog habilitado (default). Sem isso, CREATE FUNCTION falha com erro 1419
+      # em testes de integração que não rodam como root.
+      - --log-bin-trust-function-creators=1
+    volumes:
+      - ./01-init-grants.sql:/docker-entrypoint-initdb.d/01-init-grants.sql:ro
+      - ./02-mysql-seed.sql:/docker-entrypoint-initdb.d/02-mysql-seed.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uwisp", "-pwisp"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  mariadb:
+    image: mariadb:11
+    container_name: wisp-mariadb-test
+    environment:
+      MARIADB_ROOT_PASSWORD: root
+      MARIADB_USER: wisp
+      MARIADB_PASSWORD: wisp
+      MARIADB_DATABASE: wisp_test
+    ports:
+      - "3307:3306"
+    volumes:
+      - ./01-init-grants.sql:/docker-entrypoint-initdb.d/01-init-grants.sql:ro
+      - ./02-mysql-seed.sql:/docker-entrypoint-initdb.d/02-mysql-seed.sql:ro
+    healthcheck:
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-uwisp", "-pwisp"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

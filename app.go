@@ -703,6 +703,23 @@ func (a *App) DeleteSavedConnection(connectionID string) error {
 	return a.store.DeleteConnection(connectionID)
 }
 
+// GetConnectionForEdit returns the driver name and decrypted DSN for a saved connection
+// — used EXCLUSIVELY by the connection modal's clone flow (frontend/src/components/
+// ConnectionModal.tsx). Auditing rule: this method must only be consumed by the modal,
+// never by the grid, history, or any other surface. Expanding who can call this would
+// leak credentials beyond the local webview. See ADR 0007 follow-up notes and the
+// "clone de conexão" decision in docs/ROADMAP.md / STATE.md.
+func (a *App) GetConnectionForEdit(connectionID string) (store.SavedConnectionEdit, error) {
+	if a.store == nil {
+		return store.SavedConnectionEdit{}, fmt.Errorf("store local indisponível")
+	}
+	driver, dsn, err := a.store.ResolveConnection(connectionID)
+	if err != nil {
+		return store.SavedConnectionEdit{}, err
+	}
+	return store.SavedConnectionEdit{Driver: driver, DSN: dsn}, nil
+}
+
 // GetQueryHistory returns the last N recorded executions (newest to oldest).
 func (a *App) GetQueryHistory(limit int) ([]store.QueryHistoryEntry, error) {
 	if a.store == nil {
