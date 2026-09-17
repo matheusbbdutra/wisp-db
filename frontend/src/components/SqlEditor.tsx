@@ -1,4 +1,4 @@
-import {useEffect, useRef} from 'react';
+import {forwardRef, useEffect, useImperativeHandle, useRef} from 'react';
 // Import da API core (não do pacote 'monaco-editor' inteiro, que arrasta os
 // language services completos de TypeScript/CSS/HTML/JSON — dezenas de MB —
 // e o highlighting de dezenas de linguagens que o Wisp nunca usa). SQL é só
@@ -354,22 +354,79 @@ monaco.languages.registerCompletionItemProvider('sql', {
                 ],
             };
         }
-        // Sem ponto e fora de FROM/JOIN: prioriza tabela/coluna já
-        // referenciada no FROM/JOIN da query (com sortText '0'), mantendo o
-        // catálogo inteiro como fallback de menor prioridade ('1') — nada é
-        // escondido, só reordenado.
+        // Sem ponto e fora de FROM/JOIN: quando a query já referencia
+        // tabelas conhecidas (via FROM/JOIN), restringe as sugestões de
+        // coluna a ELAS — nunca ao catálogo inteiro junto. O Monaco ordena
+        // por fuzzy match score antes de sortText, então injetar todas as
+        // colunas do catálogo (mesmo com sortText pior) deixava uma coluna
+        // de OUTRA tabela, com nome mais parecido ao digitado, vencer a
+        // coluna certa — bug real relatado pelo usuário (2026-09-17): no
+        // WHERE, a sugestão de coluna veio de uma tabela totalmente
+        // diferente da indicada no FROM. Só cai no catálogo inteiro quando
+        // nenhuma tabela é conhecida ainda (ex.: digitando antes do FROM).
         const queryTables = catalog.length > 0 ? resolveQueryTables(textModel.getValue(), catalog) : [];
         const suggestions: monaco.languages.CompletionItem[] = [
             ...buildSchemaSuggestions(catalog, range),
-            ...(queryTables.length > 0 ? buildColumnSuggestions(catalog, range, queryTables, '0') : []),
-            ...buildTableSuggestions(catalog, range, undefined, '1'),
-            ...buildColumnSuggestions(catalog, range, undefined, '1'),
+            ...buildTableSuggestions(catalog, range, undefined, queryTables.length > 0 ? '1' : ''),
+            // Coluna: só do catálogo inteiro quando NENHUMA tabela da query
+            // é conhecida ainda. Com tabela(s) conhecida(s), a coluna vem só
+            // delas — nunca junto com o catálogo inteiro (ver comentário
+            // acima da declaração de queryTables).
+            ...buildColumnSuggestions(catalog, range, queryTables.length > 0 ? queryTables : undefined),
             ...buildKeywordSuggestions(range),
             ...buildFunctionSuggestions(driver, range),
         ];
         return {suggestions};
     },
 });
+
+// Delimitador de statement: ';' OU linha em branco (uma ou mais linhas só
+// com espaço entre duas quebras). Só ';' não bastava — bug real relatado
+// pelo usuário (2026-09-17): dois SELECTs digitados em blocos separados por
+// linha em branco, sem ';' em lugar nenhum, foram mandados juntos pro driver
+// (nenhum ';' encontrado → fallback pro texto inteiro), gerando erro de
+// sintaxe. Uma quebra de linha ÚNICA não conta (formatação normal de uma
+// mesma query multi-linha), só a linha em branco entre statements.
+const STATEMENT_SEPARATOR_RE = /;|\n[ \t]*\n/g;
+
+// Texto selecionado, ou (sem seleção) o "statement" sob o cursor — texto
+// entre o separador anterior e o próximo (ver STATEMENT_SEPARATOR_RE acima).
+// Mesma inspeção de string sem parser SQL usada no resto do arquivo: não
+// distingue um ';' dentro de string/comentário de um separador real de
+// statement (limitação aceita, igual extractTableAliases).
+function resolveStatementOrSelection(editor: monaco.editor.IStandaloneCodeEditor): string {
+    const model = editor.getModel();
+    const selection = editor.getSelection();
+    if (!model) return '';
+
+    let text: string;
+    if (selection && !selection.isEmpty()) {
+        text = model.getValueInRange(selection);
+    } else {
+        const position = editor.getPosition();
+        const full = model.getValue();
+        const offset = position ? model.getOffsetAt(position) : 0;
+        let start = 0;
+        let end = full.length;
+        STATEMENT_SEPARATOR_RE.lastIndex = 0;
+        let match: RegExpExecArray | null;
+        while ((match = STATEMENT_SEPARATOR_RE.exec(full)) !== null) {
+            const separatorEnd = match.index + match[0].length;
+            if (separatorEnd <= offset) {
+                start = separatorEnd;
+            } else if (match.index >= offset) {
+                end = match.index;
+                break;
+            } else {
+                // Cursor caiu DENTRO do separador (ex.: na linha em branco
+                // entre dois statements) — trata como "depois" dele.
+                start = separatorEnd;
+            }
+        }
+        text = full.slice(start, end);
+    }
+    return text.trim();
+}
 
 declare global {
     interface Window {
@@ -389,15 +446,22 @@ self.MonacoEnvironment = {
 interface Props {
     value: string;
     onChange: (value: string) => void;
-    onRunRequested: () => void;
-    // onRunSelectionRequested roda só o texto selecionado (ou, sem seleção,
-    // o "statement" sob o cursor — delimitado por ';'). Ctrl+Enter continua
-    // rodando o editor inteiro; Ctrl+Shift+Enter dispara este.
+    // Ctrl+Enter roda só o texto selecionado ou, sem seleção, o "statement"
+    // sob o cursor (delimitado por ';') — estilo DBeaver/DataGrip. Antes
+    // rodava o editor inteiro de uma vez como uma única string, o que fazia
+    // o driver receber múltiplos statements colados (com ';' no meio) numa
+    // chamada só — bug real relatado pelo usuário (2026-09-17): "executa
+    // múltiplos [statements], não considera terminar com ; ou quebra de
+    // linha". Corrigido delimitando sempre pelo statement sob o cursor.
+    onRunRequested: (text: string) => void;
+    // onRunSelectionRequested tem a mesma resolução de texto que
+    // onRunRequested (mantido como atalho alternativo, Ctrl+Shift+Enter).
     onRunSelectionRequested?: (text: string) => void;
     // onRunNewTabRequested força uma aba de resultado NOVA em vez de
-    // reaproveitar a ativa (padrão do Ctrl+Enter) — Ctrl+\, mesmo atalho do
-    // DBeaver pra "Execute SQL Statement in New Tab".
-    onRunNewTabRequested?: () => void;
+    // reaproveitar a ativa — mesma resolução de statement sob o
+    // cursor/seleção, só que sempre em aba nova (Ctrl+Alt+Enter, mesmo
+    // espírito do "Execute SQL Statement in New Tab" do DBeaver).
+    onRunNewTabRequested?: (text: string) => void;
     catalog?: db.Table[];
     onCatalogNeeded?: () => Promise<void>;
     driver?: string;
@@ -415,9 +479,23 @@ interface Props {
     ) => void;
 }
 
-export default function SqlEditor({value, onChange, onRunRequested, onRunSelectionRequested, onRunNewTabRequested, catalog, driver, autoUppercase = true, readOnly = false, onOpenIdentifier, onCatalogNeeded}: Props) {
+// Exposto via ref pro botão "Explain" da toolbar (ConsoleTab.tsx), que fica
+// FORA do Monaco e não tem acesso a cursor/seleção do editor de outro jeito
+// — precisa do mesmo statement que Ctrl+Enter rodaria, não do editor
+// inteiro (EXPLAIN só aceita um statement por vez, ver explainQuery.ts).
+export interface SqlEditorHandle {
+    getStatementOrSelection: () => string;
+}
+
+const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({value, onChange, onRunRequested, onRunSelectionRequested, onRunNewTabRequested, catalog, driver, autoUppercase = true, readOnly = false, onOpenIdentifier, onCatalogNeeded}, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+    useImperativeHandle(ref, () => ({
+        getStatementOrSelection: () => {
+            const editor = editorRef.current;
+            return editor ? resolveStatementOrSelection(editor) : '';
+        },
+    }));
     const catalogRef = useRef(catalog);
     catalogRef.current = catalog;
     const driverRef = useRef(driver);
@@ -523,7 +601,10 @@ export default function SqlEditor({value, onChange, onRunRequested, onRunSelecti
                 break;
             }
         });
-        editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => onRunRef.current());
+        editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
+            const text = resolveStatementOrSelection(editor);
+            if (text) onRunRef.current(text);
+        });
 
         // Ctrl+click num identificador da query abre a tabela/schema numa
         // aba própria (ver Props.onOpenIdentifier). Usa isCtrlHeld() (rastreado
@@ -551,28 +632,11 @@ export default function SqlEditor({value, onChange, onRunRequested, onRunSelecti
             onOpenIdentifierRef.current({kind: 'table', schema: qualifier, table: word.word});
         });
 
-        // Ctrl+Shift+Enter: roda só o texto selecionado, ou (sem seleção) o
-        // "statement" sob o cursor — texto entre o ';' anterior e o próximo.
+        // Ctrl+Shift+Enter: mesma resolução de texto que Ctrl+Enter
+        // (resolveStatementOrSelection) — mantido como atalho alternativo.
         editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter, () => {
             if (!onRunSelectionRef.current) return;
-            const model = editor.getModel();
-            const selection = editor.getSelection();
-            if (!model) return;
-
-            let text: string;
-            if (selection && !selection.isEmpty()) {
-                text = model.getValueInRange(selection);
-            } else {
-                const position = editor.getPosition();
-                const full = model.getValue();
-                const offset = position ? model.getOffsetAt(position) : 0;
-                const start = full.lastIndexOf(';', offset - 1) + 1;
-                const semicolonAfter = full.indexOf(';', offset);
-                const end = semicolonAfter === -1 ? full.length : semicolonAfter;
-                text = full.slice(start, end);
-            }
-
-            text = text.trim();
+            const text = resolveStatementOrSelection(editor);
             if (text) onRunSelectionRef.current(text);
         });
 
@@ -583,7 +647,10 @@ export default function SqlEditor({value, onChange, onRunRequested, onRunSelecti
         // nesse layout — mecanismo exato não confirmado, sem acesso à janela
         // nativa/devtools daqui). Troquei por Ctrl+Alt+Enter, combinação sem
         // caractere especial, mais segura entre layouts de teclado.
-        editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.Enter, () => onRunNewTabRef.current?.());
+        editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.Enter, () => {
+            const text = resolveStatementOrSelection(editor);
+            if (text) onRunNewTabRef.current?.(text);
+        });
 
         return () => {
             const m = editor.getModel();
@@ -614,4 +681,6 @@ export default function SqlEditor({value, onChange, onRunRequested, onRunSelecti
     }, [value]);
 
     return <div ref={containerRef} style={{height: '100%', width: '100%'}} />;
-}
+});
+
+export default SqlEditor;

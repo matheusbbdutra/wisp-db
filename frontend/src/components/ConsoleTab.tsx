@@ -5,7 +5,7 @@ import {useTranslation} from 'react-i18next';
 import {format} from 'sql-formatter';
 import type {SqlLanguage} from 'sql-formatter';
 import type {db} from '../../wailsjs/go/models';
-import SqlEditor, {AUTO_UPPERCASE_STORAGE_KEY, readAutoUppercasePreference} from './SqlEditor';
+import SqlEditor, {AUTO_UPPERCASE_STORAGE_KEY, readAutoUppercasePreference, type SqlEditorHandle} from './SqlEditor';
 import ResultGrid from './ResultGrid';
 import Sidebar from './Sidebar';
 import QueryHistory from './QueryHistory';
@@ -57,6 +57,7 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
     // Editor começa vazio — "SELECT * FROM customers" era resquício de teste
     // (nenhuma base do usuário tem essa tabela por padrão).
     const [query, setQuery] = useState('');
+    const sqlEditorRef = useRef<SqlEditorHandle>(null);
     // Painéis redimensionáveis por arrasto (ver lib/useDragResize.ts) —
     // Wails só renderiza uma webview comum, isso é CSS/JS puro, sem
     // limitação de toolkit nativo.
@@ -265,11 +266,12 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                 <main className="main-panel">
                     <div className="editor-pane" style={{height: editorResize.size}}>
                         <SqlEditor
+                            ref={sqlEditorRef}
                             value={query}
                             onChange={setQuery}
-                            onRunRequested={() => void execution.handleRun(query, false, connection.connected)}
+                            onRunRequested={text => void execution.handleRun(text, false, connection.connected)}
                             onRunSelectionRequested={text => void execution.handleRun(text, false, connection.connected)}
-                            onRunNewTabRequested={() => void execution.handleRun(query, true, connection.connected)}
+                            onRunNewTabRequested={text => void execution.handleRun(text, true, connection.connected)}
                             catalog={connection.catalog}
                             onCatalogNeeded={() => connection.connectionId ? connection.loadCatalog(connection.connectionId, connection.catalogConnectionRef.current?.name) : Promise.resolve()}
                             driver={connection.driver}
@@ -288,7 +290,17 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                         batchSize={batchSize}
                         onRun={() => void execution.handleRun(query, false, connection.connected)}
                         onRunNewTab={() => void execution.handleRun(query, true, connection.connected)}
-                        onExplain={() => void execution.handleRun(explainQuery(query, connection.driver), true, connection.connected)}
+                        onExplain={() => {
+                            // Statement sob o cursor/seleção, nunca o editor
+                            // inteiro — EXPLAIN só aceita UM statement (ver
+                            // explainQuery.ts). Sem isso, um console com mais
+                            // de uma query mandava tudo junto pro driver com
+                            // "EXPLAIN" na frente e quebrava com erro de
+                            // sintaxe (mesma causa raiz do bug corrigido em
+                            // Ctrl+Enter, 2026-09-17).
+                            const text = sqlEditorRef.current?.getStatementOrSelection() || query;
+                            void execution.handleRun(explainQuery(text, connection.driver), true, connection.connected);
+                        }}
                         onCancel={() => void execution.handleCancel()}
                         onBatchSizeInput={handleBatchSizeInput}
                         onBatchSizeBlur={handleBatchSizeBlur}
