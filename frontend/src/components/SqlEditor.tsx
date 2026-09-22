@@ -664,6 +664,16 @@ const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({value, 
             if (text) onRunNewTabRef.current?.(text);
         });
 
+        // Ctrl+Shift+S: salva o script no console
+        editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyS, () => {
+            window.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 's',
+                ctrlKey: true,
+                shiftKey: true,
+                bubbles: true,
+            }));
+        });
+
         return () => {
             const m = editor.getModel();
             if (m) {

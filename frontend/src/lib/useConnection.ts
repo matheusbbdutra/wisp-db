@@ -5,7 +5,7 @@ import {useEffect, useRef, useState} from 'react';
 import type {RefObject} from 'react';
 import {useTranslation} from 'react-i18next';
 import {Disconnect, ListSchemas, IntrospectSchemaTables, GetCachedCatalog, WarmupCatalog} from './tabApi';
-import {EventsOn} from '../../wailsjs/runtime';
+import {EventsOn, EventsOff} from '../../wailsjs/runtime';
 import type {db} from '../../wailsjs/go/models';
 
 export interface CatalogConnection {
@@ -37,7 +37,7 @@ export function useConnection({tabId, onConnectedChange, setStatus, pendingQuery
 
     // Escuta eventos assíncronos do backend Go para reatividade do catálogo
     useEffect(() => {
-        const unsubUpdated = EventsOn('wisp:catalog-updated', async (data: any) => {
+        EventsOn('wisp:catalog-updated', async (data: any) => {
             if (data?.tabId && data.tabId !== tabId) return;
             try {
                 const cached = await GetCachedCatalog(tabId);
@@ -49,14 +49,13 @@ export function useConnection({tabId, onConnectedChange, setStatus, pendingQuery
                 // falha silenciosa em background
             }
         });
-        const unsubInvalidated = EventsOn('wisp:catalog-invalidated', (data: any) => {
+        EventsOn('wisp:catalog-invalidated', (data: any) => {
             if (data?.tabId && data.tabId !== tabId) return;
             catalogReadyRef.current = false;
             void WarmupCatalog(tabId);
         });
         return () => {
-            unsubUpdated();
-            unsubInvalidated();
+            EventsOff('wisp:catalog-updated', 'wisp:catalog-invalidated');
         };
     }, [tabId]);
 

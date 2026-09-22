@@ -143,6 +143,20 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
         setStatus(t('consoleTab.disconnected'));
     }
 
+    // Atalho global Ctrl+Shift+S para salvar o script atual do console
+    useEffect(() => {
+        function handleKeyDown(e: KeyboardEvent) {
+            if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 's' || e.key === 'S')) {
+                e.preventDefault();
+                if (query.trim()) {
+                    void scripts.handleSaveClick(query);
+                }
+            }
+        }
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [query, scripts]);
+
     function handleSelectTable(schema: string, table: string) {
         scripts.handleNewScript();
         setQuery(`SELECT * FROM ${schema === 'main' ? table : `${schema}.${table}`} LIMIT 200`);
