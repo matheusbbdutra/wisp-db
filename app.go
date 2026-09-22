@@ -452,7 +452,7 @@ func (a *App) ListSchemaObjects(tabID string, schema string) (*db.SchemaObjects,
 	var tables []db.Table
 	var views []db.Table
 	for _, t := range allTables {
-		if t.Kind == "view" {
+		if strings.EqualFold(strings.TrimSpace(t.Kind), "view") {
 			views = append(views, t)
 		} else {
 			tables = append(tables, t)

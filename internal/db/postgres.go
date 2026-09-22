@@ -199,10 +199,23 @@ func (d *PostgresDriver) ListSchemas(ctx context.Context) ([]string, error) {
 }
 
 func (d *PostgresDriver) ListTables(ctx context.Context, schema string) ([]Table, error) {
+	if schema == "" || schema == "main" {
+		schema = "public"
+	}
 	// See the comment in Execute about "conn busy" with an open streaming cursor.
 	d.closePendingCursor(ctx)
-	rows, err := d.conn.Query(ctx,
-		`SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = $1 ORDER BY table_name`, schema)
+	rows, err := d.conn.Query(ctx, `
+		SELECT c.relname,
+		       CASE c.relkind
+		           WHEN 'v' THEN 'view'
+		           WHEN 'm' THEN 'view'
+		           ELSE 'table'
+		       END AS kind
+		FROM pg_class c
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname = $1
+		  AND c.relkind IN ('r', 'v', 'm', 'p', 'f')
+		ORDER BY c.relname`, schema)
 	if err != nil {
 		return nil, fmt.Errorf("listando tabelas de %q: %w", schema, err)
 	}
@@ -210,21 +223,19 @@ func (d *PostgresDriver) ListTables(ctx context.Context, schema string) ([]Table
 
 	var tables []Table
 	for rows.Next() {
-		var name, tableType string
-		if err := rows.Scan(&name, &tableType); err != nil {
+		var name, kind string
+		if err := rows.Scan(&name, &kind); err != nil {
 			return nil, err
 		}
-		tables = append(tables, Table{Schema: schema, Name: name, Kind: tableKindFromPG(tableType)})
+		tables = append(tables, Table{Schema: schema, Name: name, Kind: kind})
 	}
 	return tables, rows.Err()
 }
 
 // tableKindFromPG translates information_schema table_type into the Kind exposed in the
-// UI ("table"/"view") — views do not support UpdateCell/inline editing. Materialized
-// views do not appear in information_schema.tables (they are in pg_matviews); out of
-// scope here, a known, unimplemented gap.
+// UI ("table"/"view") — views do not support UpdateCell/inline editing.
 func tableKindFromPG(tableType string) string {
-	if tableType == "VIEW" {
+	if strings.EqualFold(tableType, "VIEW") {
 		return "view"
 	}
 	return "table"
@@ -616,17 +627,22 @@ func (d *PostgresDriver) ListFunctions(ctx context.Context, schema string) ([]Fu
 	return functions, rows.Err()
 }
 
-// ListSequences returns schema sequences via information_schema.sequences.
+// ListSequences returns schema sequences via pg_class + pg_sequences.
 func (d *PostgresDriver) ListSequences(ctx context.Context, schema string) ([]Sequence, error) {
 	if schema == "" || schema == "main" {
 		schema = "public"
 	}
 	d.closePendingCursor(ctx)
 	rows, err := d.conn.Query(ctx, `
-		SELECT sequence_name, data_type, COALESCE(start_value::bigint, 1), COALESCE(increment::bigint, 1)
-		FROM information_schema.sequences
-		WHERE sequence_schema = $1
-		ORDER BY sequence_name`, schema)
+		SELECT c.relname,
+		       COALESCE(s.data_type, 'bigint'),
+		       COALESCE(s.start_value, 1),
+		       COALESCE(s.increment_by, 1)
+		FROM pg_class c
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		LEFT JOIN pg_sequences s ON s.schemaname = n.nspname AND s.sequencename = c.relname
+		WHERE n.nspname = $1 AND c.relkind = 'S'
+		ORDER BY c.relname`, schema)
 	if err != nil {
 		return nil, fmt.Errorf("listando sequences de %q: %w", schema, err)
 	}

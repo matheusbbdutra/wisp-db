@@ -322,8 +322,14 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                         batchSizeInput={batchSizeInput}
                         activeFetching={execution.activeFetching}
                         batchSize={batchSize}
-                        onRun={() => void execution.handleRun(query, false, connection.connected)}
-                        onRunNewTab={() => void execution.handleRun(query, true, connection.connected)}
+                        onRun={() => {
+                            const text = sqlEditorRef.current?.getStatementOrSelection() || query;
+                            void execution.handleRun(text, false, connection.connected);
+                        }}
+                        onRunNewTab={() => {
+                            const text = sqlEditorRef.current?.getStatementOrSelection() || query;
+                            void execution.handleRun(text, true, connection.connected);
+                        }}
                         onExplain={() => {
                             // Statement sob o cursor/seleção, nunca o editor
                             // inteiro — EXPLAIN só aceita UM statement (ver

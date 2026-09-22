@@ -395,13 +395,12 @@ monaco.languages.registerCompletionItemProvider('sql', {
 });
 
 // Delimitador de statement: ';' OU linha em branco (uma ou mais linhas só
-// com espaço entre duas quebras). Só ';' não bastava — bug real relatado
-// pelo usuário (2026-09-17): dois SELECTs digitados em blocos separados por
-// linha em branco, sem ';' em lugar nenhum, foram mandados juntos pro driver
-// (nenhum ';' encontrado → fallback pro texto inteiro), gerando erro de
-// sintaxe. Uma quebra de linha ÚNICA não conta (formatação normal de uma
-// mesma query multi-linha), só a linha em branco entre statements.
-const STATEMENT_SEPARATOR_RE = /;|\n[ \t]*\n/g;
+// com espaço/tabs entre duas quebras, suportando \n e \r\n). Só ';' não bastava
+// — bug real relatado pelo usuário (2026-09-17): dois SELECTs digitados em blocos
+// separados por linha em branco, sem ';' em lugar nenhum, foram mandados juntos pro
+// driver, gerando erro de sintaxe. Uma quebra de linha ÚNICA não conta, só a linha
+// em branco entre statements.
+const STATEMENT_SEPARATOR_RE = /;|(?:\r?\n)[ \t\r]*(?:\r?\n)/g;
 
 // Texto selecionado, ou (sem seleção) o "statement" sob o cursor — texto
 // entre o separador anterior e o próximo (ver STATEMENT_SEPARATOR_RE acima).

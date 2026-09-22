@@ -1,4 +1,5 @@
 /build/bin/
+/wisp
 /frontend/dist/
 /frontend/node_modules/
 *.db
