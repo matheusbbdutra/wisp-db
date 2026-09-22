@@ -193,6 +193,12 @@ func (a *App) OpenReleaseURL(rawURL string) error {
 	return nil
 }
 
+// GetAppVersion returns the current compiled application version string.
+func (a *App) GetAppVersion() string {
+	return AppVersion
+}
+
+
 // --- Bindings exposed to the frontend (Wails IPC) ---
 
 // Connect opens a dedicated connection for tab tabId using the driverName dialect

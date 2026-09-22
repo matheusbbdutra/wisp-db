@@ -3,7 +3,7 @@ pkgname=wisp
 # pkgver acompanha version.go à mão (sem sufixo beta de propósito — o Arch não
 # tem a convenção "~" de pré-release do Debian); bump de versão = version.go primeiro.
 pkgver=0.1.0
-pkgrel=7
+pkgrel=8
 pkgdesc="Cliente SQL desktop leve e nativo (Go + Wails), suporte a PostgreSQL, SQLite, MySQL e MariaDB"
 arch=('x86_64')
 url="https://github.com/matheusdutra/wisp"

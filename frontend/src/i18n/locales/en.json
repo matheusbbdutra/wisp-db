@@ -358,5 +358,18 @@
     "title": "Something went wrong",
     "description": "The error was recorded in the local log. Reloading usually recovers the window.",
     "reload": "Reload"
+  },
+  "aboutModal": {
+    "title": "About Wisp",
+    "btnLabel": "About",
+    "subtitle": "Lightweight and native desktop SQL client",
+    "version": "Version {{version}}",
+    "linksTitle": "Project Links",
+    "github": "GitHub Repository",
+    "releases": "Release Notes",
+    "issues": "Report an Issue",
+    "stackTitle": "Architecture & Technologies",
+    "license": "MIT License • Open Source",
+    "close": "Close"
   }
 }

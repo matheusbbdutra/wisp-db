@@ -118,6 +118,65 @@ export function splitStatements(full: string): StatementRange[] {
 }
 
 /**
+ * Retorna os limites exatos do statement SQL associado ao offset para fins de formatação
+ * ou substituição pontual, excluindo whitespaces intermediários das pontas mas preservando
+ * terminadores como ';' caso existam.
+ */
+export function resolveStatementTargetAtOffset(full: string, offset: number): StatementRange | null {
+    const stmts = splitStatements(full);
+    if (stmts.length === 0) {
+        const trimmed = full.trim();
+        if (!trimmed) return null;
+        let start = 0;
+        while (start < full.length && /\s/.test(full[start])) start++;
+        let end = full.length;
+        while (end > start && /\s/.test(full[end - 1])) end--;
+        return { text: full.slice(start, end), start, end };
+    }
+
+    let target: StatementRange | null = null;
+
+    // 1. Cursor contido dentro do range [start, end]
+    for (const s of stmts) {
+        if (offset >= s.start && offset <= s.end) {
+            target = s;
+            break;
+        }
+    }
+
+    // 2. Cursor em linhas em branco / espaçamento intermediário:
+    if (!target) {
+        for (let i = stmts.length - 1; i >= 0; i--) {
+            if (offset >= stmts[i].start) {
+                target = stmts[i];
+                break;
+            }
+        }
+    }
+
+    // 3. Fallback se estiver antes do primeiro statement
+    if (!target) {
+        target = stmts[0];
+    }
+
+    let start = target.start;
+    while (start < target.end && /\s/.test(full[start])) {
+        start++;
+    }
+    let end = target.end;
+    while (end > start && /\s/.test(full[end - 1])) {
+        end--;
+    }
+
+    if (start >= end) {
+        return null;
+    }
+
+    const text = full.slice(start, end);
+    return { text, start, end };
+}
+
+/**
  * Retorna o comando SQL correspondente à posição atual do cursor (offset).
  * Se o cursor estiver exatamente sobre um statement ou logo após o seu delimitador/whitespace,
  * retorna aquele statement isolado (nunca o buffer inteiro com múltiplos statements).

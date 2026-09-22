@@ -46,6 +46,10 @@ export function FetchRows(arg1, arg2) {
   return window['go']['main']['App']['FetchRows'](arg1, arg2);
 }
 
+export function GetAppVersion() {
+  return window['go']['main']['App']['GetAppVersion']();
+}
+
 export function GetCachedCatalog(arg1) {
   return window['go']['main']['App']['GetCachedCatalog'](arg1);
 }

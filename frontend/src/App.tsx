@@ -9,6 +9,7 @@ import SchemaTab from './components/SchemaTab';
 import RoutineTab from './components/RoutineTab';
 import UpdateChecker from './components/UpdateChecker';
 import LanguageSwitcher from './components/LanguageSwitcher';
+import AboutModal from './components/AboutModal';
 import i18n from './i18n';
 
 interface ConsoleTabState {
@@ -64,6 +65,7 @@ function App() {
     const {t} = useTranslation();
     const [tabs, setTabs] = useState<TabState[]>(() => [createTab()]);
     const [activeId, setActiveId] = useState(() => tabs[0].id);
+    const [showAbout, setShowAbout] = useState(false);
     // Handles imperativos dos ConsoleTab vivos, pra handleCloseTab poder
     // perguntar "tem SQL não salvo?" antes de fechar (ver ConsoleTabHandle) —
     // só consoles têm essa checagem, TableTab/SchemaTab não têm editor livre.
@@ -236,6 +238,18 @@ function App() {
                     +
                 </button>
                 <UpdateChecker />
+                <button
+                    className="about-btn"
+                    onClick={() => setShowAbout(true)}
+                    title={t('aboutModal.title')}
+                >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="12" y1="16" x2="12" y2="12" />
+                        <line x1="12" y1="8" x2="12.01" y2="8" />
+                    </svg>
+                    <span>{t('aboutModal.btnLabel')}</span>
+                </button>
                 <LanguageSwitcher />
             </div>
 
@@ -288,6 +302,7 @@ function App() {
                     />
                 )
             ))}
+            <AboutModal isOpen={showAbout} onClose={() => setShowAbout(false)} />
         </div>
     )
 }

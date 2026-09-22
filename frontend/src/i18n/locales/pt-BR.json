@@ -358,5 +358,18 @@
     "title": "Algo deu errado",
     "description": "O erro foi registrado no log local. Recarregar normalmente recupera a janela.",
     "reload": "Recarregar"
+  },
+  "aboutModal": {
+    "title": "Sobre o Wisp",
+    "btnLabel": "Sobre",
+    "subtitle": "Cliente SQL desktop leve e nativo",
+    "version": "Versão {{version}}",
+    "linksTitle": "Links do Projeto",
+    "github": "Repositório no GitHub",
+    "releases": "Notas de Versão",
+    "issues": "Relatar um Problema (Issues)",
+    "stackTitle": "Tecnologias & Arquitetura",
+    "license": "Licença MIT • Código Aberto",
+    "close": "Fechar"
   }
 }

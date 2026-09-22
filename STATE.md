@@ -1,5 +1,43 @@
 # STATE — Wisp
 
+## ✅ Modal "Sobre o Wisp" (About Wisp) — FEITO (2026-09-22)
+1. **Identidade e Exibição de Versão**:
+   - `app.go`: adicionado binding `GetAppVersion() string` expondo a versão compilada em `version.go` (`AppVersion`).
+   - `frontend/wailsjs/go/main/App.d.ts` e `App.js`: registradas declarações de `GetAppVersion`.
+2. **Componente e Interface (`frontend/src/components/AboutModal.tsx`)**:
+   - Modal com logo do Wisp, badge de versão oficial, subtítulo/descrição com i18n, cards para links úteis (GitHub, Releases e Issues) abrindo no navegador nativo via `OpenReleaseURL`, tags da stack tecnológica (Go, Wails v2, React 19, Monaco Editor, Glide Data Grid, etc.) e nota de licença MIT.
+   - Suporte a tecla `Escape` e clique externo no backdrop para fechar.
+3. **Integração na Barra Superior (`frontend/src/App.tsx` e `App.css`)**:
+   - Adicionado botão discreto `.about-btn` com ícone informativo ao lado do `LanguageSwitcher`.
+   - Suporte bilíngue completo em `pt-BR.json` e `en.json`.
+4. **Testes e Validação E2E no Navegador**:
+   - Validado no Chrome DevTools Protocol (`http://localhost:34115`): abertura do modal ao clicar no botão "Sobre", verificação do nome, versão `v0.1.0-beta.14`, links e tags; validação de alternância dinâmica para inglês ("About Wisp", "Release Notes", etc.) e fechamento com `Escape` e botão `✕`.
+   - `npm run test` (54/54 testes passando), `npm run build` e `go test` 100% limpos.
+
+## ✅ Issue #1 — Formatação SQL Cirúrgica por Statement ou Seleção Ativa — FEITO (2026-09-22)
+1. **Problema**: O botão "Formatar" reformatava o buffer inteiro do console SQL, substituindo todas as queries da tela de uma vez via `setQuery(format(query))`, perdendo a posição do cursor e resetando o histórico de undo do Monaco.
+2. **Scanner e Delimitação Pontual (`frontend/src/lib/sqlStatements.ts`)**:
+   - Criada função `resolveStatementTargetAtOffset(full: string, offset: number): StatementRange | null` que localiza com precisão os limites `[start, end]` e o texto do statement SQL associado à posição atual do cursor, preservando terminadores `;` caso existam e excluindo quebras de linha e whitespaces que pertencem ao espaçamento entre queries.
+   - Adicionada suíte de testes unitários dedicada em `sqlStatements.test.ts` (18/18 testes passando).
+3. **Substituição Cirúrgica no Monaco (`frontend/src/components/SqlEditor.tsx`)**:
+   - `SqlEditorHandle`: adicionado método `formatStatementOrSelection(formatter: (text: string) => string)`.
+   - Se houver texto selecionado pelo usuário, formata estritamente a seleção via `editor.executeEdits`.
+   - Se não houver seleção, localiza o statement sob o cursor via `resolveStatementTargetAtOffset`, formata apenas essa instrução e aplica a edição pontual no range exato via `editor.executeEdits`, mantendo o histórico de Undo (`Ctrl+Z`) e sem mover o cursor para o topo.
+   - Adicionado atalho nativo do editor `Shift+Alt+F` mapeado para acionar a formatação.
+4. **Integração na ConsoleTab (`frontend/src/components/ConsoleTab.tsx`)**:
+   - `handleFormatQuery` agora delega a formatação para `sqlEditorRef.current.formatStatementOrSelection`, mantendo fallback para `setQuery` caso o editor não esteja montado.
+5. **Testes e Validação**:
+   - `vitest run`: 54/54 testes passando (100%).
+   - `npm run build`: `tsc` e `vite build` 100% limpos.
+   - `go test -count=1 ./internal/... .`: 100% passando.
+   - `git diff --check`: 0 avisos.
+   - **Teste End-to-End no Navegador via Chrome DevTools Protocol (`http://localhost:34115`)**:
+     - Submetido buffer com múltiplos statements: `SELECT 1;`, `SELECT id, name, email FROM users WHERE id = 1;` e `SELECT 3;`.
+     - Cursor posicionado na query intermediária (linha 3, coluna 10). Botão "Formatar" acionado.
+     - `SELECT 1;` e `SELECT 3;` permaneceram 100% intactos; apenas o segundo statement foi reformatado em múltiplas linhas identadas.
+     - Acionado Undo (`Ctrl+Z`): apenas o segundo statement retornou ao formato original, confirmando preservação do histórico de edições.
+     - Selecionado trecho pontual da primeira query: botão "Formatar" formatou unicamente a seleção sem tocar nas demais queries.
+
 ## ✅ ADR 0015 — Paridade de Cancelamento Nativo de Queries entre Dialetos — FEITO (2026-09-22)
 1. **Cancelamento Nativo no Driver SQLite (`internal/db/sqlite.go`)**:
    - Adicionados campos `mu sync.Mutex` e `cancelQuery context.CancelFunc` na struct `SQLiteDriver`.

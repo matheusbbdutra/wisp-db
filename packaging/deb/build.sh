@@ -57,7 +57,7 @@ cd "${REPO_ROOT}"
 
 # Mesmo build do PKGBUILD. -trimpath evita embutir o caminho absoluto de
 # build no binário (problema real já corrigido no PKGBUILD do Arch).
-wails build -tags webkit2_41 -clean -trimpath
+wails build -tags webkit2_41 -clean -trimpath -m
 
 [ -x "${BINARIO_BUILDADO}" ] || {
   echo "Binário esperado não encontrado: ${BINARIO_BUILDADO}" >&2

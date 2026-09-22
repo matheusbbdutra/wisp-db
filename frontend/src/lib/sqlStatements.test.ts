@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {splitStatements, resolveStatementAtOffset} from './sqlStatements';
+import {splitStatements, resolveStatementAtOffset, resolveStatementTargetAtOffset} from './sqlStatements';
 
 describe('splitStatements', () => {
     it('divide statements por ponto e vírgula', () => {
@@ -123,5 +123,62 @@ SELECT * FROM users;
             const rawSlice = script.slice(s.start, s.end);
             expect(rawSlice).toContain(s.text);
         }
+    });
+});
+
+describe('resolveStatementTargetAtOffset', () => {
+    it('retorna null para buffer vazio ou somente espaços', () => {
+        expect(resolveStatementTargetAtOffset('', 0)).toBeNull();
+        expect(resolveStatementTargetAtOffset('   \n\t  ', 2)).toBeNull();
+    });
+
+    it('isola perfeitamente o segundo statement com limites e pontuação intactos', () => {
+        const sql = 'SELECT 1;\n\nSELECT 2 FROM users WHERE id = 1;\n\nSELECT 3;';
+        // Encontra o offset do início de SELECT 2
+        const offset2 = sql.indexOf('SELECT 2');
+        const target = resolveStatementTargetAtOffset(sql, offset2 + 5);
+
+        expect(target).not.toBeNull();
+        expect(target!.text).toBe('SELECT 2 FROM users WHERE id = 1;');
+        expect(sql.slice(target!.start, target!.end)).toBe('SELECT 2 FROM users WHERE id = 1;');
+        // Garante que não invadiu o SELECT 1 nem o SELECT 3
+        expect(target!.start).toBe(offset2);
+        expect(sql.slice(0, target!.start)).toContain('SELECT 1;');
+        expect(sql.slice(target!.end)).toContain('SELECT 3;');
+    });
+
+    it('suporta múltiplos statements sem linha em branco entre eles (somente newline)', () => {
+        const sql = 'SELECT 1;\nSELECT 2;';
+        const offset2 = sql.indexOf('SELECT 2');
+        const target = resolveStatementTargetAtOffset(sql, offset2);
+
+        expect(target).not.toBeNull();
+        expect(target!.text).toBe('SELECT 2;');
+        expect(target!.start).toBe(offset2);
+        expect(sql.slice(target!.start, target!.end)).toBe('SELECT 2;');
+    });
+
+    it('mantém integridade de statement único sem ponto e vírgula', () => {
+        const sql = '   SELECT * FROM table   ';
+        const target = resolveStatementTargetAtOffset(sql, 8);
+
+        expect(target).not.toBeNull();
+        expect(target!.text).toBe('SELECT * FROM table');
+        expect(sql.slice(target!.start, target!.end)).toBe('SELECT * FROM table');
+    });
+
+    it('permite substituir apenas o alvo formatado sem alterar o restante do documento', () => {
+        const sql = 'SELECT 1;\n\nSELECT a,b FROM tbl WHERE x=1;\n\nSELECT 3;';
+        const offset = sql.indexOf('SELECT a');
+        const target = resolveStatementTargetAtOffset(sql, offset)!;
+        expect(target).not.toBeNull();
+
+        // Simula a formatação
+        const formatted = 'SELECT\n  a,\n  b\nFROM\n  tbl\nWHERE\n  x = 1;';
+        const result = sql.slice(0, target.start) + formatted + sql.slice(target.end);
+
+        expect(result).toBe('SELECT 1;\n\nSELECT\n  a,\n  b\nFROM\n  tbl\nWHERE\n  x = 1;\n\nSELECT 3;');
+        expect(result.startsWith('SELECT 1;\n\n')).toBe(true);
+        expect(result.endsWith('\n\nSELECT 3;')).toBe(true);
     });
 });

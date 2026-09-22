@@ -236,7 +236,11 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
     function handleFormatQuery() {
         const dialect: SqlLanguage = connection.driver === 'postgres' ? 'postgresql' : connection.driver === 'sqlite' ? 'sqlite' : 'sql';
         try {
-            setQuery(format(query, {language: dialect}));
+            if (sqlEditorRef.current) {
+                sqlEditorRef.current.formatStatementOrSelection(text => format(text, {language: dialect}));
+            } else {
+                setQuery(format(query, {language: dialect}));
+            }
         } catch (err) {
             setStatus(t('consoleTab.errorFormat', {error: err}));
         }
@@ -334,6 +338,7 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                             onRunSelectionRequested={text => void execution.handleRun(text, false, connection.connected)}
                             onRunNewTabRequested={text => void execution.handleRun(text, true, connection.connected)}
                             onRunScriptRequested={handleRunScript}
+                            onFormatRequested={handleFormatQuery}
                             catalog={connection.catalog}
                             onCatalogNeeded={() => connection.connectionId ? connection.loadCatalog(connection.connectionId, connection.catalogConnectionRef.current?.name) : Promise.resolve()}
                             onEnsureTableColumns={connection.ensureTableColumns}

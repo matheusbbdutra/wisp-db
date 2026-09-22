@@ -26,6 +26,8 @@ export function ExecuteBatch(arg1:string,arg2:Array<db.BatchOp>):Promise<void>;
 
 export function FetchRows(arg1:string,arg2:number):Promise<main.FetchBatch>;
 
+export function GetAppVersion():Promise<string>;
+
 export function GetCachedCatalog(arg1:string):Promise<Array<db.Table>>;
 
 export function GetConnectionForEdit(arg1:string):Promise<store.SavedConnectionEdit>;

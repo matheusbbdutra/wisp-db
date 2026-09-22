@@ -19,7 +19,7 @@ import type {db} from '../../wailsjs/go/models';
 import editorWorker from 'monaco-editor/editor/editor.worker?worker';
 import {isCtrlHeld} from '../lib/modifierKeyTracker';
 import {extractTableAliases} from '../lib/extractTableAliases';
-import {resolveStatementAtOffset} from '../lib/sqlStatements';
+import {resolveStatementAtOffset, resolveStatementTargetAtOffset} from '../lib/sqlStatements';
 
 // Registro manual do SQL em vez de importar o "basic-languages" agregado
 // (que nesta versão do monaco-editor puxa TODAS as linguagens suportadas
@@ -496,16 +496,19 @@ interface Props {
             | {kind: 'table'; schema: string | null; table: string}
             | {kind: 'schema'; schema: string}
     ) => void;
+    // Disparado quando o usuário aciona o atalho de formatação dentro do editor (Shift+Alt+F)
+    onFormatRequested?: () => void;
 }
 
-// Exposto via ref pro botão "Explain" e execução de batch/scripts
+// Exposto via ref pro botão "Explain", execução de batch/scripts e formatação isolada
 export interface SqlEditorHandle {
     getStatementOrSelection: () => string;
     getScriptTextOrSelection: () => { text: string; baseOffset: number };
     highlightRange: (startOffset: number, endOffset: number) => void;
+    formatStatementOrSelection: (formatter: (text: string) => string) => void;
 }
 
-const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({value, onChange, onRunRequested, onRunSelectionRequested, onRunNewTabRequested, onRunScriptRequested, catalog, driver, autoUppercase = true, wordWrap, readOnly = false, onOpenIdentifier, onCatalogNeeded, onEnsureTableColumns}, ref) {
+const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({value, onChange, onRunRequested, onRunSelectionRequested, onRunNewTabRequested, onRunScriptRequested, onFormatRequested, catalog, driver, autoUppercase = true, wordWrap, readOnly = false, onOpenIdentifier, onCatalogNeeded, onEnsureTableColumns}, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
     useImperativeHandle(ref, () => ({
@@ -543,6 +546,52 @@ const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({value, 
             editor.revealRangeInCenter(selection);
             editor.focus();
         },
+        formatStatementOrSelection: (formatter: (text: string) => string) => {
+            const editor = editorRef.current;
+            if (!editor) return;
+            const model = editor.getModel();
+            if (!model) return;
+
+            const selection = editor.getSelection();
+            if (selection && !selection.isEmpty()) {
+                const selectedText = model.getValueInRange(selection);
+                const formatted = formatter(selectedText);
+                editor.executeEdits('format-sql', [
+                    {
+                        range: selection,
+                        text: formatted,
+                        forceMoveMarkers: true,
+                    },
+                ]);
+                editor.focus();
+                return;
+            }
+
+            const position = editor.getPosition();
+            const full = model.getValue();
+            const offset = position ? model.getOffsetAt(position) : 0;
+            const target = resolveStatementTargetAtOffset(full, offset);
+            if (!target || !target.text) return;
+
+            const formatted = formatter(target.text);
+            const startPos = model.getPositionAt(target.start);
+            const endPos = model.getPositionAt(target.end);
+            const range = new monaco.Range(
+                startPos.lineNumber,
+                startPos.column,
+                endPos.lineNumber,
+                endPos.column
+            );
+
+            editor.executeEdits('format-sql', [
+                {
+                    range,
+                    text: formatted,
+                    forceMoveMarkers: true,
+                },
+            ]);
+            editor.focus();
+        },
     }));
     const catalogRef = useRef(catalog);
     catalogRef.current = catalog;
@@ -553,6 +602,7 @@ const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({value, 
     const onRunSelectionRef = useRef(onRunSelectionRequested);
     const onRunNewTabRef = useRef(onRunNewTabRequested);
     const onRunScriptRef = useRef(onRunScriptRequested);
+    const onFormatRef = useRef(onFormatRequested);
     const onOpenIdentifierRef = useRef(onOpenIdentifier);
     const onCatalogNeededRef = useRef(onCatalogNeeded);
     const onEnsureTableColumnsRef = useRef(onEnsureTableColumns);
@@ -561,6 +611,7 @@ const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({value, 
     onRunSelectionRef.current = onRunSelectionRequested;
     onRunNewTabRef.current = onRunNewTabRequested;
     onRunScriptRef.current = onRunScriptRequested;
+    onFormatRef.current = onFormatRequested;
     onOpenIdentifierRef.current = onOpenIdentifier;
     onCatalogNeededRef.current = onCatalogNeeded;
     onEnsureTableColumnsRef.current = onEnsureTableColumns;
@@ -604,6 +655,10 @@ const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({value, 
             },
         });
         editorRef.current = editor;
+        if (import.meta.env.DEV) {
+            (window as any).monaco = monaco;
+            (window as any).__monacoEditor = editor;
+        }
         const initialModel = editor.getModel();
         if (initialModel) {
             catalogByModel.set(initialModel, catalogRef.current ?? []);
@@ -714,6 +769,11 @@ const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({value, 
         // Alt+X: Executa o script sequencialmente (ou trecho selecionado)
         editor.addCommand(monaco.KeyMod.Alt | monaco.KeyCode.KeyX, () => {
             onRunScriptRef.current?.();
+        });
+
+        // Shift+Alt+F: Formata o statement sob o cursor ou a seleção
+        editor.addCommand(monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF, () => {
+            onFormatRef.current?.();
         });
 
         return () => {
