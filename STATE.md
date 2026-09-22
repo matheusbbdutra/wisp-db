@@ -1,5 +1,14 @@
 # STATE — Wisp
 
+## ✅ Release v0.1.0-beta.13 — Scanner de Statements e Correção de Execução Sob Cursor (2026-09-22)
+- **Problema**: No console SQL com múltiplos SELECTs (com ou sem ponto e vírgula, com ou sem linhas em branco), ao executar com o cursor posicionado sobre uma query sem selecionar com o mouse, `resolveStatementOrSelection` colapsava ranges em posições de borda (offset logo após `;` ou quebras de linha), retornando string vazia `""`. Na Toolbar do console, o fallback `|| query` enviava o buffer inteiro da tela para o driver PostgreSQL/pgx, resultando em `ERROR: syntax error at or near "SELECT" (SQLSTATE 42601)`.
+- **Solução**:
+  - Criado módulo `frontend/src/lib/sqlStatements.ts` com parser/scanner robusto (`splitStatements` e `resolveStatementAtOffset`) que preserva strings `'...'` (com escapes `''` e `\'`) e comentários (`--` e `/* ... */`), mapeando ranges `[start, end]` para cada statement delimitado por `;` ou linhas em branco.
+  - Implementado isolamento exato: o cursor sobre qualquer ponto de um statement (ou seu delimitador imediato) seleciona única e exclusivamente aquela instrução SQL.
+  - Adicionada suíte de testes unitários `frontend/src/lib/sqlStatements.test.ts` (12 casos de teste cobrindo todas as variações e edge cases).
+  - Integrado em `frontend/src/components/SqlEditor.tsx`.
+  - Bump de versão para `v0.1.0-beta.13` em `version.go` e `pkgrel=6` em `packaging/arch/PKGBUILD`.
+
 ## ✅ ADRs 0009, 0010 e 0011 — Cache Reativo, Objetos de Schema e Word Wrap — FEITO (2026-09-22)
 Implementação cirúrgica dos 3 ADRs validada com build limpo do frontend (`npm run build`) e backend (`go test -count=1 ./...`):
 1. **ADR 0009 — Cache Reativo e Ciclo de Vida**:

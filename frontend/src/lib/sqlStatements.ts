@@ -1,0 +1,137 @@
+export interface StatementRange {
+    text: string;
+    start: number;
+    end: number;
+}
+
+/**
+ * Divide o texto do editor SQL em declarações individuais.
+ *
+ * Delimitadores suportados:
+ * 1. Ponto e vírgula (';') fora de strings ('...') e comentários (-- ou /* ... * /).
+ * 2. Linhas em branco (uma ou mais linhas contendo apenas espaços/tabs entre quebras de linha).
+ *
+ * Preserva integridade de:
+ * - Aspas simples '...' (incluindo aspas escapadas '' e \')
+ * - Comentários de linha -- ...
+ * - Comentários de bloco /* ... * /
+ */
+export function splitStatements(full: string): StatementRange[] {
+    const statements: StatementRange[] = [];
+    let inString = false;
+    let inComment = false;
+    let inBlockComment = false;
+    let lastIndex = 0;
+
+    for (let i = 0; i < full.length; i++) {
+        const ch = full[i];
+        const next = full[i + 1] || '';
+
+        // Comentário de bloco /* ... */
+        if (!inString && !inComment && !inBlockComment && ch === '/' && next === '*') {
+            inBlockComment = true;
+            i++;
+            continue;
+        }
+        if (inBlockComment) {
+            if (ch === '*' && next === '/') {
+                inBlockComment = false;
+                i++;
+            }
+            continue;
+        }
+
+        // Comentário de linha -- ...
+        if (!inString && !inComment && ch === '-' && next === '-') {
+            inComment = true;
+            i++;
+            continue;
+        }
+        if (inComment) {
+            if (ch === '\n') {
+                inComment = false;
+            }
+            continue;
+        }
+
+        // String '...'
+        if (ch === "'") {
+            if (inString && next === "'") {
+                // Aspa simples escapada em SQL: ''
+                i++;
+                continue;
+            }
+            inString = !inString;
+            continue;
+        }
+        if (inString) {
+            if (ch === '\\') {
+                // Escape de barra invertida \'
+                i++;
+            }
+            continue;
+        }
+
+        // Delimitador 1: ';'
+        if (ch === ';') {
+            const text = full.slice(lastIndex, i).trim();
+            if (text) {
+                statements.push({text, start: lastIndex, end: i + 1});
+            }
+            lastIndex = i + 1;
+            continue;
+        }
+
+        // Delimitador 2: linha em branco (newline + whitespace + newline)
+        if (ch === '\n') {
+            let j = i + 1;
+            while (j < full.length && (full[j] === ' ' || full[j] === '\t' || full[j] === '\r')) {
+                j++;
+            }
+            if (j < full.length && full[j] === '\n') {
+                const text = full.slice(lastIndex, i).trim();
+                if (text) {
+                    statements.push({text, start: lastIndex, end: j + 1});
+                }
+                lastIndex = j + 1;
+                i = j;
+                continue;
+            }
+        }
+    }
+
+    const trailing = full.slice(lastIndex).trim();
+    if (trailing) {
+        statements.push({text: trailing, start: lastIndex, end: full.length});
+    }
+
+    return statements;
+}
+
+/**
+ * Retorna o comando SQL correspondente à posição atual do cursor (offset).
+ * Se o cursor estiver exatamente sobre um statement ou logo após o seu delimitador/whitespace,
+ * retorna aquele statement isolado (nunca o buffer inteiro com múltiplos statements).
+ */
+export function resolveStatementAtOffset(full: string, offset: number): string {
+    const stmts = splitStatements(full);
+    if (stmts.length === 0) return full.trim();
+
+    // 1. Cursor contido dentro do range [start, end]
+    for (const s of stmts) {
+        if (offset >= s.start && offset <= s.end) {
+            return s.text;
+        }
+    }
+
+    // 2. Cursor em linhas em branco / espaçamento intermediário:
+    // retorna o statement imediatamente anterior ao offset.
+    for (let i = stmts.length - 1; i >= 0; i--) {
+        if (offset >= stmts[i].start) {
+            return stmts[i].text;
+        }
+    }
+
+    // 3. Fallback se estiver antes do primeiro statement
+    return stmts[0].text;
+}

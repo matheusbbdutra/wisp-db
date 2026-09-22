@@ -19,6 +19,7 @@ import type {db} from '../../wailsjs/go/models';
 import editorWorker from 'monaco-editor/editor/editor.worker?worker';
 import {isCtrlHeld} from '../lib/modifierKeyTracker';
 import {extractTableAliases} from '../lib/extractTableAliases';
+import {resolveStatementAtOffset} from '../lib/sqlStatements';
 
 // Registro manual do SQL em vez de importar o "basic-languages" agregado
 // (que nesta versão do monaco-editor puxa TODAS as linguagens suportadas
@@ -394,52 +395,23 @@ monaco.languages.registerCompletionItemProvider('sql', {
     },
 });
 
-// Delimitador de statement: ';' OU linha em branco (uma ou mais linhas só
-// com espaço/tabs entre duas quebras, suportando \n e \r\n). Só ';' não bastava
-// — bug real relatado pelo usuário (2026-09-17): dois SELECTs digitados em blocos
-// separados por linha em branco, sem ';' em lugar nenhum, foram mandados juntos pro
-// driver, gerando erro de sintaxe. Uma quebra de linha ÚNICA não conta, só a linha
-// em branco entre statements.
-const STATEMENT_SEPARATOR_RE = /;|(?:\r?\n)[ \t\r]*(?:\r?\n)/g;
-
-// Texto selecionado, ou (sem seleção) o "statement" sob o cursor — texto
-// entre o separador anterior e o próximo (ver STATEMENT_SEPARATOR_RE acima).
-// Mesma inspeção de string sem parser SQL usada no resto do arquivo: não
-// distingue um ';' dentro de string/comentário de um separador real de
-// statement (limitação aceita, igual extractTableAliases).
+// Texto selecionado ou (sem seleção) o "statement" sob o cursor (delimitado por
+// ';' ou linha em branco). Usa o scanner robusto de sqlStatements.ts que
+// preserva integridade de strings e comentários.
 function resolveStatementOrSelection(editor: monaco.editor.IStandaloneCodeEditor): string {
     const model = editor.getModel();
     const selection = editor.getSelection();
     if (!model) return '';
 
-    let text: string;
     if (selection && !selection.isEmpty()) {
-        text = model.getValueInRange(selection);
-    } else {
-        const position = editor.getPosition();
-        const full = model.getValue();
-        const offset = position ? model.getOffsetAt(position) : 0;
-        let start = 0;
-        let end = full.length;
-        STATEMENT_SEPARATOR_RE.lastIndex = 0;
-        let match: RegExpExecArray | null;
-        while ((match = STATEMENT_SEPARATOR_RE.exec(full)) !== null) {
-            const separatorEnd = match.index + match[0].length;
-            if (separatorEnd <= offset) {
-                start = separatorEnd;
-            } else if (match.index >= offset) {
-                end = match.index;
-                break;
-            } else {
-                // Cursor caiu DENTRO do separador (ex.: na linha em branco
-                // entre dois statements) — trata como "depois" dele.
-                start = separatorEnd;
-            }
-        }
-        text = full.slice(start, end);
+        return model.getValueInRange(selection).trim();
     }
-    return text.trim();
+    const position = editor.getPosition();
+    const full = model.getValue();
+    const offset = position ? model.getOffsetAt(position) : 0;
+    return resolveStatementAtOffset(full, offset);
 }
+
 
 declare global {
     interface Window {
