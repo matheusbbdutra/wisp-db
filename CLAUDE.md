@@ -42,6 +42,10 @@ em PT-BR" — a regra global segue valendo em outros projetos.
 5. **Sem otimização por GPU.** Não há hot path identificado que justifique. Grid virtualizado usa renderização em canvas (Glide Data Grid) no frontend — isso já é o único ponto onde "aceleração gráfica" se aplica, e é decisão de lib, não de pipeline de dados custom.
 6. **Isolamento de sessão**: cada aba = `tabId` único → `*sql.Conn` dedicado + `context.WithCancel()` próprio. Nunca compartilhar conexão entre abas. Cancelamento real (`pgx.CancelQuery` ou equivalente nativo do driver) é requisito, não "nice to have".
 7. **Formato de resultado de query na ponte IPC**: sempre `{ columns: string[], types: string[], rows: any[][] }`. Nunca `[]map[string]any` (duplica chaves em JSON, explode payload).
+8. **Isolamento de statements no editor SQL (CRÍTICO - NÃO ALTERAR SEM TESTES E ADR)**:
+   - A execução via atalhos (Ctrl+Enter, Ctrl+Alt+Enter, Ctrl+Shift+Enter) e botões da RunBar (`onRun`, `onRunNewTab`, `onExplain`) NUNCA deve enviar o buffer inteiro do editor se houver múltiplos comandos na tela.
+   - A resolução do comando ativo DEVE usar o scanner de ranges (`splitStatements` e `resolveStatementAtOffset` em `frontend/src/lib/sqlStatements.ts`), que calcula limites `[start, end]` precisos e preserva strings (`'...'`, escapes `''` e `\'`) e comentários (`--` e `/* ... */`), delimitando por `;` e linhas em branco (`\n\s*\n`).
+   - Se o cursor estiver posicionado sobre ou adjacente a qualquer query, apenas ela é enviada ao backend/driver. NUNCA regredir para splits ingênuos por regex relativo ou fallbacks acidentais `|| query` que agrupem múltiplos statements, pois o PostgreSQL (`pgx`) e a maioria dos drivers relacionais em modo estendido rejeitam múltiplos comandos com erro de sintaxe imediato (`ERROR: syntax error at or near "SELECT"`).
 
 ## Metas de performance (critério de aceite, não aspiracional)
 - RAM idle com 1 conexão ativa, sem grid grande carregado: **abaixo de 500MB**.
