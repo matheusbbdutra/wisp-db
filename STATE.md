@@ -8,6 +8,9 @@
   - Adicionada suíte de testes unitários `frontend/src/lib/sqlStatements.test.ts` (12 casos de teste cobrindo todas as variações e edge cases).
   - Integrado em `frontend/src/components/SqlEditor.tsx`.
   - Bump de versão para `v0.1.0-beta.13` em `version.go` e `pkgrel=6` em `packaging/arch/PKGBUILD`.
+  - Reorganizada toda a semântica de releases no GitHub (`v0.1.0-beta.1` a `v0.1.0-beta.13`) com títulos canônicos uniformes, tags alinhadas e flag Pre-release (removido status indevido de "Latest" da beta.12 e preenchida a release faltante da beta.8).
+  - Invariante formalizada no `AGENTS.md` (regra fixa #8), `docs/ARCHITECTURE.md` (passo 0 do query flow) e cabeçalho de proteção em `sqlStatements.ts`.
+  - Migrado `CLAUDE.md` para o padrão aberto de mercado `AGENTS.md`, com todas as referências cruzadas da documentação e código atualizadas.
 
 ## ✅ ADRs 0009, 0010 e 0011 — Cache Reativo, Objetos de Schema e Word Wrap — FEITO (2026-09-22)
 Implementação cirúrgica dos 3 ADRs validada com build limpo do frontend (`npm run build`) e backend (`go test -count=1 ./...`):
