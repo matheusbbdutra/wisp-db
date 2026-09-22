@@ -1,5 +1,37 @@
 # STATE — Wisp
 
+## 🚀 Release v0.1.0-beta.16 — EM ANDAMENTO (2026-09-22)
+- **Tag**: `v0.1.0-beta.16`
+- **Destaque**: Pipeline automatizado de releases multiplataforma via GoReleaser + GitHub Actions.
+- **Artefatos gerados pelo CI**:
+  - Debian/Ubuntu: `.deb`
+  - Fedora/RHEL/openSUSE: `.rpm`
+  - Arch Linux: `.pkg.tar.zst`
+  - Universal Linux: `.tar.gz`
+  - Windows 10/11: `.zip` (com `wisp.exe` nativo)
+  - `checksums.txt` (SHA-256)
+
+## 📦 Automação de Releases Multiplataforma (GoReleaser + GitHub Actions) — PRONTO (2026-09-22)
+1. **Configuração Unificada do GoReleaser (`.goreleaser.yaml`)**:
+   - Compilação do frontend React/Monaco via hook antes do build (`npm --prefix frontend run build`).
+   - Build Linux (`id: wisp-linux`): binário ELF com `CGO_ENABLED=1`, `-tags webkit2_41` e `-trimpath`.
+   - Build Windows (`id: wisp-windows`): binário PE32+ com `CGO_ENABLED=0`, `-H windowsgui` e `-trimpath` (cross-compile nativo sem necessidade de CGO ou Wine).
+   - Empacotamento Linux via nFPM:
+     - Debian/Ubuntu: `.deb` com dependências `libwebkit2gtk-4.1-0` e `libgtk-3-0`.
+     - Fedora/RHEL/openSUSE: `.rpm` com dependências `webkit2gtk4.1` e `gtk3`.
+     - Arch Linux: `.pkg.tar.zst` nativo com dependências `gtk3` e `webkit2gtk-4.1`.
+     - Universal Linux: `.tar.gz` contendo executável, assets e licença.
+   - Empacotamento Windows: `.zip` com `wisp.exe`, ícone, documentação e licença.
+   - Cálculo automático de integridade com `checksums.txt` (SHA-256).
+2. **Scripts Compartilhados (`packaging/scripts/`)**:
+   - `postinstall.sh` e `postremove.sh` compartilhados entre `.deb` e `.rpm` para regeneração de cache de ícones e base de dados desktop.
+3. **Pipeline CI/CD no GitHub Actions (`.github/workflows/release.yml`)**:
+   - Disparado exclusivamente em tags de release (`v*`).
+   - Custo zero/desprezível (repositório público com runners ilimitados).
+4. **Validação**:
+   - `goreleaser check`: 100% válido, zero deprecations.
+   - `goreleaser release --snapshot --clean`: testado e validado em 9 segundos com geração de todos os 5 formatos.
+
 ## 🚀 Release v0.1.0-beta.15 — PUBLICADA (2026-09-22)
 - **Tag**: `v0.1.0-beta.15`
 - **Release GitHub**: https://github.com/matheusbbdutra/wisp-db/releases/tag/v0.1.0-beta.15

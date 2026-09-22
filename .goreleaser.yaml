@@ -1,0 +1,118 @@
+version: 2
+
+project_name: wisp
+
+before:
+  hooks:
+    - npm --prefix frontend run build
+
+builds:
+  - id: wisp-linux
+    binary: wisp
+    main: .
+    tags:
+      - webkit2_41
+    flags:
+      - -trimpath
+    goos:
+      - linux
+    goarch:
+      - amd64
+    env:
+      - CGO_ENABLED=1
+
+  - id: wisp-windows
+    binary: wisp
+    main: .
+    flags:
+      - -trimpath
+    ldflags:
+      - -H windowsgui
+    goos:
+      - windows
+    goarch:
+      - amd64
+    env:
+      - CGO_ENABLED=0
+
+archives:
+  - id: linux
+    ids:
+      - wisp-linux
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - src: packaging/assets/wisp.desktop
+      - src: build/appicon.png
+      - src: build/appicon.svg
+      - src: README.md
+      - src: LICENSE
+
+  - id: windows
+    ids:
+      - wisp-windows
+    formats:
+      - zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - src: build/windows/icon.ico
+      - src: README.md
+      - src: LICENSE
+
+nfpms:
+  - id: packages
+    package_name: wisp
+    ids:
+      - wisp-linux
+    vendor: Matheus Dutra
+    homepage: https://github.com/matheusbbdutra/wisp-db
+    maintainer: Matheus Dutra <matheusbbdutra@gmail.com>
+    description: Cliente SQL desktop leve e nativo (Go + Wails, PostgreSQL/SQLite/MySQL/MariaDB)
+    license: MIT
+    formats:
+      - deb
+      - rpm
+      - archlinux
+    bindir: /usr/bin
+    contents:
+      - src: packaging/assets/wisp.desktop
+        dst: /usr/share/applications/wisp.desktop
+        file_info:
+          mode: 0644
+      - src: build/appicon.svg
+        dst: /usr/share/icons/hicolor/scalable/apps/wisp.svg
+        file_info:
+          mode: 0644
+      - src: build/appicon.png
+        dst: /usr/share/icons/hicolor/512x512/apps/wisp.png
+        file_info:
+          mode: 0644
+    scripts:
+      postinstall: packaging/scripts/postinstall.sh
+      postremove: packaging/scripts/postremove.sh
+    overrides:
+      deb:
+        dependencies:
+          - libwebkit2gtk-4.1-0
+          - libgtk-3-0
+      rpm:
+        dependencies:
+          - webkit2gtk4.1
+          - gtk3
+      archlinux:
+        dependencies:
+          - gtk3
+          - webkit2gtk-4.1
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "Merge pull request"
+      - "Merge branch"
