@@ -1,5 +1,17 @@
 # STATE — Wisp
 
+## 🚀 Release v0.1.0-beta.15 — PUBLICADA (2026-09-22)
+- **Tag**: `v0.1.0-beta.15`
+- **Release GitHub**: https://github.com/matheusbbdutra/wisp-db/releases/tag/v0.1.0-beta.15
+- **Issue Fechada**: [Issue #1](https://github.com/matheusbbdutra/wisp-db/issues/1) (fechada com comentário detalhado).
+- **Pacotes Anexados**:
+  - Debian: `wisp_0.1.0~beta15_amd64.deb` (6.6 MiB)
+  - Arch Linux: `wisp-0.1.0-8-x86_64.pkg.tar.zst` (8.5 MiB)
+- **Principais Entregas**:
+  1. Resolução cirúrgica da formatação SQL na Issue #1 (`resolveStatementTargetAtOffset`, `formatStatementOrSelection` via `editor.executeEdits`, atalho `Shift+Alt+F`, preservação de histórico de Undo).
+  2. Modal "Sobre o Wisp" com versão do app, logo, links úteis externos, tags da stack e licença MIT.
+  3. Paridade de cancelamento nativo de queries em SQLite (ADR 0015).
+
 ## ✅ Modal "Sobre o Wisp" (About Wisp) — FEITO (2026-09-22)
 1. **Identidade e Exibição de Versão**:
    - `app.go`: adicionado binding `GetAppVersion() string` expondo a versão compilada em `version.go` (`AppVersion`).
