@@ -59,7 +59,7 @@ Implemented this way because running `SELECT *` on a multi-million-row table can
 3. Expired/missing cache → incremental fetch via the dialect's native catalog (`information_schema`, `pg_catalog`, `duckdb_tables()`, `system.tables`), written to cache.
 4. DDL detected in the tab itself (parsing the first token: `CREATE|ALTER|DROP`) immediately invalidates that connection's cache.
 
-## Security boundaries (see also CLAUDE.md)
+## Security boundaries (see also AGENTS.md)
 
 - Every credential goes through the `Credential Vault` before touching disk.
 - Inline editing is only allowed with a real primary key detected via the catalog — never a heuristic.

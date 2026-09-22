@@ -4,13 +4,14 @@
 
 1. Read `docs/ARCHITECTURE.md` and the ADRs in `docs/adr/`.
 2. Read `STATE.md` to see what's already decided and what's in progress.
-3. Read `CLAUDE.md` if you're using an AI agent to contribute — it defines the project's specific rules. Note: `CLAUDE.md` and `STATE.md` are written in Brazilian Portuguese (the maintainer's working language for internal notes); the public-facing docs (this file, `README.md`, `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`, ADRs) are in English.
+3. Read `AGENTS.md` if you're using an AI agent to contribute — it defines the project's specific rules. Note: `AGENTS.md` and `STATE.md` are written in Brazilian Portuguese (the maintainer's working language for internal notes); the public-facing docs (this file, `README.md`, `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`, ADRs) are in English.
 
 ## Workflow
 
-1. Any change that revisits a decision listed in `CLAUDE.md` or `docs/adr/` needs a new ADR (`docs/adr/000N-title.md`), not just a code comment.
+1. Any change that revisits a decision listed in `AGENTS.md` or `docs/adr/` needs a new ADR (`docs/adr/000N-title.md`), not just a code comment.
 2. Small, focused PRs — one logical change per PR.
-3. Before opening a PR: `gofmt`/`goimports` on the backend, the frontend's standard lint, and the "Definition of done" checklist in `CLAUDE.md`.
+3. Before opening a PR: `gofmt`/`goimports` on the backend, the frontend's standard lint, and the "Definition of done" checklist in `AGENTS.md`.
+
 
 ## Tests
 

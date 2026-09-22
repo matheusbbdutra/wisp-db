@@ -25,7 +25,7 @@ interface Props {
 
 // Aba de tabela (nível superior, irmã do Console): tem tabId e conexão
 // PRÓPRIOS — reconecta no mount via ConnectSaved com o mesmo connectionId
-// salvo da origem, nunca reusa a sessão do console (ver CLAUDE.md:
+// salvo da origem, nunca reusa a sessão do console (ver AGENTS.md:
 // 1 tabId = 1 conexão dedicada). Disconnect centralizado em App.tsx.
 export default function TableTab({tabId, connectionId, schema, table, hidden, onConnectedChange, onOpenRoutine}: Props) {
     const {t} = useTranslation();

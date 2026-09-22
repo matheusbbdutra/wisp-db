@@ -1,5 +1,5 @@
 // Package vault implements Wisp credential encryption (ADR: never plaintext on disk, see
-// docs/adr/0003-storage.md and CLAUDE.md). The master key is generated once and stored
+// docs/adr/0003-storage.md and AGENTS.md). The master key is generated once and stored
 // in the OS keychain via go-keyring (Secret Service on Linux, Keychain on macOS,
 // Credential Manager on Windows) — never in a config file or environment variable.
 package vault

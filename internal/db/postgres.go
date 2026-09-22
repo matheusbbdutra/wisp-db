@@ -169,7 +169,7 @@ func (d *PostgresDriver) closePendingCursor(ctx context.Context) {
 
 // CancelRunningQuery triggers native Postgres protocol cancellation (CancelRequest on an
 // auxiliary connection) — this ensures that "stop" in the tab actually terminates the
-// query on the server, not just locally (see CLAUDE.md, "Isolamento de sessão").
+// query on the server, not just locally (see AGENTS.md, "Isolamento de sessão").
 func (d *PostgresDriver) CancelRunningQuery(ctx context.Context) error {
 	if d.conn == nil {
 		return nil

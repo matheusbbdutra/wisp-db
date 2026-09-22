@@ -1,5 +1,5 @@
 // Package session implements per-tab (tabId) execution isolation, required by
-// docs/ARCHITECTURE.md and CLAUDE.md: each tab has its own connection and its own
+// docs/ARCHITECTURE.md and AGENTS.md: each tab has its own connection and its own
 // context.CancelFunc, never shared between tabs.
 package session
 

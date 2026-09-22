@@ -392,14 +392,14 @@ aceitar o relato do agente) antes de aceitar cada rodada.
   rodada e no final.
 
 **2. Comentários Go migrados para inglês** (Codex, `20260916T120756-go-comments-en`,
-política em `CLAUDE.md`/`docs/adr/0006-i18n.md`): os 10 arquivos com
+política em `AGENTS.md`/`docs/adr/0006-i18n.md`): os 10 arquivos com
 comentário PT-BR (`app.go`, `internal/db/{driver,factory,postgres,sqlite}.go`,
 `internal/schemacache/cache.go`, `internal/session/manager.go`,
 `internal/store/store.go`, `internal/vault/vault.go`, `version.go`) —
 significado técnico preservado (causas raiz, invariantes, referências a
 memórias/ADRs mantidas literais). Verificado por mim: `go build ./...` e
 `go vet ./...` limpos; só restam 2 ocorrências de "PT-BR" que são
-referências literais a seções do `CLAUDE.md` dentro de comentário já em
+referências literais a seções do `AGENTS.md` dentro de comentário já em
 inglês (correto, não é resíduo).
 
 **3. Polish visual** (Codex, `20260916T122129-ui-polish`, lista das 3
@@ -1125,11 +1125,11 @@ em inglês do que em português, sendo open source):
   inglês — já estava assim desde 2026-09-15/16, só formalizado.
 - Interface do app: **bilíngue** (inglês + PT-BR), nunca só inglês — plano
   já aceito em `docs/adr/0006-i18n.md`, ainda não implementado.
-- Ficam como estavam: `STATE.md`/`CLAUDE.md` em PT-BR (notas internas);
+- Ficam como estavam: `STATE.md`/`AGENTS.md` em PT-BR (notas internas);
   comentários TS/TSX do frontend não decididos ainda, tratar como PT-BR
   até decisão explícita.
 
-Registrado em `CLAUDE.md` (seção "Idioma", nova) e `docs/adr/0006-i18n.md`
+Registrado em `AGENTS.md` (seção "Idioma", nova) e `docs/adr/0006-i18n.md`
 (corrigida contradição — dizia que comentários ficariam em português).
 **A partir deste commit, meus próprios commits neste projeto passam a ser
 em inglês.**
@@ -1138,7 +1138,7 @@ em inglês.**
 `master` limpo e sincronizado com o remoto (push feito até `1e1d25b`).
 Release `v0.1.0-beta.4` publicada. README (EN + PT-BR) com logo, badges
 (licença/Wails/Go) e RAM idle medida. Política de idioma do projeto
-formalizada em `CLAUDE.md`/`docs/adr/0006-i18n.md`.
+formalizada em `AGENTS.md`/`docs/adr/0006-i18n.md`.
 
 **Aviso do usuário pra próxima sessão**: possivelmente vamos delegar mais
 (OpenCode/Codex/Cursor/Antigravity) daqui pra frente pra não estourar
@@ -1153,7 +1153,7 @@ for grande/mecânico.
    Restam outros componentes com literais PT — continuar em lotes
    delegados no mesmo padrão (`useTranslation` / chaves flat por
    namespace / en+pt-BR). Ver topo deste `STATE.md`.
-2. **Comentários Go em inglês** — política definida (`CLAUDE.md`,
+2. **Comentários Go em inglês** — política definida (`AGENTS.md`,
    "Idioma"), comentários novos já nascem em inglês; comentários
    existentes em PT-BR (a maioria do código atual) ainda não migrados —
    fica pra leva dedicada futura, também candidato a delegação mecânica

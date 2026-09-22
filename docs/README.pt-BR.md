@@ -82,7 +82,7 @@ go test ./...                 # backend Go — SQLite real (arquivo temporário)
 cd frontend && npm run test   # Vitest — lógica pura (sem DOM/React)
 ```
 
-Nenhum mock no lugar de um banco real em nenhum teste da suíte — é regra fixa do projeto (ver `CLAUDE.md`).
+Nenhum mock no lugar de um banco real em nenhum teste da suíte — é regra fixa do projeto (ver `AGENTS.md`).
 
 ## Estrutura
 

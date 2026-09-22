@@ -1,6 +1,6 @@
 # Wisp — Regras do Projeto
 
-Cliente SQL desktop leve e nativo (Go/Wails + Webview). Estas regras são **específicas do Wisp** e complementam (nunca substituem) as regras globais do usuário em `~/.claude/CLAUDE.md`. Em conflito, as regras globais de segurança prevalecem; convenções deste arquivo prevalecem sobre preferência genérica do agente.
+Cliente SQL desktop leve e nativo (Go/Wails + Webview). Estas regras são **específicas do Wisp** e complementam (nunca substituem) as regras globais do usuário. Em conflito, as regras globais de segurança prevalecem; convenções deste arquivo prevalecem sobre preferência genérica do agente.
 
 ## Antes de codar
 - Leia `docs/ARCHITECTURE.md` e o(s) ADR(s) relevante(s) em `docs/adr/` antes de tocar em módulo novo.
@@ -26,7 +26,7 @@ em PT-BR" — a regra global segue valendo em outros projetos.
   inglês — o mantenedor continua usando em português no dia a dia. Ver
   plano em `docs/adr/0006-i18n.md` (i18next/react-i18next, seletor de
   idioma, detecção por locale do SO) — aceito, ainda não implementado.
-- **O que continua em PT-BR, sem mudança**: `STATE.md` e `CLAUDE.md` (notas
+- **O que continua em PT-BR, sem mudança**: `STATE.md` e `AGENTS.md` (notas
   de trabalho internas, nunca voltadas a quem lê o repo por fora) — mesma
   lógica de sempre, isso não muda com a política acima. Comentários no
   código TS/TSX do frontend não foram decididos ainda nesta conversa —

@@ -88,7 +88,7 @@ go test ./...                 # Go backend — real SQLite (temp file) and real 
 cd frontend && npm run test   # Vitest — pure logic (no DOM/React needed)
 ```
 
-No mocks in place of a real database anywhere in the suite — that's a hard project rule (see `CLAUDE.md`).
+No mocks in place of a real database anywhere in the suite — that's a hard project rule (see `AGENTS.md`).
 
 ## Structure
 

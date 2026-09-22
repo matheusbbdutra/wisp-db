@@ -1,5 +1,5 @@
 // ============================================================================
-// INVARIANTE DO PROJETO (CLAUDE.md #8 / ARCHITECTURE.md):
+// INVARIANTE DO PROJETO (AGENTS.md #8 / ARCHITECTURE.md):
 // NUNCA simplificar este módulo para regex relativo ou remover o scanner de ranges.
 // A execução no PostgreSQL (pgx) e em drivers relacionais rejeita múltiplos comandos
 // colados com "ERROR: syntax error at or near SELECT". Qualquer alteração aqui DEVE
