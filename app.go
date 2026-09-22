@@ -634,28 +634,32 @@ func (a *App) WarmupCatalog(tabID string) error {
 			_ = a.schemaCache.Set(s.CacheKey, catalog)
 		}
 
+		// Phase 1 (ADR 0012): Fast flat table listing per schema (O(T)) without eager column join
 		for _, schema := range schemas {
-			// Skip introspecting if already complete in memory
+			existingMap := make(map[string]db.Table)
 			if a.schemaCache != nil {
 				if catalog, ok := a.schemaCache.Get(s.CacheKey); ok {
-					if tables, ok := catalog.Tables[schema]; ok && len(tables) > 0 {
-						hasColumns := true
-						for _, t := range tables {
-							if len(t.Columns) == 0 {
-								hasColumns = false
-								break
-							}
-						}
-						if hasColumns {
-							continue
+					for _, t := range catalog.Tables[schema] {
+						if len(t.Columns) > 0 {
+							existingMap[t.Name] = t
 						}
 					}
 				}
 			}
 
-			tables, err := mdDriver.IntrospectSchema(s.Ctx, schema)
+			flatTables, err := mdDriver.ListTables(s.Ctx, schema)
 			if err != nil {
 				continue
+			}
+
+			// Merge: keep introspected columns for tables that were already loaded
+			merged := make([]db.Table, len(flatTables))
+			for i, ft := range flatTables {
+				if existing, ok := existingMap[ft.Name]; ok && len(existing.Columns) > 0 {
+					merged[i] = existing
+				} else {
+					merged[i] = ft
+				}
 			}
 
 			if a.schemaCache != nil {
@@ -663,7 +667,7 @@ func (a *App) WarmupCatalog(tabID string) error {
 				if catalog.Tables == nil {
 					catalog.Tables = make(map[string][]db.Table)
 				}
-				catalog.Tables[schema] = tables
+				catalog.Tables[schema] = merged
 				_ = a.schemaCache.Set(s.CacheKey, catalog)
 			}
 		}

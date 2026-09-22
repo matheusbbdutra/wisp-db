@@ -1,5 +1,97 @@
 # STATE — Wisp
 
+## ✅ ADR 0015 — Paridade de Cancelamento Nativo de Queries entre Dialetos — FEITO (2026-09-22)
+1. **Cancelamento Nativo no Driver SQLite (`internal/db/sqlite.go`)**:
+   - Adicionados campos `mu sync.Mutex` e `cancelQuery context.CancelFunc` na struct `SQLiteDriver`.
+   - `Execute` e `ExecuteStreaming` agora vinculam a execução do statement a um contexto cancelável derivado (`queryCtx, cancel := context.WithCancel(ctx)`), registrando a função de cancelamento ativa sob mutex.
+   - `CloseCursor` invoca `cancel()` e fecha o cursor de streaming sob mutex garantindo liberação imediata.
+   - `CancelRunningQuery` implementado delegando a `CloseCursor()`, o que aciona `cancel()`: isso dispara imediatamente o hook `interruptOnDone` do `modernc.org/sqlite` que chama `sqlite3_interrupt`, interrompendo queries em voo (como CTEs recursivas, joins pesados ou varreduras longas) em microssegundos com `context.Canceled` / erro de interrupção.
+   - `FetchNext` atualizado para checar periodicamente `ctx.Err()` dentro do loop de paginação, abortando iterações pendentes imediatamente caso o contexto seja cancelado.
+2. **Atualização do Session Manager (`internal/session/manager.go`)**:
+   - Comentário de `Manager.Cancel` revisado (em inglês, conforme convenção Go do projeto), removendo a limitação legada sobre o SQLite e formalizando a estratégia uniforme por dialeto (Postgres via `PgConn.CancelRequest`, MySQL via reconnect de `dataConn`, e SQLite via context cancel + `sqlite3_interrupt` no nível do statement).
+3. **Bypass de Fila Confirmado no Frontend (`frontend/src/lib/tabApi.ts` e `useResultExecution.ts`)**:
+   - Confirmado que `CancelQuery` no frontend ignora intencionalmente a fila serializada `withQueue`, permitindo envio assíncrono e imediato mesmo com consultas em execução na aba.
+4. **Testes e Validação**:
+   - `internal/db/sqlite_test.go`: adicionados testes unitários cobrindo cancelamento de query simples (`TestSQLiteQueryCancellation`), interrupção de streaming (`TestSQLiteStreamingCancellation`), interrupção durante `FetchNext` (`TestSQLiteCancelRunningQueryDuringFetchNext`) e cancelamento durante query pesada em execução (`TestSQLiteCancelRunningQueryDuringExecute`).
+   - `internal/session/session_test.go`: adicionado `TestManagerCancelSQLiteQuery` validando o ciclo de vida completo via `Manager.Cancel`, confirmando interrupção rápida (<30ms) e reutilização da sessão para queries subsequentes sem necessidade de reconexão.
+   - **Teste End-to-End no Navegador via Subagente `/browser` + Chrome DevTools (`http://localhost:34115`)**:
+     - Servidor de desenvolvimento `wails dev` e Chrome instrumentado via CDP.
+     - Conexão estabelecida com sucesso na base SQLite `sample (cópia)`.
+     - Inserida e disparada a query recursiva infinita: `WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM cnt) SELECT count(*) FROM cnt;`.
+     - Aba entrou em status `rodando...` e o botão "Cancelar" foi exibido na RunBar.
+     - Botão "Cancelar" acionado: query abortada com sucesso pelo backend (`erro ao executar: Error: executando query: context canceled`), sem travar a interface.
+     - Imediatamente após a interrupção, executada a query `SELECT 1;`: executou em 0 ms e renderizou `Resultados: 1 linha, 1 coluna` no grid Canvas sem necessidade de reconectar.
+   - Validações: `go test -count=1 ./...`, `go vet ./...`, `npm run build` (`tsc` + `vite build`), `npx vitest run` (49/49 testes) e `git diff --check` 100% limpos.
+
+## ✅ ADR 0014 — Execução Sequencial de Scripts Multi-Statement (Batch) — FEITO (2026-09-22)
+1. **Pipeline de Execução Sequencial em Lote**:
+   - `frontend/src/lib/useResultExecution.ts`: implementado `handleRunScript(text, connected, onStatementError)` utilizando o scanner robusto de `splitStatements`.
+   - Execução enfileirada sob a fila exclusiva da aba (`withQueue(`${tabId}:query`)`), garantindo atomicidade contra operações paralelas de introspecção ou load-more.
+   - Suporte unificado a scripts mistos (DDL, DML e DQL): comandos com dados (`SELECT`) geram abas de resultado correspondentes (`ResultTabState`); comandos DDL/DML acumulam contagem e tempo de execução sem gerar abas vazias.
+   - Parada imediata no primeiro erro com criação de aba de erro e chamada a `onStatementError(start, end)`.
+   - Cancelamento cooperativo: `handleCancel` interrompe o loop de statements via flag `scriptCancelledRef` e aciona `CancelQuery(tabId)` para abortar a query em voo no servidor.
+2. **Affordance Visual e Integração no Editor Monaco**:
+   - `frontend/src/components/SqlEditor.tsx`:
+     - Atalho de teclado `Alt+X` registrado no Monaco via `editor.addCommand`.
+     - `SqlEditorHandle`: adicionados métodos `getScriptTextOrSelection()` (captura seleção ativa ou o buffer completo com `baseOffset`) e `highlightRange(startOffset, endOffset)` (seleciona e centraliza o trecho com erro via `revealRangeInCenter`).
+   - `frontend/src/components/ConsoleRunBar.tsx` e `ConsoleToolbar.tsx`:
+     - Adicionado botão "Executar script" (`Alt+X`) na `ConsoleRunBar` e na `ConsoleToolbar`.
+   - `frontend/src/components/ConsoleTab.tsx`:
+     - Atalho global `Alt+X` conectado com tratamento de foco e seleção automática do statement que falhar.
+3. **Internacionalização e Testes**:
+   - Textos bilíngues em `pt-BR.json` e `en.json` (`runScript`, `runScriptTitle`, `scriptProgress`, `scriptSuccess`, `scriptCancelled`, `scriptErrorAtStatement`, `scriptNoStatements`).
+   - `sqlStatements.test.ts`: adicionados testes unitários para verificação de particionamento e precisão de ranges em scripts batch DDL/DML/DQL (49/49 testes passando).
+   - **Teste End-to-End no Navegador via Subagente `/browser` + Chrome DevTools (`http://localhost:34115`)**:
+     - Conexão ativa no SQLite `sample (cópia)`.
+     - **Execução com sucesso**: submetido script misto com 5 comandos (DDL `authors`, DDL `books` com FK, 2x INSERTs e `SELECT * FROM books`). Execução concluída em 2 ms, gerando automaticamente a aba de resultado `books` com 2 linhas e 3 colunas.
+     - **Interrupção e Destaque de Erro**: submetido script com erro intermediário (`SELECT 1; THIS IS A SYNTAX ERROR; SELECT 2;`). A execução interrompeu no comando 2, abriu a aba de erro correspondente, abortou o comando 3 e selecionou/destacou automaticamente no Monaco o trecho com erro (`highlightRange` das linhas 1:10 a 2:24).
+   - **Correção da Concorrência SQLite (`internal/db/sqlite.go`)**:
+     - Diagnosticada e corrigida causa raiz de erro `SQLITE_BUSY` durante batch com DDL: configurado `PRAGMA busy_timeout = 5000;` na abertura da conexão e garantido fechamento imediato de `*sql.Rows` em `ExecuteStreaming` quando `len(columns) == 0` (DDL/DML), liberando locks de escrita instantaneamente sem reter o cursor.
+   - Validações: `npm run build` (`tsc` + `vite build`), `npx vitest run`, `go test -count=1 ./...`, `go vet ./...` e `git diff --check` limpos.
+
+## ✅ ADR 0013 — Navegação Relacional por Foreign Keys no ResultGrid — FEITO (2026-09-22)
+1. **Mapeamento de Foreign Keys e Normalização**:
+   - Criado módulo `frontend/src/lib/foreignKeyNav.ts` (`extractForeignKeyReferences`, `findForeignKeyReference`, `buildForeignKeyFilterQuery`) com 9 testes unitários em `foreignKeyNav.test.ts`.
+   - `useResultExecution.ts`: `tryComputeEditContext` agora busca metadados de chaves estrangeiras via `ListForeignKeys(tabId, schema, table)` e anexa `foreignKeys` ao `editContext` mesmo quando a tabela não possui PK (permitindo navegação relacional em tabelas de relacionamento ou unconstrained).
+   - `TableTab.tsx`: no `init()`, consulta `ListForeignKeys` em lote mantendo em cache local (`tableFksRef`) e preenche `foreignKeys` no `editContext` da sub-aba Dados, além de alimentar instantaneamente a sub-aba FKs.
+2. **Affordance Visual e Ações de Célula no Grid**:
+   - `GridCanvas.tsx`: colunas com chaves estrangeiras ganham indicador visual `↗` no título.
+   - Células que contêm FK e valor não-nulo recebem destaque em azul (`textDark: '#60a5fa'`) com peso de fonte semibold (`500`).
+   - Navegação direta via clique com tecla modificadora: `isCtrlHeld() || event.shiftKey` (suportando ambiente Wayland/Hyprland) navega diretamente para o registro referenciado.
+   - Menu de contexto (`GridContextMenu.tsx`): adicionado item dedicado `Ir para [tabela] ([coluna] = [valor])` com ícone 🔗 e atalho de visualização rápida.
+3. **Navegação em Nova Aba Dedicada com Pré-Filtro (Preservando Grid de Origem)**:
+   - `App.tsx`: `TableTabState` e `handleOpenTable` atualizados para suportar parâmetro opcional `initialFilter: { column, value }`. Ao navegar, uma nova aba `TableTab` é aberta com título descritivo `${table} (${column}=${value})`.
+   - `TableTab.tsx`: carrega os dados com query filtrada (`SELECT * FROM ${qualified} WHERE "${column}" = ${value} LIMIT 200`), exibindo uma barra informativa `.table-filter-banner` com botão "Limpar filtro" que permite recarregar a tabela completa sob demanda.
+   - O grid anterior permanece intacto com posição de scroll, filtros e seleção preservados (fechar com `Ctrl+W` retorna instantaneamente).
+   - Suporte bilingue completo em `pt-BR.json` e `en.json`.
+4. **Validação**:
+   - `npx vitest run`: 49/49 testes unitários passando (incluindo 9/9 testes de `foreignKeyNav`).
+   - `npm run build`: `tsc` e `vite build` limpos.
+   - `go test -count=1 ./...` e `go vet ./...` limpos.
+   - `git diff --check` limpo.
+   - **Teste End-to-End no Navegador via Subagente `/browser` + Chrome DevTools (`http://localhost:34115`)**:
+     - **Affordance e Renderização**: `SELECT * FROM books;` renderizou coluna com título `author_id ↗` no GridCanvas e células (`id: 1` e `id: 2`) com destaque azul (`textDark: '#60a5fa'`, peso 500).
+     - **Menu de Contexto**: clique na célula abriu menu com opção `"Ir para registro em authors (id = 1)"` (com title `"Abrir registro referenciado em uma nova aba"`).
+     - **Navegação e Isolamento de Abas**: ao clicar na ação, abriu instantaneamente nova aba `authors (id=1)` com badge de pré-filtro `Filtrado por: id = 1` e botão interativo "Limpar filtro", exibindo unicamente o registro referenciado (`Machado de Assis`). A aba original `Console 1` permaneceu intacta com todas as sub-abas de resultados preservadas.
+
+## ✅ ADR 0012 — Catálogo Hierárquico em Duas Fases e Lazy Loading de Colunas — FEITO (2026-09-22)
+1. **Fase 1 (Catálogo Flat $O(T)$)**:
+   - `app.go`: `WarmupCatalog` atualizado para listar tabelas de forma rasa por schema (`ListTables`) em pouquíssimos milissegundos sem consultar `information_schema.columns`, preservando em cache tabelas cujas colunas já foram previamente introspectadas.
+   - `frontend/src/lib/useConnection.ts`: `loadCatalog` substituído de introspecção massiva por chamada rasa de `ListTables(tabId, schema)`, eliminando esperas de dezenas de segundos no startup em bases com milhares de tabelas.
+2. **Fase 2 (Resolução Lazy de Colunas $O(C)$ sob demanda)**:
+   - `frontend/src/lib/useConnection.ts`: implementada função `ensureTableColumns(schema, tableName)` com deduplicação de requisições em voo (`inFlightColumnsRef`), consultando `IntrospectTable` sob demanda e atualizando o estado do catálogo em memória.
+   - `frontend/src/components/SqlEditor.tsx`: registrado provider assíncrono `columnLoaderByModel`. Quando o usuário referencia tabelas na query (`FROM/JOIN` via `resolveQueryTables`) ou digita narrowing por ponto (`dot?.kind === 'table-columns'`), o editor solicita as colunas daquelas tabelas específicas em background, preenchendo as sugestões sem travar o editor.
+   - `frontend/src/components/ConsoleTab.tsx`: conexão repassada via prop `onEnsureTableColumns`.
+3. **Validação**:
+   - `go test -count=1 ./...` passando em todos os pacotes.
+   - `npm run build` (`tsc` + `vite build`) limpo.
+   - `npx vitest run` 49/49 testes unitários passando.
+   - `git diff --check` limpo.
+   - **Teste End-to-End no Navegador via Subagente `/browser` + Chrome DevTools (`http://localhost:34115`)**:
+     - **Catálogo Raso**: inspecionado estado do catálogo em memória no `useConnection`: tabelas `authors`, `books` e `customers` carregadas com `columnsCount: 0`.
+     - **Lazy Loading Contextual no Monaco**: digitado `SELECT  FROM books;` (cursor após `SELECT `) e `SELECT books.`; o provider assíncrono disparou a carga exclusiva das colunas da tabela `books`.
+     - **Sugestões Exibidas**: popup de autocomplete exibiu exatamente as colunas `author_id` (`main.books · INTEGER`), `id` e `title`. O catálogo atualizou `books` para `columnsCount: 3` mantendo `authors` e `customers` com `columnsCount: 0` (zero desperdício de memória).
+
 ## ✅ Release v0.1.0-beta.13 — Scanner de Statements e Correção de Execução Sob Cursor (2026-09-22)
 - **Problema**: No console SQL com múltiplos SELECTs (com ou sem ponto e vírgula, com ou sem linhas em branco), ao executar com o cursor posicionado sobre uma query sem selecionar com o mouse, `resolveStatementOrSelection` colapsava ranges em posições de borda (offset logo após `;` ou quebras de linha), retornando string vazia `""`. Na Toolbar do console, o fallback `|| query` enviava o buffer inteiro da tela para o driver PostgreSQL/pgx, resultando em `ERROR: syntax error at or near "SELECT" (SQLSTATE 42601)`.
 - **Solução**:

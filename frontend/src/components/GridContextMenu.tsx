@@ -17,12 +17,21 @@ export interface MenuState {
     draftIndex?: number;
 }
 
+export interface ForeignKeyTarget {
+    targetSchema: string;
+    targetTable: string;
+    targetColumn: string;
+    value: any;
+}
+
 interface GridContextMenuProps {
     hasSelectionTarget: boolean;
     canCopyRow: boolean;
     showRemoveDraft: boolean;
     showDelete: boolean;
     deleteLabel: string;
+    fkTarget?: ForeignKeyTarget | null;
+    onNavigateForeignKey?: (target: ForeignKeyTarget) => void;
     onCopyCell: () => void;
     onViewValue: () => void;
     onCopyRow: () => void;
@@ -38,6 +47,8 @@ export default function GridContextMenu({
     showRemoveDraft,
     showDelete,
     deleteLabel,
+    fkTarget,
+    onNavigateForeignKey,
     onCopyCell,
     onViewValue,
     onCopyRow,
@@ -49,6 +60,19 @@ export default function GridContextMenu({
     const {t} = useTranslation();
     return (
         <>
+            {fkTarget && onNavigateForeignKey && (
+                <button
+                    className="grid-context-menu-item"
+                    onClick={() => onNavigateForeignKey(fkTarget)}
+                    title={t('resultGrid.goToRecordTitle')}
+                >
+                    {t('resultGrid.goToRecord', {
+                        table: fkTarget.targetTable,
+                        column: fkTarget.targetColumn,
+                        value: String(fkTarget.value),
+                    })}
+                </button>
+            )}
             <button className="grid-context-menu-item" onClick={onCopyCell}>
                 {t('resultGrid.copyCell')}
             </button>

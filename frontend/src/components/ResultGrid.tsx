@@ -18,6 +18,9 @@ import GridContextMenu, {MenuState} from './GridContextMenu';
 import GridEditPopover from './GridEditPopover';
 import type {db} from '../../wailsjs/go/models';
 
+import type {ForeignKeyReference} from '../lib/foreignKeyNav';
+import {findForeignKeyReference} from '../lib/foreignKeyNav';
+
 // Contexto de edição inline (ADR 0004): só existe quando a query é um
 // SELECT simples de tabela única com PK real detectada no catálogo.
 // editableColumns já é a interseção entre as colunas do resultado e as
@@ -32,6 +35,7 @@ export interface EditContext {
     // linhas de rascunho de INSERT (tipo pra coerceInsertValue e quais
     // campos oferecer; geradas ficam de fora do rascunho).
     allColumns: db.Column[];
+    foreignKeys?: ForeignKeyReference[];
 }
 
 interface Props {
@@ -39,6 +43,7 @@ interface Props {
     rows: any[][];
     tabId: string;
     editContext?: EditContext | null;
+    foreignKeys?: ForeignKeyReference[];
     readOnlyNotice?: string | null;
     onCellSaved?: (rowIndex: number, colIndex: number, newValue: any) => void;
     // rowIndex é o índice ORIGINAL em `rows` (já traduzido pelo ResultGrid,
@@ -51,6 +56,7 @@ interface Props {
     onRowInserted?: (row: any[]) => void;
     onStatus?: (msg: string) => void;
     onCopied?: () => void;
+    onNavigateForeignKey?: (targetSchema: string, targetTable: string, targetColumn: string, value: any) => void;
 }
 
 // Grid de resultado virtualizado (Glide Data Grid, renderização em canvas).
@@ -59,7 +65,7 @@ interface Props {
 // INSERT/DELETE (usePendingBatch), edição de célula (useCellEditing),
 // regras de editabilidade (useEditability), painel de valor (useValuePanel),
 // canvas (GridCanvas), toolbar, menu e popover.
-export default function ResultGrid({columns, rows, tabId, editContext, readOnlyNotice, onCellSaved, onRowDeleted, onRowInserted, onStatus, onCopied}: Props) {
+export default function ResultGrid({columns, rows, tabId, editContext, foreignKeys, readOnlyNotice, onCellSaved, onRowDeleted, onRowInserted, onStatus, onCopied, onNavigateForeignKey}: Props) {
     const {t} = useTranslation();
     const [gridSelection, setGridSelection] = useState<GridSelection | undefined>(undefined);
     const [menu, setMenu] = useState<MenuState | null>(null);
@@ -206,6 +212,21 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
         }
         : undefined;
 
+    const effectiveForeignKeys = foreignKeys ?? editContext?.foreignKeys ?? [];
+    const menuColName = menu ? (columns[menu.col] ?? '') : '';
+    const menuRowVal = menu && menu.row >= 0 && rows[menu.row] ? rows[menu.row][menu.col] : null;
+    const menuFkRef = menuColName && menuRowVal !== null && menuRowVal !== undefined && menuRowVal !== ''
+        ? findForeignKeyReference(effectiveForeignKeys, menuColName)
+        : undefined;
+    const menuFkTarget = menuFkRef && menuRowVal !== null && menuRowVal !== undefined && menuRowVal !== ''
+        ? {
+            targetSchema: menuFkRef.targetSchema,
+            targetTable: menuFkRef.targetTable,
+            targetColumn: menuFkRef.targetColumn,
+            value: menuRowVal,
+        }
+        : null;
+
     return (
         <div className="result-container">
             <ResultGridToolbar
@@ -243,6 +264,8 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
                 onGridSelectionChange={setGridSelection}
                 gridRef={gridRef}
                 directEdit={directEdit}
+                foreignKeys={effectiveForeignKeys}
+                onNavigateForeignKey={onNavigateForeignKey}
                 onDirectEditChange={value => setDirectEdit(prev => (prev ? {...prev, value} : prev))}
                 onCommitDirectEdit={commitDirectEdit}
                 onCancelDirectEdit={cancelDirectEdit}
@@ -257,6 +280,11 @@ export default function ResultGrid({columns, rows, tabId, editContext, readOnlyN
                         showRemoveDraft={menu.draftIndex !== undefined}
                         showDelete={menu.draftIndex === undefined && target === null && !!editContext && rowHasPkValues(menu.row)}
                         deleteLabel={pendingDeleteRows.has(menu.row) ? t('resultGrid.unmarkDelete') : t('resultGrid.deleteRow')}
+                        fkTarget={menuFkTarget}
+                        onNavigateForeignKey={target => {
+                            onNavigateForeignKey?.(target.targetSchema, target.targetTable, target.targetColumn, target.value);
+                            closeMenu();
+                        }}
                         onCopyCell={() => handleCopyCell(menu.col, menu.row, menu.draftIndex, closeMenu)}
                         onViewValue={handleViewValue}
                         onCopyRow={() => handleCopyRow(menu.row, closeMenu)}

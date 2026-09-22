@@ -102,4 +102,26 @@ describe('resolveStatementAtOffset', () => {
         expect(resB).toBe('SELECT id FROM b');
         expect(resB).not.toContain('FROM a');
     });
+
+    it('retorna ranges precisos para cada statement em scripts batch (ADR 0014)', () => {
+        const script = `
+CREATE TABLE users (id int, name text);
+INSERT INTO users VALUES (1, 'Alice');
+UPDATE users SET name = 'Bob' WHERE id = 1;
+SELECT * FROM users;
+        `.trim();
+
+        const stmts = splitStatements(script);
+        expect(stmts).toHaveLength(4);
+        expect(stmts[0].text).toBe('CREATE TABLE users (id int, name text)');
+        expect(stmts[1].text).toBe("INSERT INTO users VALUES (1, 'Alice')");
+        expect(stmts[2].text).toBe("UPDATE users SET name = 'Bob' WHERE id = 1");
+        expect(stmts[3].text).toBe('SELECT * FROM users');
+
+        // Cada range [start, end] deve englobar o texto delimitado no script original
+        for (const s of stmts) {
+            const rawSlice = script.slice(s.start, s.end);
+            expect(rawSlice).toContain(s.text);
+        }
+    });
 });

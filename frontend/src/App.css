@@ -284,6 +284,19 @@
     min-height: 0;
 }
 
+.table-filter-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 12px;
+    background: rgba(37, 99, 235, 0.12);
+    border-bottom: 1px solid rgba(37, 99, 235, 0.28);
+    font-size: 12px;
+    color: var(--text-main);
+    flex-shrink: 0;
+}
+
 .table-meta-pane {
     flex: 1;
     display: flex;

@@ -3,6 +3,8 @@
 /frontend/dist/
 /frontend/node_modules/
 *.db
+*.db-wal
+*.db-shm
 
 # Empacotamento (artefatos gerados, não versionados)
 /packaging/arch/*.tar.gz

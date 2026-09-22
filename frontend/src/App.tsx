@@ -26,6 +26,7 @@ interface TableTabState {
     connectionId: string;
     schema: string;
     table: string;
+    initialFilter?: { column: string; value: any };
 }
 
 interface SchemaTabState {
@@ -86,15 +87,22 @@ function App() {
     // Abre a tabela numa aba própria (irmã do Console): tabId novo com
     // conexão própria via ConnectSaved no mount do TableTab — nunca reusa
     // a sessão do console de origem (1 tabId = 1 conexão dedicada).
-    function handleOpenTable(connectionId: string, schema: string, table: string) {
+    function handleOpenTable(
+        connectionId: string,
+        schema: string,
+        table: string,
+        initialFilter?: { column: string; value: any }
+    ) {
+        const title = initialFilter ? `${table} (${initialFilter.column}=${initialFilter.value})` : table;
         const tab: TableTabState = {
             kind: 'table',
             id: `tab-${crypto.randomUUID()}`,
-            title: table,
+            title,
             connected: false,
             connectionId,
             schema,
             table,
+            initialFilter,
         };
         setTabs(prev => [...prev, tab]);
         setActiveId(tab.id);
@@ -242,7 +250,7 @@ function App() {
                         tabId={tab.id}
                         hidden={tab.id !== activeId}
                         onConnectedChange={connected => handleConnectedChange(tab.id, connected)}
-                        onOpenTable={(connectionId, schema, table) => handleOpenTable(connectionId, schema, table)}
+                        onOpenTable={handleOpenTable}
                         onOpenSchema={(connectionId, schema) => handleOpenSchema(connectionId, schema)}
                         restoreLastScriptOnMount={tab.id === initialTabIdRef.current}
                     />
@@ -253,9 +261,11 @@ function App() {
                         connectionId={tab.connectionId}
                         schema={tab.schema}
                         table={tab.table}
+                        initialFilter={tab.initialFilter}
                         hidden={tab.id !== activeId}
                         onConnectedChange={connected => handleConnectedChange(tab.id, connected)}
                         onOpenRoutine={(kind, name, definition) => handleOpenRoutine(kind, name, definition)}
+                        onOpenTable={handleOpenTable}
                     />
                 ) : tab.kind === 'schema' ? (
                     <SchemaTab

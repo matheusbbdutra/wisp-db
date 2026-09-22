@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBuildUpdateCellQueryPKSimples(t *testing.T) {
@@ -312,5 +313,154 @@ func TestSQLiteForeignKeyDefinitions(t *testing.T) {
 				t.Fatalf("FK reconstruída incorretamente: %+v", keys)
 			}
 		})
+	}
+}
+
+func TestSQLiteQueryCancellation(t *testing.T) {
+	d := newTempSQLiteDriver(t)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	errCh := make(chan error, 1)
+	go func() {
+		// Recursive CTE that takes seconds or runs forever
+		_, err := d.Execute(ctx, `WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM cnt) SELECT count(*) FROM cnt`)
+		errCh <- err
+	}()
+
+	time.Sleep(10 * time.Millisecond)
+	cancel()
+
+	err := <-errCh
+	if err == nil {
+		t.Fatal("esperava erro de cancelamento, obtido nil")
+	}
+
+	// Now try running a new query on the same driver to see if d.conn is still usable
+	res, err2 := d.Execute(context.Background(), `SELECT 1`)
+	if err2 != nil {
+		t.Fatalf("query subsequente falhou: %v", err2)
+	}
+	if len(res.Rows) != 1 || res.Rows[0][0] != int64(1) {
+		t.Fatalf("resultado inesperado: %+v", res)
+	}
+}
+
+func TestSQLiteStreamingCancellation(t *testing.T) {
+	d := newTempSQLiteDriver(t)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	cols, types, err := d.ExecuteStreaming(ctx, `WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM cnt) SELECT x FROM cnt`)
+	if err != nil {
+		t.Fatalf("ExecuteStreaming failed: %v", err)
+	}
+	if len(cols) != 1 || cols[0] != "x" {
+		t.Fatalf("colunas inesperadas: %v (tipos: %v)", cols, types)
+	}
+
+	// Fetch next 10 rows
+	rows, hasMore, err := d.FetchNext(ctx, 10)
+	if err != nil {
+		t.Fatalf("FetchNext failed: %v", err)
+	}
+	if len(rows) != 10 || !hasMore {
+		t.Fatalf("esperava 10 linhas com hasMore=true, obtido %d (hasMore=%v)", len(rows), hasMore)
+	}
+
+	// Now cancel context and try FetchNext
+	cancel()
+	_, hasMore2, err2 := d.FetchNext(ctx, 1000)
+	if err2 == nil {
+		t.Fatal("FetchNext após cancel deveria falhar com erro de contexto")
+	}
+	if hasMore2 {
+		t.Fatal("hasMore deveria ser false após cancel")
+	}
+
+	// And verify that subsequent query works
+	res, err3 := d.Execute(context.Background(), `SELECT 1`)
+	if err3 != nil {
+		t.Fatalf("query subsequente falhou: %v", err3)
+	}
+	if len(res.Rows) != 1 || res.Rows[0][0] != int64(1) {
+		t.Fatalf("resultado inesperado: %+v", res)
+	}
+}
+
+func TestSQLiteCancelRunningQueryDuringFetchNext(t *testing.T) {
+	d := newTempSQLiteDriver(t)
+	ctx := context.Background()
+
+	// Use recursive CTE to generate endless rows
+	_, _, err := d.ExecuteStreaming(ctx, `WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM cnt) SELECT x FROM cnt`)
+	if err != nil {
+		t.Fatalf("ExecuteStreaming failed: %v", err)
+	}
+
+	fetchErrCh := make(chan error, 1)
+	go func() {
+		// Try fetching 50 million rows, which would take seconds
+		_, _, err := d.FetchNext(ctx, 50_000_000)
+		fetchErrCh <- err
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	// Now call CancelRunningQuery
+	if err := d.CancelRunningQuery(ctx); err != nil {
+		t.Fatalf("CancelRunningQuery retornou erro: %v", err)
+	}
+
+	select {
+	case err := <-fetchErrCh:
+		if err == nil {
+			t.Fatal("FetchNext deveria ter sido interrompido")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("FetchNext did not unblock within 2 seconds after CancelRunningQuery")
+	}
+
+	// Verify driver is still usable
+	res, err := d.Execute(context.Background(), `SELECT 42`)
+	if err != nil {
+		t.Fatalf("subsequent query failed: %v", err)
+	}
+	if len(res.Rows) != 1 || res.Rows[0][0] != int64(42) {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+}
+
+func TestSQLiteCancelRunningQueryDuringExecute(t *testing.T) {
+	d := newTempSQLiteDriver(t)
+	ctx := context.Background()
+
+	// Query that runs indefinitely in Execute
+	slowQuery := `WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM cnt) SELECT count(*) FROM cnt`
+
+	execErrCh := make(chan error, 1)
+	go func() {
+		_, err := d.Execute(ctx, slowQuery)
+		execErrCh <- err
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	if err := d.CancelRunningQuery(ctx); err != nil {
+		t.Fatalf("CancelRunningQuery falhou: %v", err)
+	}
+
+	select {
+	case err := <-execErrCh:
+		if err == nil {
+			t.Fatal("Execute deveria ter sido interrompido com erro")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Execute did not abort within 2 seconds")
+	}
+
+	// Verify driver remains usable
+	res, err := d.Execute(context.Background(), `SELECT 100`)
+	if err != nil {
+		t.Fatalf("query subsequente falhou: %v", err)
+	}
+	if len(res.Rows) != 1 || res.Rows[0][0] != int64(100) {
+		t.Fatalf("resultado inesperado: %+v", res)
 	}
 }

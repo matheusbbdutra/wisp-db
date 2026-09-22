@@ -5,10 +5,12 @@ import {useRef, useState} from 'react';
 import type {RefObject} from 'react';
 import {useTranslation} from 'react-i18next';
 import {CancelQuery} from '../../wailsjs/go/main/App';
-import {RunQuery, FetchRows, IntrospectTable} from './tabApi';
+import {RunQuery, FetchRows, IntrospectTable, ListForeignKeys} from './tabApi';
 import type {db} from '../../wailsjs/go/models';
 import {detectSingleTable, type SingleTableRef} from './detectSingleTable';
+import {extractForeignKeyReferences} from './foreignKeyNav';
 import {makeResultLabel} from './resultTabLabel';
+import {splitStatements} from './sqlStatements';
 import {withQueue} from './tabCallQueue';
 import type {EditContext} from '../components/ResultGrid';
 
@@ -59,6 +61,9 @@ export function useResultExecution({tabId, batchSize, driver, catalog, setStatus
     // Abas de resultado (ver ResultTabState acima) — uma por execução.
     const [resultTabs, setResultTabs] = useState<ResultTabState[]>([]);
     const [activeResultId, setActiveResultId] = useState<string | null>(null);
+    const [scriptRunning, setScriptRunning] = useState(false);
+    const scriptRunningRef = useRef(false);
+    const scriptCancelledRef = useRef(false);
     const resultSeqRef = useRef(0);
     const cancelledQueryIdsRef = useRef(new Set<string>());
     const [historyToken, setHistoryToken] = useState(0);
@@ -66,7 +71,7 @@ export function useResultExecution({tabId, batchSize, driver, catalog, setStatus
     // "Executar" fica sempre clicável quando conectado (enfileira mais uma
     // execução, ver handleRun) — "Cancelar" só interrompe a que está
     // rodando de verdade agora (a fila garante que só uma roda por vez).
-    const anyRunning = resultTabs.some(tab => tab.status === 'running' || tab.status === 'queued');
+    const anyRunning = resultTabs.some(tab => tab.status === 'running' || tab.status === 'queued') || scriptRunning;
     const activeResult = resultTabs.find(tab => tab.id === activeResultId) ?? null;
     const activeFetching = activeResult?.fetching ?? false;
 
@@ -79,6 +84,9 @@ export function useResultExecution({tabId, batchSize, driver, catalog, setStatus
     function resetResults() {
         setResultTabs([]);
         setActiveResultId(null);
+        setScriptRunning(false);
+        scriptRunningRef.current = false;
+        scriptCancelledRef.current = false;
     }
 
     // Resolve o schema da tabela detectada pra chamar IntrospectTable (que
@@ -133,9 +141,21 @@ export function useResultExecution({tabId, batchSize, driver, catalog, setStatus
             updateResultTab(id, tab => ({...tab, editContext: null, readOnlyNotice: t('consoleTab.readOnlyNotFound', {schema, table: ref.table})}));
             return;
         }
+        let fks: db.ForeignKey[] = [];
+        try {
+            fks = (await ListForeignKeys(tabId, schema, ref.table)) ?? [];
+        } catch {
+            // Falha ao obter FKs não impede visualização ou edição
+        }
+        const foreignKeys = extractForeignKeyReferences(fks, schema);
+
         const pkColumns = cols.filter(c => c.IsPrimaryKey).map(c => c.Name);
         if (pkColumns.length === 0) {
-            updateResultTab(id, tab => ({...tab, editContext: null, readOnlyNotice: t('consoleTab.readOnlyNoPk', {schema, table: ref.table})}));
+            updateResultTab(id, tab => ({
+                ...tab,
+                editContext: {schema, table: ref.table, pkColumns: [], editableColumns: [], allColumns: cols, foreignKeys},
+                readOnlyNotice: t('consoleTab.readOnlyNoPk', {schema, table: ref.table}),
+            }));
             return;
         }
         const byName = new Map(cols.map(c => [c.Name, c]));
@@ -148,10 +168,18 @@ export function useResultExecution({tabId, batchSize, driver, catalog, setStatus
             return !!c && !c.IsGenerated && !c.IsPrimaryKey;
         });
         if (editableColumns.length === 0) {
-            updateResultTab(id, tab => ({...tab, editContext: null, readOnlyNotice: t('consoleTab.readOnlyNoEditable', {schema, table: ref.table})}));
+            updateResultTab(id, tab => ({
+                ...tab,
+                editContext: {schema, table: ref.table, pkColumns: [], editableColumns: [], allColumns: cols, foreignKeys},
+                readOnlyNotice: t('consoleTab.readOnlyNoEditable', {schema, table: ref.table}),
+            }));
             return;
         }
-        updateResultTab(id, tab => ({...tab, editContext: {schema, table: ref.table, pkColumns, editableColumns, allColumns: cols}, readOnlyNotice: null}));
+        updateResultTab(id, tab => ({
+            ...tab,
+            editContext: {schema, table: ref.table, pkColumns, editableColumns, allColumns: cols, foreignKeys},
+            readOnlyNotice: null,
+        }));
     }
 
     async function fetchBatchFor(id: string, currentRows: any[][], replace: boolean) {
@@ -303,7 +331,141 @@ export function useResultExecution({tabId, batchSize, driver, catalog, setStatus
         updateResultTab(activeResultId, tab => ({...tab, rows: [...tab.rows, row]}));
     }
 
+    async function handleRunScript(
+        text: string,
+        connected: boolean,
+        onStatementError?: (start: number, end: number) => void
+    ) {
+        if (!connected) {
+            setStatus(t('consoleTab.errorNoConnection'));
+            return;
+        }
+        const stmts = splitStatements(text);
+        if (stmts.length === 0) {
+            setStatus(t('consoleTab.scriptNoStatements'));
+            return;
+        }
+
+        pendingQueryCountRef.current += 1;
+        catalogCancelledRef.current = true;
+        scriptCancelledRef.current = false;
+        scriptRunningRef.current = true;
+        setScriptRunning(true);
+
+        await withQueue(`${tabId}:query`, async () => {
+            let executedCount = 0;
+            let totalDurationMs = 0;
+            try {
+                for (let i = 0; i < stmts.length; i++) {
+                    if (scriptCancelledRef.current) {
+                        setStatus(t('consoleTab.scriptCancelled', {executed: executedCount, total: stmts.length}));
+                        break;
+                    }
+                    const stmt = stmts[i];
+                    setStatus(t('consoleTab.scriptProgress', {current: i + 1, total: stmts.length}));
+
+                    let meta: {Columns?: string[] | null; Types?: string[] | null; DurationMs?: number};
+                    try {
+                        meta = await RunQuery(tabId, stmt.text);
+                    } catch (err) {
+                        onStatementError?.(stmt.start, stmt.end);
+                        resultSeqRef.current += 1;
+                        const errorTabId = crypto.randomUUID();
+                        const errorTab: ResultTabState = {
+                            id: errorTabId,
+                            queryText: stmt.text,
+                            label: makeResultLabel(stmt.text, resultSeqRef.current),
+                            status: 'error',
+                            columns: [],
+                            rows: [],
+                            hasMore: false,
+                            fetching: false,
+                            durationMs: null,
+                            errorMsg: String(err),
+                            editContext: null,
+                            readOnlyNotice: null,
+                            editSourceRef: null,
+                        };
+                        setResultTabs(prev => {
+                            const frozen = prev.map(tab => (tab.hasMore ? {...tab, hasMore: false} : tab));
+                            const next = [...frozen, errorTab];
+                            if (next.length <= MAX_RESULT_TABS) return next;
+                            const removable = next.filter(tab => tab.status === 'done' || tab.status === 'error');
+                            const toDrop = next.length - MAX_RESULT_TABS;
+                            const dropIds = new Set(removable.slice(0, toDrop).map(tab => tab.id));
+                            return next.filter(tab => !dropIds.has(tab.id));
+                        });
+                        setActiveResultId(errorTabId);
+                        setStatus(t('consoleTab.scriptErrorAtStatement', {index: i + 1, total: stmts.length, error: String(err)}));
+                        break;
+                    }
+
+                    totalDurationMs += meta.DurationMs ?? 0;
+                    executedCount++;
+
+                    const resultColumns = meta.Columns ?? [];
+                    if (resultColumns.length > 0) {
+                        resultSeqRef.current += 1;
+                        const id = crypto.randomUUID();
+                        const freshTab: ResultTabState = {
+                            id,
+                            queryText: stmt.text,
+                            label: makeResultLabel(stmt.text, resultSeqRef.current),
+                            status: 'running',
+                            columns: resultColumns,
+                            rows: [],
+                            hasMore: false,
+                            fetching: false,
+                            durationMs: meta.DurationMs ?? null,
+                            errorMsg: null,
+                            editContext: null,
+                            readOnlyNotice: null,
+                            editSourceRef: null,
+                        };
+                        setResultTabs(prev => {
+                            const frozen = prev.map(tab => (tab.hasMore ? {...tab, hasMore: false} : tab));
+                            const next = [...frozen, freshTab];
+                            if (next.length <= MAX_RESULT_TABS) return next;
+                            const removable = next.filter(tab => tab.status === 'done' || tab.status === 'error');
+                            const toDrop = next.length - MAX_RESULT_TABS;
+                            const dropIds = new Set(removable.slice(0, toDrop).map(tab => tab.id));
+                            return next.filter(tab => !dropIds.has(tab.id));
+                        });
+                        setActiveResultId(id);
+
+                        const fetched = await fetchBatchFor(id, [], true);
+                        const ref = detectSingleTable(stmt.text);
+                        updateResultTab(id, tab => ({...tab, editSourceRef: ref}));
+                        if (ref) {
+                            await tryComputeEditContext(id, ref, resultColumns, !fetched.hasMore);
+                        }
+                        updateResultTab(id, tab => ({...tab, status: 'done'}));
+                    }
+
+                    if (scriptCancelledRef.current) {
+                        setStatus(t('consoleTab.scriptCancelled', {executed: executedCount, total: stmts.length}));
+                        break;
+                    }
+                }
+
+                if (!scriptCancelledRef.current && executedCount === stmts.length) {
+                    setStatus(t('consoleTab.scriptSuccess', {count: executedCount, durationMs: totalDurationMs}));
+                }
+            } finally {
+                scriptRunningRef.current = false;
+                setScriptRunning(false);
+                pendingQueryCountRef.current = Math.max(0, pendingQueryCountRef.current - 1);
+                setHistoryToken(n => n + 1);
+            }
+        });
+    }
+
     async function handleCancel() {
+        if (scriptRunningRef.current) {
+            scriptCancelledRef.current = true;
+            await CancelQuery(tabId);
+            return;
+        }
         const active = resultTabs.find(tab => tab.id === activeResultId);
         if (active?.status === 'queued') {
             cancelledQueryIdsRef.current.add(active.id);
@@ -329,9 +491,11 @@ export function useResultExecution({tabId, batchSize, driver, catalog, setStatus
         setActiveResultId,
         activeResult,
         anyRunning,
+        scriptRunning,
         activeFetching,
         historyToken,
         handleRun,
+        handleRunScript,
         handleLoadMore,
         handleCancel,
         handleCloseResultTab,

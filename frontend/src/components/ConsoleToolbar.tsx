@@ -3,6 +3,7 @@
 import {useTranslation} from 'react-i18next';
 
 interface ConsoleToolbarProps {
+    connected?: boolean;
     showSaveForm: boolean;
     saveNameInput: string;
     savingScript: boolean;
@@ -19,6 +20,7 @@ interface ConsoleToolbarProps {
     onToggleScripts: () => void;
     onToggleHistory: () => void;
     onFormat: () => void;
+    onRunScript?: () => void;
     autoUppercase: boolean;
     onAutoUppercaseChange: (next: boolean) => void;
     wordWrap: boolean;
@@ -26,6 +28,7 @@ interface ConsoleToolbarProps {
 }
 
 export default function ConsoleToolbar({
+    connected,
     showSaveForm,
     saveNameInput,
     savingScript,
@@ -44,6 +47,7 @@ export default function ConsoleToolbar({
     onToggleScripts,
     onToggleHistory,
     onFormat,
+    onRunScript,
     onAutoUppercaseChange,
     onWordWrapChange,
 }: ConsoleToolbarProps) {
@@ -107,6 +111,17 @@ export default function ConsoleToolbar({
             >
                 {t('consoleTab.format')}
             </button>
+            {onRunScript && (
+                <button
+                    className="btn btn-secondary"
+                    onClick={onRunScript}
+                    disabled={connected === false || queryEmpty}
+                    title={t('consoleTab.runScriptTitle')}
+                >
+                    {t('consoleTab.runScript')}
+                    <kbd className="kbd-shortcut">Alt+X</kbd>
+                </button>
+            )}
             <label className="auto-uppercase-toggle" title={t('consoleTab.autoUppercaseTitle')}>
                 <input
                     type="checkbox"

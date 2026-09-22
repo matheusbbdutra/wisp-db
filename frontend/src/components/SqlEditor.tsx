@@ -37,6 +37,7 @@ monaco.languages.setMonarchTokensProvider('sql', sqlLanguage);
 const catalogByModel = new Map<monaco.editor.ITextModel, db.Table[]>();
 const driverByModel = new Map<monaco.editor.ITextModel, string | undefined>();
 const catalogLoaderByModel = new Map<monaco.editor.ITextModel, () => Promise<void>>();
+const columnLoaderByModel = new Map<monaco.editor.ITextModel, (schema: string, table: string) => Promise<db.Table | null>>();
 
 type MonacoRange = {
     startLineNumber: number;
@@ -357,6 +358,19 @@ monaco.languages.registerCompletionItemProvider('sql', {
             return {suggestions: buildTableSuggestions(catalog, range, dot.tables)};
         }
         if (dot?.kind === 'table-columns') {
+            const columnLoader = columnLoaderByModel.get(textModel);
+            if (columnLoader) {
+                await Promise.all(
+                    dot.tables.map(async t => {
+                        if (!t.Columns || t.Columns.length === 0) {
+                            const full = await columnLoader(t.Schema, t.Name);
+                            if (full?.Columns) {
+                                t.Columns = full.Columns;
+                            }
+                        }
+                    })
+                );
+            }
             return {suggestions: buildColumnSuggestions(catalog, range, dot.tables)};
         }
         // Logo após FROM/JOIN: só schema/tabela — nunca coluna (ver
@@ -380,6 +394,21 @@ monaco.languages.registerCompletionItemProvider('sql', {
         // diferente da indicada no FROM. Só cai no catálogo inteiro quando
         // nenhuma tabela é conhecida ainda (ex.: digitando antes do FROM).
         const queryTables = catalog.length > 0 ? resolveQueryTables(textModel.getValue(), catalog) : [];
+        if (queryTables.length > 0) {
+            const columnLoader = columnLoaderByModel.get(textModel);
+            if (columnLoader) {
+                await Promise.all(
+                    queryTables.map(async t => {
+                        if (!t.Columns || t.Columns.length === 0) {
+                            const full = await columnLoader(t.Schema, t.Name);
+                            if (full?.Columns) {
+                                t.Columns = full.Columns;
+                            }
+                        }
+                    })
+                );
+            }
+        }
         const suggestions: monaco.languages.CompletionItem[] = [
             ...buildSchemaSuggestions(catalog, range),
             ...buildTableSuggestions(catalog, range, undefined, queryTables.length > 0 ? '1' : ''),
@@ -447,8 +476,12 @@ interface Props {
     // cursor/seleção, só que sempre em aba nova (Ctrl+Alt+Enter, mesmo
     // espírito do "Execute SQL Statement in New Tab" do DBeaver).
     onRunNewTabRequested?: (text: string) => void;
+    // onRunScriptRequested executa todo o script sequencialmente (Alt+X)
+    // dividindo statements via splitStatements.
+    onRunScriptRequested?: () => void;
     catalog?: db.Table[];
     onCatalogNeeded?: () => Promise<void>;
+    onEnsureTableColumns?: (schema: string, table: string) => Promise<db.Table | null>;
     driver?: string;
     autoUppercase?: boolean;
     wordWrap?: boolean;
@@ -465,21 +498,50 @@ interface Props {
     ) => void;
 }
 
-// Exposto via ref pro botão "Explain" da toolbar (ConsoleTab.tsx), que fica
-// FORA do Monaco e não tem acesso a cursor/seleção do editor de outro jeito
-// — precisa do mesmo statement que Ctrl+Enter rodaria, não do editor
-// inteiro (EXPLAIN só aceita um statement por vez, ver explainQuery.ts).
+// Exposto via ref pro botão "Explain" e execução de batch/scripts
 export interface SqlEditorHandle {
     getStatementOrSelection: () => string;
+    getScriptTextOrSelection: () => { text: string; baseOffset: number };
+    highlightRange: (startOffset: number, endOffset: number) => void;
 }
 
-const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({value, onChange, onRunRequested, onRunSelectionRequested, onRunNewTabRequested, catalog, driver, autoUppercase = true, wordWrap, readOnly = false, onOpenIdentifier, onCatalogNeeded}, ref) {
+const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({value, onChange, onRunRequested, onRunSelectionRequested, onRunNewTabRequested, onRunScriptRequested, catalog, driver, autoUppercase = true, wordWrap, readOnly = false, onOpenIdentifier, onCatalogNeeded, onEnsureTableColumns}, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
     useImperativeHandle(ref, () => ({
         getStatementOrSelection: () => {
             const editor = editorRef.current;
             return editor ? resolveStatementOrSelection(editor) : '';
+        },
+        getScriptTextOrSelection: () => {
+            const editor = editorRef.current;
+            if (!editor) return { text: '', baseOffset: 0 };
+            const model = editor.getModel();
+            if (!model) return { text: '', baseOffset: 0 };
+            const selection = editor.getSelection();
+            if (selection && !selection.isEmpty()) {
+                const text = model.getValueInRange(selection);
+                const baseOffset = model.getOffsetAt(selection.getStartPosition());
+                return { text, baseOffset };
+            }
+            return { text: model.getValue(), baseOffset: 0 };
+        },
+        highlightRange: (startOffset: number, endOffset: number) => {
+            const editor = editorRef.current;
+            if (!editor) return;
+            const model = editor.getModel();
+            if (!model) return;
+            const startPos = model.getPositionAt(startOffset);
+            const endPos = model.getPositionAt(endOffset);
+            const selection = new monaco.Selection(
+                startPos.lineNumber,
+                startPos.column,
+                endPos.lineNumber,
+                endPos.column
+            );
+            editor.setSelection(selection);
+            editor.revealRangeInCenter(selection);
+            editor.focus();
         },
     }));
     const catalogRef = useRef(catalog);
@@ -490,14 +552,18 @@ const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({value, 
     const onRunRef = useRef(onRunRequested);
     const onRunSelectionRef = useRef(onRunSelectionRequested);
     const onRunNewTabRef = useRef(onRunNewTabRequested);
+    const onRunScriptRef = useRef(onRunScriptRequested);
     const onOpenIdentifierRef = useRef(onOpenIdentifier);
     const onCatalogNeededRef = useRef(onCatalogNeeded);
+    const onEnsureTableColumnsRef = useRef(onEnsureTableColumns);
     onChangeRef.current = onChange;
     onRunRef.current = onRunRequested;
     onRunSelectionRef.current = onRunSelectionRequested;
     onRunNewTabRef.current = onRunNewTabRequested;
+    onRunScriptRef.current = onRunScriptRequested;
     onOpenIdentifierRef.current = onOpenIdentifier;
     onCatalogNeededRef.current = onCatalogNeeded;
+    onEnsureTableColumnsRef.current = onEnsureTableColumns;
     // Refs (não estado) pro listener do Monaco, que é registrado uma vez só
     // na montagem e não re-registra a cada render.
     const autoUppercaseRef = useRef(autoUppercase);
@@ -645,12 +711,18 @@ const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({value, 
             }));
         });
 
+        // Alt+X: Executa o script sequencialmente (ou trecho selecionado)
+        editor.addCommand(monaco.KeyMod.Alt | monaco.KeyCode.KeyX, () => {
+            onRunScriptRef.current?.();
+        });
+
         return () => {
             const m = editor.getModel();
             if (m) {
                 catalogByModel.delete(m);
                 driverByModel.delete(m);
                 catalogLoaderByModel.delete(m);
+                columnLoaderByModel.delete(m);
             }
             editor.dispose();
         };
@@ -663,6 +735,11 @@ const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({value, 
             catalogByModel.set(model, catalog ?? []);
             driverByModel.set(model, driver);
             catalogLoaderByModel.set(model, () => onCatalogNeededRef.current?.() ?? Promise.resolve());
+            if (onEnsureTableColumnsRef.current) {
+                columnLoaderByModel.set(model, onEnsureTableColumnsRef.current);
+            } else {
+                columnLoaderByModel.delete(model);
+            }
         }
     }, [catalog, driver]);
 

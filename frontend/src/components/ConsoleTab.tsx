@@ -31,7 +31,7 @@ interface Props {
     tabId: string;
     hidden: boolean;
     onConnectedChange: (connected: boolean) => void;
-    onOpenTable: (connectionId: string, schema: string, table: string) => void;
+    onOpenTable: (connectionId: string, schema: string, table: string, initialFilter?: { column: string; value: any }) => void;
     onOpenSchema: (connectionId: string, schema: string) => void;
     // true só na aba de console inicial da sessão (ver App.tsx) — recarrega
     // sozinha o último script aberto (ver lastScript.ts), em vez
@@ -207,6 +207,32 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
         onOpenTable(connection.connectionId, match.Schema, match.Name);
     }
 
+    function handleRunScript() {
+        const scriptInfo = sqlEditorRef.current?.getScriptTextOrSelection() ?? { text: query, baseOffset: 0 };
+        if (!scriptInfo.text.trim()) {
+            return;
+        }
+        void execution.handleRunScript(
+            scriptInfo.text,
+            connection.connected,
+            (start, end) => {
+                sqlEditorRef.current?.highlightRange(scriptInfo.baseOffset + start, scriptInfo.baseOffset + end);
+            }
+        );
+    }
+
+    // Atalho global Alt+X para executar script sequencialmente
+    useEffect(() => {
+        function handleKeyDown(e: KeyboardEvent) {
+            if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.key === 'x' || e.key === 'X')) {
+                e.preventDefault();
+                handleRunScript();
+            }
+        }
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [query, connection.connected]);
+
     function handleFormatQuery() {
         const dialect: SqlLanguage = connection.driver === 'postgres' ? 'postgresql' : connection.driver === 'sqlite' ? 'sqlite' : 'sql';
         try {
@@ -254,6 +280,7 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
             />
 
             <ConsoleToolbar
+                connected={connection.connected}
                 showSaveForm={scripts.showSaveForm}
                 saveNameInput={scripts.saveNameInput}
                 savingScript={scripts.savingScript}
@@ -272,6 +299,7 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                 onToggleScripts={() => setShowScripts(v => !v)}
                 onToggleHistory={() => setShowHistory(v => !v)}
                 onFormat={handleFormatQuery}
+                onRunScript={handleRunScript}
                 onAutoUppercaseChange={handleAutoUppercaseChange}
                 onWordWrapChange={handleWordWrapChange}
             />
@@ -305,8 +333,10 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                             onRunRequested={text => void execution.handleRun(text, false, connection.connected)}
                             onRunSelectionRequested={text => void execution.handleRun(text, false, connection.connected)}
                             onRunNewTabRequested={text => void execution.handleRun(text, true, connection.connected)}
+                            onRunScriptRequested={handleRunScript}
                             catalog={connection.catalog}
                             onCatalogNeeded={() => connection.connectionId ? connection.loadCatalog(connection.connectionId, connection.catalogConnectionRef.current?.name) : Promise.resolve()}
+                            onEnsureTableColumns={connection.ensureTableColumns}
                             driver={connection.driver}
                             autoUppercase={autoUppercase}
                             wordWrap={wordWrap}
@@ -330,6 +360,7 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                             const text = sqlEditorRef.current?.getStatementOrSelection() || query;
                             void execution.handleRun(text, true, connection.connected);
                         }}
+                        onRunScript={handleRunScript}
                         onExplain={() => {
                             // Statement sob o cursor/seleção, nunca o editor
                             // inteiro — EXPLAIN só aceita UM statement (ver
@@ -367,6 +398,11 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                         onRowDeleted={execution.handleRowDeleted}
                         onRowInserted={execution.handleRowInserted}
                         onStatus={setStatus}
+                        onNavigateForeignKey={(targetSchema, targetTable, targetColumn, val) => {
+                            if (connection.connectionId) {
+                                onOpenTable(connection.connectionId, targetSchema, targetTable, {column: targetColumn, value: val});
+                            }
+                        }}
                     />
                     {execution.activeResult?.hasMore && (
                         <div className="load-more-bar">

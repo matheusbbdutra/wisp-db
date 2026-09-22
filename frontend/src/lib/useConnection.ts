@@ -4,7 +4,7 @@
 import {useEffect, useRef, useState} from 'react';
 import type {RefObject} from 'react';
 import {useTranslation} from 'react-i18next';
-import {Disconnect, ListSchemas, IntrospectSchemaTables, GetCachedCatalog, WarmupCatalog} from './tabApi';
+import {Disconnect, ListSchemas, ListTables, IntrospectTable, GetCachedCatalog, WarmupCatalog} from './tabApi';
 import {EventsOn, EventsOff} from '../../wailsjs/runtime';
 import type {db} from '../../wailsjs/go/models';
 
@@ -83,17 +83,18 @@ export function useConnection({tabId, onConnectedChange, setStatus, pendingQuery
             await new Promise(resolve => window.setTimeout(resolve, 150));
             if (catalogCancelledRef.current || pendingQueryCountRef.current > 0) return;
 
+            // Phase 1 (ADR 0012): Listagem rasa rápida de tabelas por schema (O(T)) sem join pesado de colunas
             const schemas = await ListSchemas(tabId);
-            const detailed: db.Table[] = [];
+            const flatTables: db.Table[] = [];
             for (const schema of schemas ?? []) {
                 if (catalogCancelledRef.current || pendingQueryCountRef.current > 0) return;
                 try {
-                    const tables = await IntrospectSchemaTables(tabId, schema);
-                    detailed.push(...(tables ?? []));
+                    const tables = await ListTables(tabId, schema);
+                    flatTables.push(...(tables ?? []));
                 } catch (schemaErr) {
-                    console.error(`erro ao introspectar schema ${schema} para autocomplete:`, schemaErr);
+                    console.error(`erro ao listar tabelas do schema ${schema} para autocomplete:`, schemaErr);
                 }
-                setCatalog([...detailed]);
+                setCatalog([...flatTables]);
             }
             if (!catalogCancelledRef.current && catalogConnectionRef.current?.id === connectionId) {
                 catalogReadyRef.current = true;
@@ -108,6 +109,53 @@ export function useConnection({tabId, onConnectedChange, setStatus, pendingQuery
             catalogLoadingRef.current = false;
         }
     }
+
+    const inFlightColumnsRef = useRef<Map<string, Promise<db.Table | null>>>(new Map());
+
+    // Phase 2 (ADR 0012): Resolução lazy de colunas sob demanda (O(C))
+    async function ensureTableColumns(schema: string, tableName: string): Promise<db.Table | null> {
+        const key = `${schema.toLowerCase()}.${tableName.toLowerCase()}`;
+        const existing = catalog.find(
+            t => t.Schema?.toLowerCase() === schema.toLowerCase() && t.Name?.toLowerCase() === tableName.toLowerCase()
+        );
+        if (existing?.Columns && existing.Columns.length > 0) {
+            return existing;
+        }
+
+        const inFlight = inFlightColumnsRef.current.get(key);
+        if (inFlight) {
+            return inFlight;
+        }
+
+        const promise = (async () => {
+            try {
+                const full = await IntrospectTable(tabId, schema, tableName);
+                if (full?.Columns && full.Columns.length > 0) {
+                    setCatalog(prev => {
+                        const idx = prev.findIndex(
+                            t => t.Schema?.toLowerCase() === schema.toLowerCase() && t.Name?.toLowerCase() === tableName.toLowerCase()
+                        );
+                        if (idx >= 0) {
+                            const updated = [...prev];
+                            updated[idx] = full;
+                            return updated;
+                        }
+                        return [...prev, full];
+                    });
+                    return full;
+                }
+            } catch (err) {
+                console.error(`erro ao buscar colunas de ${key}:`, err);
+            } finally {
+                inFlightColumnsRef.current.delete(key);
+            }
+            return null;
+        })();
+
+        inFlightColumnsRef.current.set(key, promise);
+        return promise;
+    }
+
     async function handleConnected(connectionId: string, connName?: string, activeDriver?: string) {
         setConnected(true);
         onConnectedChange(true);
@@ -117,16 +165,6 @@ export function useConnection({tabId, onConnectedChange, setStatus, pendingQuery
         catalogCancelledRef.current = false;
         catalogReadyRef.current = false;
         setStatus(connName ? t('consoleTab.connectedNamed', {name: connName}) : t('consoleTab.connected'));
-        // O catálogo completo do autocomplete é carregado sob demanda pelo
-        // editor. Não fazemos introspecção pesada ao conectar: em bancos
-        // grandes isso bloquearia a primeira consulta do usuário.
-        //
-        // Sequencial POR SCHEMA, nunca Promise.all: a sessão de uma aba usa
-        // uma única conexão (*sql.Conn/pgx) dedicada (ver internal/session),
-        // que não suporta uso concorrente. Bug real: com 2+ schemas as
-        // chamadas em paralelo colidiam com erro "conn busy" e derrubavam o
-        // catálogo inteiro (ver memória wisp-autocomplete-conn-busy-concurrency).
-        //
     }
 
     function handleError(err: string) {
@@ -155,6 +193,7 @@ export function useConnection({tabId, onConnectedChange, setStatus, pendingQuery
         catalogCancelledRef,
         catalogConnectionRef,
         loadCatalog,
+        ensureTableColumns,
         handleConnected,
         handleDisconnect,
         handleError,

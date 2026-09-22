@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"wisp/internal/db"
 )
@@ -92,5 +93,54 @@ func TestCloseIdempotente(t *testing.T) {
 	// chamada é no-op que retorna nil.)
 	if err := m.Close("tab1"); err != nil {
 		t.Fatalf("segundo Close deveria ser idempotente: %v", err)
+	}
+}
+
+func TestManagerCancelSQLiteQuery(t *testing.T) {
+	m := NewManager()
+	t.Cleanup(func() {
+		_ = m.Close("tab1")
+	})
+
+	d := newTestDriver(t)
+	if _, err := m.Open("tab1", d, d, "k1", ""); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	qctx, err := m.StartQuery("tab1")
+	if err != nil {
+		t.Fatalf("StartQuery: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		slowQuery := `WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM cnt) SELECT count(*) FROM cnt`
+		_, err := d.Execute(qctx, slowQuery)
+		errCh <- err
+	}()
+
+	// Allow query to start
+	time.Sleep(20 * time.Millisecond)
+	cancelCtx := context.Background()
+	if err := m.Cancel(cancelCtx, "tab1"); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("query should have failed with cancellation error")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("query did not cancel within 2 seconds")
+	}
+
+	// Verify tab session is still open and can run subsequent queries
+	res, err := d.Execute(context.Background(), `SELECT 1`)
+	if err != nil {
+		t.Fatalf("subsequent query failed: %v", err)
+	}
+	if len(res.Rows) != 1 {
+		t.Fatalf("unexpected result: %+v", res)
 	}
 }

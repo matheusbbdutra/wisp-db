@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	_ "modernc.org/sqlite"
 )
@@ -13,12 +14,14 @@ import (
 // SQLiteDriver implements DatabaseDriver for local SQLite files (modernc.org/sqlite,
 // pure Go — see docs/adr/0002-cgo-policy.md).
 type SQLiteDriver struct {
+	mu     sync.Mutex
 	conn   *sql.Conn
 	pool   *sql.DB
 	cursor *sql.Rows // cursor opened by ExecuteStreaming, see FetchNext/CloseCursor
 	// cursorBinaryCols marks BLOB columns in the open cursor — for the same reason as the
 	// field of the same name in PostgresDriver (see normalizeRowSkipping).
 	cursorBinaryCols []bool
+	cancelQuery      context.CancelFunc
 }
 
 // binaryColumnMaskSQLite marks columns whose declared type is BLOB (by index) — these
@@ -64,6 +67,11 @@ func (d *SQLiteDriver) Connect(ctx context.Context, dsn string) error {
 		pool.Close()
 		return fmt.Errorf("obtendo conexão sqlite: %w", err)
 	}
+	if _, err := conn.ExecContext(ctx, "PRAGMA busy_timeout = 5000;"); err != nil {
+		_ = conn.Close()
+		_ = pool.Close()
+		return fmt.Errorf("configurando busy_timeout sqlite: %w", err)
+	}
 	d.pool = pool
 	d.conn = conn
 	return nil
@@ -81,7 +89,18 @@ func (d *SQLiteDriver) Close() error {
 }
 
 func (d *SQLiteDriver) Execute(ctx context.Context, query string) (*QueryResult, error) {
-	rows, err := d.conn.QueryContext(ctx, query)
+	queryCtx, cancel := context.WithCancel(ctx)
+	d.mu.Lock()
+	d.cancelQuery = cancel
+	d.mu.Unlock()
+	defer func() {
+		d.mu.Lock()
+		d.cancelQuery = nil
+		d.mu.Unlock()
+		cancel()
+	}()
+
+	rows, err := d.conn.QueryContext(queryCtx, query)
 	if err != nil {
 		return nil, fmt.Errorf("executando query: %w", err)
 	}
@@ -95,18 +114,35 @@ func (d *SQLiteDriver) Execute(ctx context.Context, query string) (*QueryResult,
 func (d *SQLiteDriver) ExecuteStreaming(ctx context.Context, query string) ([]string, []string, error) {
 	d.CloseCursor()
 
-	rows, err := d.conn.QueryContext(ctx, query)
+	queryCtx, cancel := context.WithCancel(ctx)
+	d.mu.Lock()
+	d.cancelQuery = cancel
+	d.mu.Unlock()
+
+	rows, err := d.conn.QueryContext(queryCtx, query)
 	if err != nil {
+		d.mu.Lock()
+		d.cancelQuery = nil
+		d.mu.Unlock()
+		cancel()
 		return nil, nil, fmt.Errorf("executando query: %w", err)
 	}
 
 	columns, err := rows.Columns()
 	if err != nil {
+		d.mu.Lock()
+		d.cancelQuery = nil
+		d.mu.Unlock()
+		cancel()
 		rows.Close()
 		return nil, nil, err
 	}
 	colTypes, err := rows.ColumnTypes()
 	if err != nil {
+		d.mu.Lock()
+		d.cancelQuery = nil
+		d.mu.Unlock()
+		cancel()
 		rows.Close()
 		return nil, nil, err
 	}
@@ -115,27 +151,49 @@ func (d *SQLiteDriver) ExecuteStreaming(ctx context.Context, query string) ([]st
 		types[i] = ct.DatabaseTypeName()
 	}
 
+	if len(columns) == 0 {
+		_ = rows.Close()
+		d.mu.Lock()
+		if d.cancelQuery != nil {
+			d.cancelQuery()
+			d.cancelQuery = nil
+		}
+		d.cursor = nil
+		d.mu.Unlock()
+		return columns, types, nil
+	}
+
+	d.mu.Lock()
 	d.cursor = rows
 	d.cursorBinaryCols = binaryColumnMaskSQLite(colTypes)
+	d.mu.Unlock()
 	return columns, types, nil
 }
 
 func (d *SQLiteDriver) FetchNext(ctx context.Context, n int) ([][]any, bool, error) {
-	if d.cursor == nil {
+	d.mu.Lock()
+	cursor := d.cursor
+	cursorBinaryCols := d.cursorBinaryCols
+	d.mu.Unlock()
+
+	if cursor == nil {
 		return nil, false, nil
 	}
 
-	columns, err := d.cursor.Columns()
+	columns, err := cursor.Columns()
 	if err != nil {
 		return nil, false, err
 	}
 
 	var result [][]any
 	for len(result) < n {
-		if !d.cursor.Next() {
-			err := d.cursor.Err()
-			d.cursor.Close()
-			d.cursor = nil
+		if ctx != nil && ctx.Err() != nil {
+			_ = d.CloseCursor()
+			return result, false, ctx.Err()
+		}
+		if !cursor.Next() {
+			err := cursor.Err()
+			_ = d.CloseCursor()
 			return result, false, err
 		}
 		values := make([]any, len(columns))
@@ -143,28 +201,36 @@ func (d *SQLiteDriver) FetchNext(ctx context.Context, n int) ([][]any, bool, err
 		for i := range values {
 			pointers[i] = &values[i]
 		}
-		if err := d.cursor.Scan(pointers...); err != nil {
+		if err := cursor.Scan(pointers...); err != nil {
 			return result, false, err
 		}
-		result = append(result, normalizeRowSkipping(values, d.cursorBinaryCols))
+		result = append(result, normalizeRowSkipping(values, cursorBinaryCols))
 	}
 	return result, true, nil
 }
 
 func (d *SQLiteDriver) CloseCursor() error {
-	if d.cursor == nil {
+	d.mu.Lock()
+	cancel := d.cancelQuery
+	d.cancelQuery = nil
+	cursor := d.cursor
+	d.cursor = nil
+	d.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	if cursor == nil {
 		return nil
 	}
-	err := d.cursor.Close()
-	d.cursor = nil
-	return err
+	return cursor.Close()
 }
 
-// CancelRunningQuery: SQLite is embedded and single-file — there is no native remote
-// server cancellation. The canceled ctx (Session Manager) already interrupts the local
-// call, which is the only applicable mechanism here.
+// CancelRunningQuery cancels the active statement execution context and closes any
+// active cursor, immediately interrupting queries in SQLite (sqlite3_interrupt via
+// modernc.org/sqlite).
 func (d *SQLiteDriver) CancelRunningQuery(ctx context.Context) error {
-	return nil
+	return d.CloseCursor()
 }
 
 func (d *SQLiteDriver) ListSchemas(ctx context.Context) ([]string, error) {

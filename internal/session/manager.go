@@ -123,13 +123,10 @@ func (m *Manager) StartQuery(tabID string) (context.Context, error) {
 }
 
 // Cancel interrupts the tab's running query through native driver cancellation (e.g. pgx
-// CancelRequest). It does NOT cancel QueryCtx — verified in practice (real pgx) that
-// this alone unblocks an ongoing FetchNext (e.g. ~9ms to abort a fetch of millions of
-// rows) without the side effect of canceling ctx, which makes pgx close the entire
-// connection, requiring reconnection. Known limitation: SQLite has no native
-// cancellation (CancelRunningQuery is a no-op there) — canceling a running SQLite query
-// is not fully supported today (local/fast queries, so the practical impact is low;
-// revisit if it becomes a real problem).
+// CancelRequest for Postgres, dataConn reconnect for MySQL, statement context cancel +
+// CloseCursor for SQLite — see ADR 0015). It does NOT cancel QueryCtx on the session level —
+// verified in practice (real pgx) that driver-level cancellation alone unblocks in-flight
+// execution without the side effect of breaking the session or dropping connections.
 func (m *Manager) Cancel(ctx context.Context, tabID string) error {
 	s, err := m.Get(tabID)
 	if err != nil {

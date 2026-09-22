@@ -15,6 +15,8 @@ import DataEditor, {
 } from '@glideapps/glide-data-grid';
 import type {DirectEdit} from '../lib/useCellEditing';
 import type {MenuState} from './GridContextMenu';
+import type {ForeignKeyReference} from '../lib/foreignKeyNav';
+import {isCtrlHeld} from '../lib/modifierKeyTracker';
 
 interface GridCanvasProps {
     columns: string[];
@@ -29,6 +31,8 @@ interface GridCanvasProps {
     onGridSelectionChange: (sel: GridSelection) => void;
     gridRef: RefObject<DataEditorRef | null>;
     directEdit: DirectEdit | null;
+    foreignKeys?: ForeignKeyReference[];
+    onNavigateForeignKey?: (targetSchema: string, targetTable: string, targetColumn: string, value: any) => void;
     onDirectEditChange: (value: string) => void;
     onCommitDirectEdit: () => void;
     onCancelDirectEdit: () => void;
@@ -53,6 +57,8 @@ export default function GridCanvas({
     onGridSelectionChange,
     gridRef,
     directEdit,
+    foreignKeys,
+    onNavigateForeignKey,
     onDirectEditChange,
     onCommitDirectEdit,
     onCancelDirectEdit,
@@ -88,13 +94,24 @@ export default function GridCanvas({
         lineHeight: 1.4,
     }), []);
 
+    const fkByCol = useMemo(() => {
+        const map = new Map<string, ForeignKeyReference>();
+        for (const fk of foreignKeys ?? []) {
+            map.set(fk.column.toLowerCase(), fk);
+        }
+        return map;
+    }, [foreignKeys]);
+
     const gridColumns = useMemo<GridColumn[]>(() => {
-        return columns.map(c => ({
-            id: c,
-            title: c,
-            width: columnWidths[c] ?? Math.max(120, Math.min(320, c.length * 10 + 48)),
-        }));
-    }, [columns, columnWidths]);
+        return columns.map(c => {
+            const isFk = fkByCol.has(c.toLowerCase());
+            return {
+                id: c,
+                title: isFk ? `${c} ↗` : c,
+                width: columnWidths[c] ?? Math.max(120, Math.min(320, (c.length + (isFk ? 2 : 0)) * 10 + 48)),
+            };
+        });
+    }, [columns, columnWidths, fkByCol]);
 
     const onColumnResize = useCallback((column: GridColumn, newSize: number) => {
         if (column.id) {
@@ -158,6 +175,10 @@ export default function GridCanvas({
             };
         }
 
+        const colName = columns[colIndex] ?? '';
+        const fkRef = fkByCol.get(colName.toLowerCase());
+        const isFk = !!fkRef && val !== null && val !== undefined && val !== '';
+
         const str = typeof val === 'object' ? JSON.stringify(val) : String(val);
         const editable = isCellEditable(colIndex, rowIndex);
         return {
@@ -166,9 +187,12 @@ export default function GridCanvas({
             readonly: !editable,
             data: str,
             displayData: str,
-            themeOverride: deleteTheme,
+            themeOverride: {
+                ...(isFk ? {textDark: '#60a5fa', baseFontStyle: '500 12px ui-monospace, monospace'} : {}),
+                ...deleteTheme,
+            },
         };
-    }, [rows, isCellEditable, toOriginalRow, rowCount, pendingInserts, pendingDeleteRows, columns]);
+    }, [rows, isCellEditable, toOriginalRow, rowCount, pendingInserts, pendingDeleteRows, columns, fkByCol]);
 
     // Captura a posição do mouse na fase de captura (roda antes do handler
     // interno do grid), porque CellClickedEventArgs só traz coordenadas
@@ -202,6 +226,21 @@ export default function GridCanvas({
         onMenu({x: lastMousePos.current.x, y: lastMousePos.current.y, col, row: toOriginalRow(displayRow), displayRow});
     }, [toOriginalRow, rowCount, onMenu]);
 
+    const handleCellClickedWrapper = useCallback((cell: Item, event?: CellClickedEventArgs) => {
+        const [colIndex, displayRowIndex] = cell;
+        if (displayRowIndex < rowCount && (isCtrlHeld() || (event && (event.shiftKey || (event as any).ctrlKey || (event as any).metaKey)))) {
+            const rowIndex = toOriginalRow(displayRowIndex);
+            const colName = columns[colIndex] ?? '';
+            const fkRef = fkByCol.get(colName.toLowerCase());
+            const val = rows[rowIndex]?.[colIndex];
+            if (fkRef && val !== null && val !== undefined && val !== '' && onNavigateForeignKey) {
+                onNavigateForeignKey(fkRef.targetSchema, fkRef.targetTable, fkRef.targetColumn, val);
+                return;
+            }
+        }
+        onCellClicked(cell);
+    }, [rowCount, toOriginalRow, columns, fkByCol, rows, onNavigateForeignKey, onCellClicked]);
+
     return (
         <div
             className="result-grid-canvas"
@@ -215,7 +254,7 @@ export default function GridCanvas({
                 columns={gridColumns}
                 rows={displayRowCount}
                 getCellContent={getCellContent}
-                onCellClicked={onCellClicked}
+                onCellClicked={handleCellClickedWrapper}
                 onPaste={false}
                 rowMarkers="number"
                 onColumnResize={onColumnResize}

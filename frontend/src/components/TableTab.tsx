@@ -5,6 +5,8 @@ import type {db} from '../../wailsjs/go/models';
 import SqlEditor from './SqlEditor';
 import ResultGrid, {type EditContext} from './ResultGrid';
 import {withQueue} from '../lib/tabCallQueue';
+import {extractForeignKeyReferences} from '../lib/foreignKeyNav';
+import {formatPreviewValue} from '../lib/gridEditPreview';
 
 type SubTab = 'dados' | 'colunas' | 'indices' | 'fks' | 'ddl' | 'triggers' | 'funcoes';
 
@@ -15,23 +17,26 @@ interface Props {
     connectionId: string;
     schema: string;
     table: string;
+    initialFilter?: { column: string; value: any };
     hidden: boolean;
     onConnectedChange: (connected: boolean) => void;
     // Abre a definição completa de um trigger/função numa aba própria (App.tsx
     // cuida de criar) — a lista de Triggers/Funções mostra só o nome, sem
     // despejar o DDL de todos inline (ver comentário em handleSelectSub).
     onOpenRoutine: (kind: 'trigger' | 'function', name: string, definition: string) => void;
+    onOpenTable?: (connectionId: string, schema: string, table: string, initialFilter?: { column: string; value: any }) => void;
 }
 
 // Aba de tabela (nível superior, irmã do Console): tem tabId e conexão
 // PRÓPRIOS — reconecta no mount via ConnectSaved com o mesmo connectionId
 // salvo da origem, nunca reusa a sessão do console (ver AGENTS.md:
 // 1 tabId = 1 conexão dedicada). Disconnect centralizado em App.tsx.
-export default function TableTab({tabId, connectionId, schema, table, hidden, onConnectedChange, onOpenRoutine}: Props) {
+export default function TableTab({tabId, connectionId, schema, table, initialFilter, hidden, onConnectedChange, onOpenRoutine, onOpenTable}: Props) {
     const {t} = useTranslation();
     const [connected, setConnected] = useState(false);
     const [status, setStatus] = useState(() => t('tableTab.statusConnecting'));
     const [subTab, setSubTab] = useState<SubTab>('dados');
+    const [activeFilter, setActiveFilter] = useState<{ column: string; value: any } | null>(initialFilter ?? null);
 
     // Colunas reais da tabela (via IntrospectTable, antes de qualquer cursor
     // aberto) — base pro editContext, computado após o primeiro fetch.
@@ -39,6 +44,7 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
     // Espelho em state só pra sub-aba "Colunas" renderizar (ref não dispara
     // re-render) — mesmos dados de tableColumnsRef, sem chamada extra.
     const [tableColumns, setTableColumns] = useState<db.Column[]>([]);
+    const tableFksRef = useRef<db.ForeignKey[]>([]);
 
     // --- Dados ---
     const [columns, setColumns] = useState<string[]>([]);
@@ -127,6 +133,17 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
                     tableColumnsRef.current = [];
                     setTableColumns([]);
                 }
+                try {
+                    const rawFks = (await ListForeignKeys(tabId, schema, table)) ?? [];
+                    if (!cancelled) {
+                        tableFksRef.current = rawFks;
+                        setForeignKeys(rawFks);
+                    }
+                } catch {
+                    if (!cancelled) {
+                        tableFksRef.current = [];
+                    }
+                }
                 if (cancelled) return;
                 await loadDados();
             });
@@ -140,14 +157,15 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
 
     function computeEditContext(resultColumns: string[]) {
         const cols = tableColumnsRef.current;
+        const foreignKeys = extractForeignKeyReferences(tableFksRef.current, schema);
         if (cols.length === 0) {
-            setEditContext(null);
+            setEditContext({schema, table, pkColumns: [], editableColumns: [], allColumns: cols, foreignKeys});
             setReadOnlyNotice(t('tableTab.readOnlyNotFound', {schema, table}));
             return;
         }
         const pkColumns = cols.filter(c => c.IsPrimaryKey).map(c => c.Name);
         if (pkColumns.length === 0) {
-            setEditContext(null);
+            setEditContext({schema, table, pkColumns: [], editableColumns: [], allColumns: cols, foreignKeys});
             setReadOnlyNotice(t('tableTab.readOnlyNoPk', {schema, table}));
             return;
         }
@@ -157,19 +175,27 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
             return !!c && !c.IsGenerated && !c.IsPrimaryKey;
         });
         if (editableColumns.length === 0) {
-            setEditContext(null);
+            setEditContext({schema, table, pkColumns: [], editableColumns: [], allColumns: cols, foreignKeys});
             setReadOnlyNotice(t('tableTab.readOnlyNoEditable', {schema, table}));
             return;
         }
-        setEditContext({schema, table, pkColumns, editableColumns, allColumns: cols});
+        setEditContext({schema, table, pkColumns, editableColumns, allColumns: cols, foreignKeys});
         setReadOnlyNotice(null);
     }
 
-    async function loadDados() {
+    async function loadDados(filterOverride?: { column: string; value: any } | null) {
         setFetching(true);
         setDadosError(null);
+        const filter = filterOverride !== undefined ? filterOverride : activeFilter;
         try {
-            const meta = await RunQuery(tabId, `SELECT * FROM ${qualified} LIMIT ${BATCH_SIZE}`);
+            let sql = `SELECT * FROM ${qualified} LIMIT ${BATCH_SIZE}`;
+            if (filter) {
+                const whereClause = filter.value === null || filter.value === undefined
+                    ? `"${filter.column}" IS NULL`
+                    : `"${filter.column}" = ${formatPreviewValue(filter.value)}`;
+                sql = `SELECT * FROM ${qualified} WHERE ${whereClause} LIMIT ${BATCH_SIZE}`;
+            }
+            const meta = await RunQuery(tabId, sql);
             const resultColumns = meta.Columns ?? [];
             setColumns(resultColumns);
             const batch = await FetchRows(tabId, BATCH_SIZE);
@@ -182,6 +208,13 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
         } finally {
             setFetching(false);
         }
+    }
+
+    async function handleClearFilter() {
+        setActiveFilter(null);
+        await withQueue(`${tabId}:query`, async () => {
+            await loadDados(null);
+        });
     }
 
     async function handleLoadMore() {
@@ -283,6 +316,18 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
 
             {subTab === 'dados' && (
                 <div className="table-dados-pane">
+                    {activeFilter && (
+                        <div className="table-filter-banner">
+                            <span>{t('tableTab.filteredBy', {column: activeFilter.column, value: String(activeFilter.value)})}</span>
+                            <button
+                                className="btn btn-secondary btn-sm"
+                                onClick={handleClearFilter}
+                                title={t('tableTab.clearFilterTitle')}
+                            >
+                                {t('tableTab.clearFilter')}
+                            </button>
+                        </div>
+                    )}
                     {dadosError && !dadosLoaded ? (
                         <div className="meta-empty">{t('tableTab.loadDataError', {error: dadosError})}</div>
                     ) : (
@@ -297,6 +342,9 @@ export default function TableTab({tabId, connectionId, schema, table, hidden, on
                                 onRowDeleted={handleRowDeleted}
                                 onRowInserted={handleRowInserted}
                                 onStatus={setStatus}
+                                onNavigateForeignKey={(targetSchema, targetTable, targetColumn, val) => {
+                                    onOpenTable?.(connectionId, targetSchema, targetTable, {column: targetColumn, value: val});
+                                }}
                             />
                             {hasMore && (
                                 <div className="load-more-bar">
