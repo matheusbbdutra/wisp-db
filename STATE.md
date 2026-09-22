@@ -1,7 +1,16 @@
 # STATE — Wisp
 
-## 🚀 Release v0.1.0-beta.16 — EM ANDAMENTO (2026-09-22)
+## 🚀 Release v0.1.0-beta.16 — PUBLICADA (2026-09-22)
 - **Tag**: `v0.1.0-beta.16`
+- **Release GitHub**: https://github.com/matheusbbdutra/wisp-db/releases/tag/v0.1.0-beta.16
+- **Status do Workflow CI**: Sucesso (2m14s) via GitHub Actions + GoReleaser.
+- **Artefatos Publicados**:
+  - Debian/Ubuntu: `wisp_0.1.0-beta.16_linux_amd64.deb` (5.76 MiB)
+  - Fedora/RHEL/openSUSE: `wisp_0.1.0-beta.16_linux_amd64.rpm` (5.76 MiB)
+  - Arch Linux: `wisp_0.1.0-beta.16_linux_amd64.pkg.tar.zst` (5.86 MiB)
+  - Universal Linux: `wisp_0.1.0-beta.16_linux_amd64.tar.gz` (5.76 MiB)
+  - Windows: `wisp_0.1.0-beta.16_windows_amd64.zip` (9.86 MiB) com `wisp.exe`
+  - Hashes: `checksums.txt` (SHA-256)
 - **Destaque**: Pipeline automatizado de releases multiplataforma via GoReleaser + GitHub Actions.
 - **Artefatos gerados pelo CI**:
   - Debian/Ubuntu: `.deb`
