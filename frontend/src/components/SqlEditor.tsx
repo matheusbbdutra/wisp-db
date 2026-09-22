@@ -59,6 +59,20 @@ export function readAutoUppercasePreference(): boolean {
     }
 }
 
+// Preferência GLOBAL de quebra automática de linha (word wrap): evita que
+// colagens longas se estendam infinitamente na horizontal. Padrão = ligado.
+export const WORD_WRAP_STORAGE_KEY = 'wisp:wordWrap';
+
+export function readWordWrapPreference(): boolean {
+    try {
+        const raw = localStorage.getItem(WORD_WRAP_STORAGE_KEY);
+        if (raw === null) return true;
+        return raw === 'true';
+    } catch {
+        return true;
+    }
+}
+
 // Keywords SQL ANSI (não específicas de dialeto), sempre disponíveis. O
 // Monaco filtra por prefixo do que foi digitado, então concatenar a lista
 // cheia é barato e correto.
@@ -466,6 +480,7 @@ interface Props {
     onCatalogNeeded?: () => Promise<void>;
     driver?: string;
     autoUppercase?: boolean;
+    wordWrap?: boolean;
     // Somente leitura (ex.: visualização de DDL na aba de tabela): bloqueia
     // digitação no Monaco sem mudar nada do modo edição existente.
     readOnly?: boolean;
@@ -487,7 +502,7 @@ export interface SqlEditorHandle {
     getStatementOrSelection: () => string;
 }
 
-const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({value, onChange, onRunRequested, onRunSelectionRequested, onRunNewTabRequested, catalog, driver, autoUppercase = true, readOnly = false, onOpenIdentifier, onCatalogNeeded}, ref) {
+const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({value, onChange, onRunRequested, onRunSelectionRequested, onRunNewTabRequested, catalog, driver, autoUppercase = true, wordWrap, readOnly = false, onOpenIdentifier, onCatalogNeeded}, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
     useImperativeHandle(ref, () => ({
@@ -522,6 +537,8 @@ const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({value, 
     // só a caixa alta em vez do que o usuário digitou).
     const isApplyingAutoCaseRef = useRef(false);
 
+    const effectiveWordWrap = readOnly || (wordWrap ?? readWordWrapPreference());
+
     useEffect(() => {
         if (!containerRef.current) return;
 
@@ -534,13 +551,8 @@ const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({value, 
             fontSize: 13,
             lineHeight: 20,
             readOnly,
-            // Quebra de linha só nas views somente-leitura (DDL/Trigger/
-            // Função) — são texto pra ler, não SQL pra editar, então uma
-            // definição longa (CREATE FUNCTION com corpo grande, por
-            // exemplo) deve quebrar em vez de exigir scroll horizontal. O
-            // editor principal (query) continua sem wrap — comportamento de
-            // editor de código padrão.
-            wordWrap: readOnly ? 'on' : 'off',
+            wordWrap: effectiveWordWrap ? 'on' : 'off',
+            wrappingIndent: 'indent',
             fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", "JetBrains Mono", Menlo, Consolas, monospace',
             padding: {top: 8, bottom: 8},
             lineNumbersMinChars: 3,
@@ -679,6 +691,13 @@ const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({value, 
             editor.setValue(value);
         }
     }, [value]);
+
+    useEffect(() => {
+        editorRef.current?.updateOptions({
+            wordWrap: effectiveWordWrap ? 'on' : 'off',
+            wrappingIndent: 'indent',
+        });
+    }, [effectiveWordWrap]);
 
     return <div ref={containerRef} style={{height: '100%', width: '100%'}} />;
 });

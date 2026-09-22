@@ -1,10 +1,11 @@
 // Estado de conexão da aba de console + carregamento sob demanda do
 // catálogo de autocomplete. Extraído do ConsoleTab sem mudança de
 // comportamento.
-import {useRef, useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import type {RefObject} from 'react';
 import {useTranslation} from 'react-i18next';
-import {Disconnect, ListSchemas, IntrospectSchemaTables} from './tabApi';
+import {Disconnect, ListSchemas, IntrospectSchemaTables, GetCachedCatalog, WarmupCatalog} from './tabApi';
+import {EventsOn} from '../../wailsjs/runtime';
 import type {db} from '../../wailsjs/go/models';
 
 export interface CatalogConnection {
@@ -34,19 +35,55 @@ export function useConnection({tabId, onConnectedChange, setStatus, pendingQuery
     const catalogReadyRef = useRef(false);
     const catalogConnectionRef = useRef<CatalogConnection | null>(null);
 
+    // Escuta eventos assíncronos do backend Go para reatividade do catálogo
+    useEffect(() => {
+        const unsubUpdated = EventsOn('wisp:catalog-updated', async (data: any) => {
+            if (data?.tabId && data.tabId !== tabId) return;
+            try {
+                const cached = await GetCachedCatalog(tabId);
+                if (cached && cached.length > 0) {
+                    setCatalog(cached);
+                    catalogReadyRef.current = true;
+                }
+            } catch {
+                // falha silenciosa em background
+            }
+        });
+        const unsubInvalidated = EventsOn('wisp:catalog-invalidated', (data: any) => {
+            if (data?.tabId && data.tabId !== tabId) return;
+            catalogReadyRef.current = false;
+            void WarmupCatalog(tabId);
+        });
+        return () => {
+            unsubUpdated();
+            unsubInvalidated();
+        };
+    }, [tabId]);
+
     async function loadCatalog(connectionId: string, connName?: string) {
         if (catalogLoadingRef.current || catalogReadyRef.current) return;
         catalogLoadingRef.current = true;
         catalogCancelledRef.current = false;
-        // Let a query submitted immediately after connecting enter the queue first.
-        await new Promise(resolve => window.setTimeout(resolve, 150));
-        if (catalogCancelledRef.current || pendingQueryCountRef.current > 0) {
-            catalogLoadingRef.current = false;
-            return;
-        }
         try {
+            // 1. Tenta carregar instantaneamente do cache persistido local (0ms de latência)
+            const cached = await GetCachedCatalog(tabId);
+            if (cached && cached.length > 0) {
+                setCatalog(cached);
+                catalogReadyRef.current = true;
+                setStatus(connName ? t('consoleTab.connectedNamed', {name: connName}) : t('consoleTab.connected'));
+                // Atualiza/aquece em background sem travar o usuário
+                void WarmupCatalog(tabId);
+                return;
+            }
+
+            // 2. Sem cache prévio (primeira conexão), dispara warmup em background
             setStatus(prev => t('consoleTab.loadingCatalog', {status: prev}));
+            void WarmupCatalog(tabId);
+
+            // Aguarda pequeno delay para queries prioritárias entrarem na fila primeiro
+            await new Promise(resolve => window.setTimeout(resolve, 150));
             if (catalogCancelledRef.current || pendingQueryCountRef.current > 0) return;
+
             const schemas = await ListSchemas(tabId);
             const detailed: db.Table[] = [];
             for (const schema of schemas ?? []) {
@@ -66,7 +103,6 @@ export function useConnection({tabId, onConnectedChange, setStatus, pendingQuery
         } catch (err) {
             if (!catalogCancelledRef.current) {
                 console.error('erro ao carregar catálogo para autocomplete:', err);
-                setCatalog([]);
                 setStatus(connName ? t('consoleTab.connectedNamed', {name: connName}) : t('consoleTab.connected'));
             }
         } finally {

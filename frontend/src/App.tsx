@@ -266,6 +266,7 @@ function App() {
                         hidden={tab.id !== activeId}
                         onConnectedChange={connected => handleConnectedChange(tab.id, connected)}
                         onOpenTable={(connectionId, schema, table) => handleOpenTable(connectionId, schema, table)}
+                        onOpenRoutine={(kind, name, definition) => handleOpenRoutine(kind, name, definition)}
                     />
                 ) : (
                     <RoutineTab

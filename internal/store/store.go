@@ -177,10 +177,21 @@ func (s *Store) ResolveConnection(id string) (driver string, dsn string, err err
 	return driver, dsn, nil
 }
 
-// DeleteConnection removes a saved connection.
+// DeleteConnection removes a saved connection and its associated query history atomically.
 func (s *Store) DeleteConnection(id string) error {
-	_, err := s.db.Exec(`DELETE FROM connections WHERE id = ?`, id)
-	return err
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("iniciando transação para exclusão da conexão: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM query_history WHERE connection_id = ?`, id); err != nil {
+		return fmt.Errorf("excluindo histórico da conexão %q: %w", id, err)
+	}
+	if _, err := tx.Exec(`DELETE FROM connections WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("excluindo conexão %q: %w", id, err)
+	}
+	return tx.Commit()
 }
 
 // RecordQuery records an execution in query_history. An empty connectionID means the
@@ -308,18 +319,14 @@ func (s *Store) DeleteScript(id string) error {
 // packages). cacheKey is never the plaintext DSN — it is a hash calculated by the caller
 // (see schemacache.Key).
 func (s *Store) GetSchemaCacheJSON(cacheKey string) (catalogJSON string, found bool, err error) {
-	var ttlExpiresAt time.Time
 	err = s.db.QueryRow(
-		`SELECT catalog_json, ttl_expires_at FROM schema_cache WHERE cache_key = ?`, cacheKey,
-	).Scan(&catalogJSON, &ttlExpiresAt)
+		`SELECT catalog_json FROM schema_cache WHERE cache_key = ?`, cacheKey,
+	).Scan(&catalogJSON)
 	if err == sql.ErrNoRows {
 		return "", false, nil
 	}
 	if err != nil {
 		return "", false, fmt.Errorf("lendo schema cache: %w", err)
-	}
-	if time.Now().After(ttlExpiresAt) {
-		return "", false, nil
 	}
 	return catalogJSON, true, nil
 }

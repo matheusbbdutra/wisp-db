@@ -26,6 +26,8 @@ export function ExecuteBatch(arg1:string,arg2:Array<db.BatchOp>):Promise<void>;
 
 export function FetchRows(arg1:string,arg2:number):Promise<main.FetchBatch>;
 
+export function GetCachedCatalog(arg1:string):Promise<Array<db.Table>>;
+
 export function GetConnectionForEdit(arg1:string):Promise<store.SavedConnectionEdit>;
 
 export function GetQueryHistory(arg1:number):Promise<Array<store.QueryHistoryEntry>>;
@@ -47,6 +49,8 @@ export function ListIncomingForeignKeys(arg1:string,arg2:string,arg3:string):Pro
 export function ListIndexes(arg1:string,arg2:string,arg3:string):Promise<Array<db.Index>>;
 
 export function ListSavedConnections():Promise<Array<store.SavedConnection>>;
+
+export function ListSchemaObjects(arg1:string,arg2:string):Promise<db.SchemaObjects>;
 
 export function ListSchemas(arg1:string):Promise<Array<string>>;
 
@@ -75,3 +79,5 @@ export function TestConnection(arg1:string,arg2:string):Promise<void>;
 export function UpdateCell(arg1:string,arg2:string,arg3:string,arg4:Array<string>,arg5:Array<any>,arg6:string,arg7:any,arg8:any):Promise<number>;
 
 export function UpdateScript(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function WarmupCatalog(arg1:string):Promise<void>;

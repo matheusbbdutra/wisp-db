@@ -11,7 +11,6 @@ interface ConsoleToolbarProps {
     activeScriptName: string;
     showScripts: boolean;
     showHistory: boolean;
-    autoUppercase: boolean;
     onSaveNameChange: (name: string) => void;
     onConfirmSaveNew: () => void;
     onCancelSaveForm: () => void;
@@ -20,7 +19,10 @@ interface ConsoleToolbarProps {
     onToggleScripts: () => void;
     onToggleHistory: () => void;
     onFormat: () => void;
+    autoUppercase: boolean;
     onAutoUppercaseChange: (next: boolean) => void;
+    wordWrap: boolean;
+    onWordWrapChange: (next: boolean) => void;
 }
 
 export default function ConsoleToolbar({
@@ -33,6 +35,7 @@ export default function ConsoleToolbar({
     showScripts,
     showHistory,
     autoUppercase,
+    wordWrap,
     onSaveNameChange,
     onConfirmSaveNew,
     onCancelSaveForm,
@@ -42,6 +45,7 @@ export default function ConsoleToolbar({
     onToggleHistory,
     onFormat,
     onAutoUppercaseChange,
+    onWordWrapChange,
 }: ConsoleToolbarProps) {
     const {t} = useTranslation();
     return (
@@ -110,6 +114,14 @@ export default function ConsoleToolbar({
                     onChange={e => onAutoUppercaseChange(e.target.checked)}
                 />
                 {t('consoleTab.autoUppercase')}
+            </label>
+            <label className="auto-uppercase-toggle" title={t('consoleTab.wordWrapTitle', 'Quebrar linhas automaticamente no editor (Alt+Z)')}>
+                <input
+                    type="checkbox"
+                    checked={wordWrap}
+                    onChange={e => onWordWrapChange(e.target.checked)}
+                />
+                {t('consoleTab.wordWrap', 'Wrap')}
             </label>
         </div>
     );

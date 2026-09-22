@@ -612,6 +612,11 @@ func (d *MySQLDriver) ListFunctions(ctx context.Context, schema string) ([]Funct
 	return fns, nil
 }
 
+// ListSequences: MySQL has no standalone user sequences — returns empty.
+func (d *MySQLDriver) ListSequences(ctx context.Context, schema string) ([]Sequence, error) {
+	return nil, nil
+}
+
 // ListIndexes lists indexes with their covered columns (in index order) and UNIQUE flag.
 // Implementation note: SHOW INDEX FROM returns ONE ROW PER COLUMN — group by Key_name to
 // recover the multi-column index definition.

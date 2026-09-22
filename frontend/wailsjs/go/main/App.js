@@ -46,6 +46,10 @@ export function FetchRows(arg1, arg2) {
   return window['go']['main']['App']['FetchRows'](arg1, arg2);
 }
 
+export function GetCachedCatalog(arg1) {
+  return window['go']['main']['App']['GetCachedCatalog'](arg1);
+}
+
 export function GetConnectionForEdit(arg1) {
   return window['go']['main']['App']['GetConnectionForEdit'](arg1);
 }
@@ -88,6 +92,10 @@ export function ListIndexes(arg1, arg2, arg3) {
 
 export function ListSavedConnections() {
   return window['go']['main']['App']['ListSavedConnections']();
+}
+
+export function ListSchemaObjects(arg1, arg2) {
+  return window['go']['main']['App']['ListSchemaObjects'](arg1, arg2);
 }
 
 export function ListSchemas(arg1) {
@@ -144,4 +152,8 @@ export function UpdateCell(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) {
 
 export function UpdateScript(arg1, arg2, arg3) {
   return window['go']['main']['App']['UpdateScript'](arg1, arg2, arg3);
+}
+
+export function WarmupCatalog(arg1) {
+  return window['go']['main']['App']['WarmupCatalog'](arg1);
 }

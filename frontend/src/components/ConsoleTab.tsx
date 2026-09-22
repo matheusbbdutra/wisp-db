@@ -5,7 +5,13 @@ import {useTranslation} from 'react-i18next';
 import {format} from 'sql-formatter';
 import type {SqlLanguage} from 'sql-formatter';
 import type {db} from '../../wailsjs/go/models';
-import SqlEditor, {AUTO_UPPERCASE_STORAGE_KEY, readAutoUppercasePreference, type SqlEditorHandle} from './SqlEditor';
+import SqlEditor, {
+    AUTO_UPPERCASE_STORAGE_KEY,
+    readAutoUppercasePreference,
+    WORD_WRAP_STORAGE_KEY,
+    readWordWrapPreference,
+    type SqlEditorHandle,
+} from './SqlEditor';
 import ResultGrid from './ResultGrid';
 import Sidebar from './Sidebar';
 import QueryHistory from './QueryHistory';
@@ -105,6 +111,17 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
             localStorage.setItem(AUTO_UPPERCASE_STORAGE_KEY, String(next));
         } catch {
             // localStorage indisponível (ex.: modo restrito): mantém só em memória.
+        }
+    }
+
+    const [wordWrap, setWordWrap] = useState(() => readWordWrapPreference());
+
+    function handleWordWrapChange(next: boolean) {
+        setWordWrap(next);
+        try {
+            localStorage.setItem(WORD_WRAP_STORAGE_KEY, String(next));
+        } catch {
+            // localStorage indisponível
         }
     }
 
@@ -232,6 +249,7 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                 showScripts={showScripts}
                 showHistory={showHistory}
                 autoUppercase={autoUppercase}
+                wordWrap={wordWrap}
                 onSaveNameChange={scripts.setSaveNameInput}
                 onConfirmSaveNew={() => void scripts.handleConfirmSaveNew(query)}
                 onCancelSaveForm={() => scripts.setShowSaveForm(false)}
@@ -241,6 +259,7 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                 onToggleHistory={() => setShowHistory(v => !v)}
                 onFormat={handleFormatQuery}
                 onAutoUppercaseChange={handleAutoUppercaseChange}
+                onWordWrapChange={handleWordWrapChange}
             />
 
             <div className="workspace">
@@ -276,6 +295,7 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                             onCatalogNeeded={() => connection.connectionId ? connection.loadCatalog(connection.connectionId, connection.catalogConnectionRef.current?.name) : Promise.resolve()}
                             driver={connection.driver}
                             autoUppercase={autoUppercase}
+                            wordWrap={wordWrap}
                             onOpenIdentifier={handleOpenIdentifier}
                         />
                     </div>

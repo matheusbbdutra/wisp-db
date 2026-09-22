@@ -197,6 +197,8 @@
     "format": "Formatar",
     "autoUppercaseTitle": "Converter keywords SQL para maiúsculas automaticamente ao digitar",
     "autoUppercase": "Uppercase automático",
+    "wordWrapTitle": "Quebrar linhas automaticamente no editor",
+    "wordWrap": "Quebra de linha",
     "sessionIdTitle": "ID da sessão ativa",
     "expandSidebarTitle": "Expandir painel de schemas",
     "resizeTitle": "Arrastar para redimensionar",

@@ -60,15 +60,13 @@ func Key(driverName, dsn string) string {
 }
 
 // Get returns the cached catalog (memory, falling back to the persistent layer) and
-// whether it was valid (found and not expired).
+// whether it was found. With stale-while-revalidate, persisted cache is returned immediately
+// so the UI and autocomplete load without network blocking.
 func (c *Cache) Get(cacheKey string) (Catalog, bool) {
 	c.mu.Lock()
 	if e, ok := c.mem[cacheKey]; ok {
 		c.mu.Unlock()
-		if time.Now().Before(e.expiresAt) {
-			return e.catalog, true
-		}
-		return Catalog{}, false
+		return e.catalog, true
 	}
 	c.mu.Unlock()
 
@@ -89,6 +87,16 @@ func (c *Cache) Get(cacheKey string) (Catalog, bool) {
 	c.mem[cacheKey] = entry{catalog: catalog, expiresAt: time.Now().Add(c.ttl)}
 	c.mu.Unlock()
 	return catalog, true
+}
+
+// IsFresh reports whether the catalog in memory has not exceeded its TTL.
+func (c *Cache) IsFresh(cacheKey string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if e, ok := c.mem[cacheKey]; ok {
+		return time.Now().Before(e.expiresAt)
+	}
+	return false
 }
 
 // Set writes the catalog to both layers (persistence is best-effort: an error there does

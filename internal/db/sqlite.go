@@ -436,6 +436,11 @@ func (d *SQLiteDriver) ListFunctions(ctx context.Context, schema string) ([]Func
 	return nil, nil
 }
 
+// ListSequences: SQLite has no standalone user sequences — returns empty.
+func (d *SQLiteDriver) ListSequences(ctx context.Context, schema string) ([]Sequence, error) {
+	return nil, nil
+}
+
 // ListIndexes lists explicit table indexes via sqlite_master (excludes PK/UNIQUE
 // autoindexes, which already appear in TableDDL as part of CREATE TABLE itself —
 // "sqlite_autoindex_" is SQLite's internal prefix for them). Columns come from PRAGMA

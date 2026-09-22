@@ -616,6 +616,33 @@ func (d *PostgresDriver) ListFunctions(ctx context.Context, schema string) ([]Fu
 	return functions, rows.Err()
 }
 
+// ListSequences returns schema sequences via information_schema.sequences.
+func (d *PostgresDriver) ListSequences(ctx context.Context, schema string) ([]Sequence, error) {
+	if schema == "" || schema == "main" {
+		schema = "public"
+	}
+	d.closePendingCursor(ctx)
+	rows, err := d.conn.Query(ctx, `
+		SELECT sequence_name, data_type, COALESCE(start_value::bigint, 1), COALESCE(increment::bigint, 1)
+		FROM information_schema.sequences
+		WHERE sequence_schema = $1
+		ORDER BY sequence_name`, schema)
+	if err != nil {
+		return nil, fmt.Errorf("listando sequences de %q: %w", schema, err)
+	}
+	defer rows.Close()
+
+	var sequences []Sequence
+	for rows.Next() {
+		var seq Sequence
+		if err := rows.Scan(&seq.Name, &seq.DataType, &seq.StartValue, &seq.Increment); err != nil {
+			return nil, err
+		}
+		sequences = append(sequences, seq)
+	}
+	return sequences, rows.Err()
+}
+
 // ListIndexes returns table indexes via pg_index + pg_get_indexdef, excluding the
 // backing index of a PK/UNIQUE constraint (already included in TableDDL via CONSTRAINT)
 // — criteria: indisprimary always excludes, and conrelid/conindid via pg_constraint also

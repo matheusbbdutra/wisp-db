@@ -47,6 +47,10 @@ export function ListTables(tabId: string, schema: string): Promise<db.Table[]> {
     return withQueue(`${tabId}:metadata`, () => App.ListTables(tabId, schema));
 }
 
+export function ListSchemaObjects(tabId: string, schema: string): Promise<db.SchemaObjects> {
+    return withQueue(`${tabId}:metadata`, () => App.ListSchemaObjects(tabId, schema));
+}
+
 export function IntrospectTable(tabId: string, schema: string, table: string): Promise<db.Table> {
     return withQueue(`${tabId}:metadata`, () => App.IntrospectTable(tabId, schema, table));
 }
@@ -58,6 +62,18 @@ export function IntrospectTable(tabId: string, schema: string, table: string): P
 // tempo em schemas com centenas de tabelas.
 export function IntrospectSchemaTables(tabId: string, schema: string): Promise<db.Table[]> {
     return withQueue(`${tabId}:metadata`, () => App.IntrospectSchemaTables(tabId, schema));
+}
+
+// Retorna o catálogo já em cache local persistido de forma instantânea (0ms),
+// sem ida ao banco de dados externo.
+export function GetCachedCatalog(tabId: string): Promise<db.Table[]> {
+    return withQueue(`${tabId}:metadata`, () => App.GetCachedCatalog(tabId));
+}
+
+// Inicia aquecimento e atualização de metadados em background sem travar
+// a fila de queries do console.
+export function WarmupCatalog(tabId: string): Promise<void> {
+    return withQueue(`${tabId}:metadata`, () => App.WarmupCatalog(tabId));
 }
 
 export function RunQuery(tabId: string, query: string): Promise<main.QueryMetadata> {

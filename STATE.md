@@ -1,6 +1,22 @@
 # STATE — Wisp
 
-## 🚧 Em andamento (2026-09-16): drivers MySQL/MariaDB + clone de conexão
+## ✅ ADRs 0009, 0010 e 0011 — Cache Reativo, Objetos de Schema e Word Wrap — FEITO (2026-09-22)
+Implementação cirúrgica dos 3 ADRs validada com build limpo do frontend (`npm run build`) e backend (`go test -count=1 ./...`):
+1. **ADR 0009 — Cache Reativo e Ciclo de Vida**:
+   - `internal/store/store.go`: `GetSchemaCacheJSON` sem descarte por TTL (stale-while-revalidate permanente); `DeleteConnection` com transação atômica deletando `query_history` e `connections`.
+   - `internal/schemacache/cache.go`: `Get` com read-through que popula a memória a partir do SQLite persistido e método `IsFresh`.
+   - `app.go`: `DeleteSavedConnection` invalida `schema_cache` antes de remover a conexão salva (garantindo que histórico e cache só sejam apagados ao excluir a conexão); novos métodos `GetCachedCatalog` (leitura local instantânea em 0ms) e `WarmupCatalog` (introspecção assíncrona em goroutine em background emitindo `wisp:catalog-updated`); emissão de `wisp:catalog-invalidated` em queries DDL.
+   - `frontend/src/lib/useConnection.ts`: escuta eventos Wails `wisp:catalog-updated` e `wisp:catalog-invalidated`; usa `GetCachedCatalog` para autocomplete instantâneo sem bloquear a fila de queries do usuário.
+2. **ADR 0010 — Catálogo Multi-Objetos por Schema (Anti-God-File)**:
+   - `internal/db/driver.go`: structs `Sequence` e `SchemaObjects`; método `ListSequences(ctx, schema)` na interface `DatabaseDriver`.
+   - Drivers: implementado `ListSequences` em Postgres (via `information_schema.sequences`), e no-op vazio em SQLite e MySQL.
+   - `app.go`: endpoint agregado `ListSchemaObjects(tabID, schema)` que reúne tables, views, functions e sequences em um único DTO.
+   - Frontend: hook `frontend/src/lib/useSchemaObjects.ts` e subcomponente `frontend/src/components/SchemaObjectList.tsx` para exibição categorizada; `frontend/src/components/SchemaTab.tsx` refatorado para pills de contagem e busca, conectando `onOpenRoutine` para abrir definições de funções na `RoutineTab`.
+3. **ADR 0011 — Quebra de Linha Automática (Word Wrap)**:
+   - `frontend/src/components/SqlEditor.tsx`: preferência `WORD_WRAP_STORAGE_KEY` persistida em `localStorage` (default ligado); suporte a `wordWrap` configurável com `wrappingIndent: 'indent'`.
+   - `frontend/src/components/ConsoleToolbar.tsx`: toggle de Word Wrap posicionado na toolbar com i18n (`consoleTab.wordWrap` e `consoleTab.wordWrapTitle`) em PT-BR e EN.
+   - `frontend/src/components/ConsoleTab.tsx`: estado `wordWrap` conectado do toolbar ao editor.
+
 Plano em `~/.claude/plans/giggly-scribbling-tome.md`. ADR 0007 aceito
 (`docs/adr/0007-mysql-mariadb-driver.md`): `go-sql-driver/mysql` v1.10.1 puro
 Go + MPL-2.0; MariaDB via mesmo driver; cancelamento via close+reopen do

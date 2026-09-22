@@ -291,6 +291,9 @@ func (a *App) RunQuery(tabID string, query string) (*QueryMetadata, error) {
 	// expire on its own.
 	if err == nil && a.schemaCache != nil && isDDL(query) {
 		a.schemaCache.Invalidate(s.CacheKey)
+		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "wisp:catalog-invalidated", map[string]any{"tabId": tabID})
+		}
 	}
 
 	if a.store != nil {
@@ -431,6 +434,49 @@ func (a *App) ListTables(tabID string, schema string) ([]db.Table, error) {
 	return tables, nil
 }
 
+// ListSchemaObjects returns all schema objects (tables, views, functions, sequences)
+// for tabID's connection within schema, grouping them in a single DTO.
+func (a *App) ListSchemaObjects(tabID string, schema string) (*db.SchemaObjects, error) {
+	s, err := a.sessions.Get(tabID)
+	if err != nil {
+		return nil, err
+	}
+
+	mdDriver := metadataDriver(s)
+
+	allTables, err := a.ListTables(tabID, schema)
+	if err != nil {
+		return nil, err
+	}
+
+	var tables []db.Table
+	var views []db.Table
+	for _, t := range allTables {
+		if t.Kind == "view" {
+			views = append(views, t)
+		} else {
+			tables = append(tables, t)
+		}
+	}
+
+	functions, err := mdDriver.ListFunctions(s.Ctx, schema)
+	if err != nil {
+		functions = nil
+	}
+
+	sequences, err := mdDriver.ListSequences(s.Ctx, schema)
+	if err != nil {
+		sequences = nil
+	}
+
+	return &db.SchemaObjects{
+		Tables:    tables,
+		Views:     views,
+		Functions: functions,
+		Sequences: sequences,
+	}, nil
+}
+
 // IntrospectTable returns a table with Columns populated (used for column autocomplete —
 // ListTables only provides Schema/Name, see internal/db.DatabaseDriver.Introspect). It
 // checks the schema cache before querying the database and writes/updates the
@@ -536,7 +582,97 @@ func (a *App) RefreshSchema(tabID string) error {
 	}
 	if a.schemaCache != nil {
 		a.schemaCache.Invalidate(s.CacheKey)
+		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "wisp:catalog-invalidated", map[string]any{"tabId": tabID})
+		}
 	}
+	return nil
+}
+
+// GetCachedCatalog returns all currently cached detailed tables across all schemas for tabID
+// without hitting the database, allowing instant autocomplete initialization.
+func (a *App) GetCachedCatalog(tabID string) ([]db.Table, error) {
+	s, err := a.sessions.Get(tabID)
+	if err != nil {
+		return nil, err
+	}
+	if a.schemaCache == nil {
+		return nil, nil
+	}
+	catalog, ok := a.schemaCache.Get(s.CacheKey)
+	if !ok || catalog.Tables == nil {
+		return nil, nil
+	}
+	var all []db.Table
+	for _, tables := range catalog.Tables {
+		all = append(all, tables...)
+	}
+	return all, nil
+}
+
+// WarmupCatalog asynchronously warms and updates the schema cache in background,
+// emitting wisp:catalog-updated upon completion without blocking the interactive query queue.
+func (a *App) WarmupCatalog(tabID string) error {
+	s, err := a.sessions.Get(tabID)
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		mdDriver := metadataDriver(s)
+		schemas, err := mdDriver.ListSchemas(s.Ctx)
+		if err != nil {
+			return
+		}
+
+		if a.schemaCache != nil {
+			catalog, _ := a.schemaCache.Get(s.CacheKey)
+			catalog.Schemas = schemas
+			if catalog.Tables == nil {
+				catalog.Tables = make(map[string][]db.Table)
+			}
+			_ = a.schemaCache.Set(s.CacheKey, catalog)
+		}
+
+		for _, schema := range schemas {
+			// Skip introspecting if already complete in memory
+			if a.schemaCache != nil {
+				if catalog, ok := a.schemaCache.Get(s.CacheKey); ok {
+					if tables, ok := catalog.Tables[schema]; ok && len(tables) > 0 {
+						hasColumns := true
+						for _, t := range tables {
+							if len(t.Columns) == 0 {
+								hasColumns = false
+								break
+							}
+						}
+						if hasColumns {
+							continue
+						}
+					}
+				}
+			}
+
+			tables, err := mdDriver.IntrospectSchema(s.Ctx, schema)
+			if err != nil {
+				continue
+			}
+
+			if a.schemaCache != nil {
+				catalog, _ := a.schemaCache.Get(s.CacheKey)
+				if catalog.Tables == nil {
+					catalog.Tables = make(map[string][]db.Table)
+				}
+				catalog.Tables[schema] = tables
+				_ = a.schemaCache.Set(s.CacheKey, catalog)
+			}
+		}
+
+		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "wisp:catalog-updated", map[string]any{"tabId": tabID})
+		}
+	}()
+
 	return nil
 }
 
@@ -695,10 +831,15 @@ func (a *App) TestConnection(driverName string, dsn string) error {
 	return driver.Close()
 }
 
-// DeleteSavedConnection permanently removes a saved connection.
+// DeleteSavedConnection permanently removes a saved connection, its history, and its schema cache.
 func (a *App) DeleteSavedConnection(connectionID string) error {
 	if a.store == nil {
 		return fmt.Errorf("store local indisponível")
+	}
+	driver, dsn, err := a.store.ResolveConnection(connectionID)
+	if err == nil && a.schemaCache != nil {
+		cacheKey := schemacache.Key(driver, dsn)
+		a.schemaCache.Invalidate(cacheKey)
 	}
 	return a.store.DeleteConnection(connectionID)
 }

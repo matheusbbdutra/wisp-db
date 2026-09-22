@@ -135,6 +135,22 @@ type Function struct {
 	Definition string
 }
 
+// Sequence describes a database sequence.
+type Sequence struct {
+	Name       string
+	DataType   string
+	StartValue int64
+	Increment  int64
+}
+
+// SchemaObjects groups all first-class objects within a schema for unified browsing.
+type SchemaObjects struct {
+	Tables    []Table    `json:"tables"`
+	Views     []Table    `json:"views"`
+	Functions []Function `json:"functions"`
+	Sequences []Sequence `json:"sequences"`
+}
+
 // DatabaseDriver is the contract every supported dialect must implement. An instance
 // represents a single live connection, isolated by tabId in the Session Manager — never
 // shared between tabs.
@@ -231,4 +247,6 @@ type DatabaseDriver interface {
 	ListIndexes(ctx context.Context, schema, table string) ([]Index, error)
 	// ListForeignKeys lists a table's outgoing FKs, with full DDL.
 	ListForeignKeys(ctx context.Context, schema, table string) ([]ForeignKey, error)
+	// ListSequences lists schema sequences (not per table).
+	ListSequences(ctx context.Context, schema string) ([]Sequence, error)
 }

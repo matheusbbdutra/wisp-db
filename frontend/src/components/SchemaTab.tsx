@@ -1,8 +1,9 @@
 import {useEffect, useState} from 'react';
 import {useTranslation} from 'react-i18next';
-import {ConnectSaved, Disconnect, ListTables} from '../lib/tabApi';
-import type {db} from '../../wailsjs/go/models';
+import {ConnectSaved, Disconnect} from '../lib/tabApi';
 import {withQueue} from '../lib/tabCallQueue';
+import {useSchemaObjects, type SchemaCategory} from '../lib/useSchemaObjects';
+import SchemaObjectList from './SchemaObjectList';
 
 interface Props {
     tabId: string;
@@ -11,35 +12,31 @@ interface Props {
     hidden: boolean;
     onConnectedChange: (connected: boolean) => void;
     onOpenTable: (connectionId: string, schema: string, table: string) => void;
+    onOpenRoutine?: (kind: 'trigger' | 'function', name: string, definition: string) => void;
 }
 
-// Aba de schema (nível superior, irmã do Console/TableTab): tem tabId e
-// conexão PRÓPRIOS — reconecta no mount via ConnectSaved com o mesmo
-// connectionId salvo da origem, nunca reusa a sessão do console (ver
-// CLAUDE.md: 1 tabId = 1 conexão dedicada). Disconnect centralizado em
-// App.tsx. Lista simples, sem sub-abas: cada linha abre a TableTab daquela
-// tabela via onOpenTable (App.tsx cuida de criar a aba).
-export default function SchemaTab({tabId, connectionId, schema, hidden, onConnectedChange, onOpenTable}: Props) {
+export default function SchemaTab({
+    tabId,
+    connectionId,
+    schema,
+    hidden,
+    onConnectedChange,
+    onOpenTable,
+    onOpenRoutine,
+}: Props) {
     const {t} = useTranslation();
     const [connected, setConnected] = useState(false);
     const [status, setStatus] = useState(() => t('schemaTab.statusConnecting'));
-    const [tables, setTables] = useState<db.Table[]>([]);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
         let cancelled = false;
         async function init() {
-            // Chave `${tabId}:mount` (não tabId puro) pra não colidir com a
-            // fila geral de bindings da aba (lib/tabApi.ts) — ver comentário
-            // completo em TableTab.tsx.
             await withQueue(`${tabId}:mount`, async () => {
                 try {
                     await ConnectSaved(tabId, connectionId);
                 } catch (err) {
                     if (cancelled) return;
                     setStatus(t('schemaTab.statusError', {error: String(err)}));
-                    setError(String(err));
                     return;
                 }
                 if (cancelled) {
@@ -49,17 +46,6 @@ export default function SchemaTab({tabId, connectionId, schema, hidden, onConnec
                 setConnected(true);
                 onConnectedChange(true);
                 setStatus(t('schemaTab.statusConnected', {schema}));
-                setLoading(true);
-                try {
-                    const result = await ListTables(tabId, schema);
-                    if (cancelled) return;
-                    setTables(result ?? []);
-                } catch (err) {
-                    if (cancelled) return;
-                    setError(String(err));
-                } finally {
-                    if (!cancelled) setLoading(false);
-                }
             });
         }
         void init();
@@ -69,48 +55,82 @@ export default function SchemaTab({tabId, connectionId, schema, hidden, onConnec
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    const {
+        activeCategory,
+        setActiveCategory,
+        loading,
+        error,
+        search,
+        setSearch,
+        counts,
+        filteredTables,
+        filteredViews,
+        filteredFunctions,
+        filteredSequences,
+    } = useSchemaObjects({tabId, schema, connected});
+
     const isError = status.toLowerCase().startsWith('erro');
+
+    const categories: {key: SchemaCategory; label: string; count: number}[] = [
+        {key: 'tables', label: t('schemaTab.tables', 'Tabelas'), count: counts.tables},
+        {key: 'views', label: t('schemaTab.views', 'Views'), count: counts.views},
+        {key: 'functions', label: t('schemaTab.functions', 'Funções'), count: counts.functions},
+        {key: 'sequences', label: t('schemaTab.sequences', 'Sequences'), count: counts.sequences},
+    ];
 
     return (
         <div className="table-tab" hidden={hidden}>
-            <div className="toolbar-secondary">
-                <span className="table-tab-title" title={t('schemaTab.title', {schema})}>{schema}</span>
-                <div className="status-badge" title={t('schemaTab.statusTitle')}>
-                    <span className={`status-dot ${connected ? 'connected' : isError ? 'error' : ''}`} />
-                    <span>{status}</span>
+            <div className="toolbar-secondary" style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12}}>
+                <div style={{display: 'flex', alignItems: 'center', gap: 12}}>
+                    <span className="table-tab-title" title={t('schemaTab.title', {schema})}>{schema}</span>
+                    <div className="status-badge" title={t('schemaTab.statusTitle')}>
+                        <span className={`status-dot ${connected ? 'connected' : isError ? 'error' : ''}`} />
+                        <span>{status}</span>
+                    </div>
                 </div>
+
+                <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
+                    <input
+                        type="text"
+                        className="sidebar-search-input"
+                        style={{width: 180, height: 24, fontSize: '11.5px'}}
+                        placeholder={t('schemaTab.filterPlaceholder', 'Filtrar objetos...')}
+                        value={search}
+                        onChange={e => setSearch(e.target.value)}
+                    />
+                </div>
+            </div>
+
+            <div style={{display: 'flex', gap: 6, padding: '8px 12px', background: 'var(--bg-panel)', borderBottom: '1px solid var(--border-default)'}}>
+                {categories.map(cat => (
+                    <button
+                        key={cat.key}
+                        type="button"
+                        className={`result-tab-pill ${activeCategory === cat.key ? 'active' : ''}`}
+                        onClick={() => setActiveCategory(cat.key)}
+                        style={{display: 'inline-flex', alignItems: 'center', gap: 6}}
+                    >
+                        <span>{cat.label}</span>
+                        <span style={{opacity: 0.6, fontSize: '10.5px'}}>({cat.count})</span>
+                    </button>
+                ))}
             </div>
 
             <div className="table-meta-pane">
                 {loading && <div className="meta-empty">{t('schemaTab.loading')}</div>}
                 {error && <div className="meta-empty">{t('schemaTab.loadError', {error})}</div>}
-                {!loading && !error && tables.length === 0 && (
-                    <div className="meta-empty">{t('schemaTab.empty')}</div>
-                )}
-                {!loading && !error && tables.length > 0 && (
-                    <div className="meta-list">
-                        {tables.map(table => (
-                            <div
-                                key={table.Name}
-                                className="meta-item"
-                                role="button"
-                                tabIndex={0}
-                                title={t('schemaTab.openTitle', {schema, table: table.Name})}
-                                onClick={() => onOpenTable(connectionId, schema, table.Name)}
-                                onKeyDown={e => {
-                                    if (e.key === 'Enter' || e.key === ' ') {
-                                        e.preventDefault();
-                                        onOpenTable(connectionId, schema, table.Name);
-                                    }
-                                }}
-                            >
-                                <div className="meta-name">
-                                    {table.Name}
-                                    {table.Kind === 'view' && <span className="tree-leaf-badge" title={t('schemaTab.view')}> {t('schemaTab.viewLabel')}</span>}
-                                </div>
-                            </div>
-                        ))}
-                    </div>
+                {!loading && !error && (
+                    <SchemaObjectList
+                        category={activeCategory}
+                        schema={schema}
+                        connectionId={connectionId}
+                        tables={filteredTables}
+                        views={filteredViews}
+                        functions={filteredFunctions}
+                        sequences={filteredSequences}
+                        onOpenTable={onOpenTable}
+                        onOpenRoutine={onOpenRoutine}
+                    />
                 )}
             </div>
         </div>

@@ -197,6 +197,8 @@
     "format": "Format",
     "autoUppercaseTitle": "Automatically convert SQL keywords to uppercase while typing",
     "autoUppercase": "Auto uppercase",
+    "wordWrapTitle": "Automatically wrap lines in the editor",
+    "wordWrap": "Word wrap",
     "sessionIdTitle": "Active session ID",
     "expandSidebarTitle": "Expand schemas panel",
     "resizeTitle": "Drag to resize",
