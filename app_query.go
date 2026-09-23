@@ -26,6 +26,11 @@ type QueryMetadata struct {
 type FetchBatch struct {
 	Rows    [][]any
 	HasMore bool
+	// Truncated is true when the cumulative row count for the current cursor has
+	// hit the session's MaxRows cap (ADR 0023). HasMore is also false in this case,
+	// and the underlying driver cursor has been closed so no more "Load more" is
+	// possible — the user sees a "Resultado truncado em N linhas" banner instead.
+	Truncated bool
 }
 
 // RunQuery starts executing a query on tab tabId's connection in streaming mode — only
@@ -89,14 +94,60 @@ func (a *App) RunQuery(tabID string, query string) (*QueryMetadata, error) {
 // RunQuery. hasMore=false means the result is exhausted — at that point (or on an error
 // during fetching), the history recorded by RunQuery is updated with the actual total
 // number of rows fetched.
+//
+// ADR 0023: when the cumulative FetchedRowCount for this cursor reaches the session's
+// MaxRows cap, the function returns Truncated=true (with HasMore=false and Rows=nil),
+// closes the underlying driver cursor (to release server-side resources), and records
+// the actual row count in history. The frontend surfaces this as a "Resultado
+// truncado em N linhas" banner.
 func (a *App) FetchRows(tabID string, batchSize int) (*FetchBatch, error) {
 	s, err := a.sessions.Get(tabID)
 	if err != nil {
 		return nil, err
 	}
 
-	rows, hasMore, err := s.Driver.FetchNext(s.QueryCtx, batchSize)
+	// Cap check BEFORE calling the driver: avoid wasting a round-trip on rows we will
+	// discard. A cap <= 0 means "no cap" (defensive — defaults applied in connect).
+	if s.MaxRows > 0 && s.FetchedRowCount >= s.MaxRows {
+		_ = s.Driver.CloseCursor()
+		if a.store != nil && s.PendingHistoryID != 0 {
+			_ = a.store.FinishQuery(s.PendingHistoryID, "ok", s.FetchedRowCount)
+			s.PendingHistoryID = 0
+		}
+		return &FetchBatch{HasMore: false, Truncated: true}, nil
+	}
+
+	// Compute the per-call request size: if asking for more than the remaining budget,
+	// trim it so the driver itself never sees an over-budget fetch. Defense-in-depth:
+	// the post-fetch check below also enforces the cap, but trimming avoids pulling
+	// rows we're going to throw away.
+	remaining := batchSize
+	if s.MaxRows > 0 {
+		left := s.MaxRows - s.FetchedRowCount
+		if left < remaining {
+			remaining = left
+		}
+	}
+
+	rows, hasMore, err := s.Driver.FetchNext(s.QueryCtx, remaining)
 	s.FetchedRowCount += len(rows)
+
+	// Post-fetch enforcement: a driver that returned more than `remaining` (which
+	// should not happen, but defend against it) gets clipped and marked truncated.
+	truncated := false
+	if s.MaxRows > 0 && s.FetchedRowCount >= s.MaxRows {
+		keep := s.MaxRows - (s.FetchedRowCount - len(rows))
+		if keep < 0 {
+			keep = 0
+		}
+		if keep < len(rows) {
+			rows = rows[:keep]
+			s.FetchedRowCount = s.MaxRows
+			hasMore = false
+			truncated = true
+			_ = s.Driver.CloseCursor()
+		}
+	}
 
 	if a.store != nil && s.PendingHistoryID != 0 {
 		if err != nil {
@@ -111,7 +162,7 @@ func (a *App) FetchRows(tabID string, batchSize int) (*FetchBatch, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &FetchBatch{Rows: rows, HasMore: hasMore}, nil
+	return &FetchBatch{Rows: rows, HasMore: hasMore, Truncated: truncated}, nil
 }
 
 // isDDL detects whether a query changes the schema (CREATE/ALTER/DROP) from its first

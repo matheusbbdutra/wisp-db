@@ -201,3 +201,58 @@ func TestSessionMetadataAndDialect(t *testing.T) {
 		t.Fatalf("expected version SQLite 3.45.1, got %s", updated.ServerVersion)
 	}
 }
+
+// TestStartQueryDerivesTimeout covers ADR 0023: when QueryTimeout > 0, StartQuery
+// must derive QueryCtx with context.WithTimeout (DeadlineExceeded kicks in past
+// the budget) AND it must remain a child of the session Ctx (so tab close still
+// cancels it via baseCancel). When QueryTimeout == 0, no deadline is applied.
+func TestStartQueryDerivesTimeout(t *testing.T) {
+	m := NewManager()
+	t.Cleanup(func() { _ = m.Close("tab-timeout") })
+
+	d := newTestDriver(t)
+	if _, err := m.Open("tab-timeout", d, d, "k1", ""); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	s, err := m.Get("tab-timeout")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+
+	// QueryTimeout = 0 → plain WithCancel, no deadline.
+	s.QueryTimeout = 0
+	qctx, err := m.StartQuery("tab-timeout")
+	if err != nil {
+		t.Fatalf("StartQuery (no timeout): %v", err)
+	}
+	if _, hasDeadline := qctx.Deadline(); hasDeadline {
+		t.Fatalf("expected no deadline when QueryTimeout == 0")
+	}
+
+	// QueryTimeout > 0 → deadline derived from session Ctx.
+	s.QueryTimeout = 100 * time.Millisecond
+	qctx, err = m.StartQuery("tab-timeout")
+	if err != nil {
+		t.Fatalf("StartQuery (with timeout): %v", err)
+	}
+	deadline, hasDeadline := qctx.Deadline()
+	if !hasDeadline {
+		t.Fatalf("expected deadline when QueryTimeout > 0")
+	}
+	if time.Until(deadline) > 100*time.Millisecond {
+		t.Fatalf("deadline too far in the future: %v", deadline)
+	}
+
+	// Cancel the session: the derived QueryCtx must also be canceled (still a child
+	// of s.Ctx), so explicit tab close remains effective even with the timeout.
+	if err := m.Close("tab-timeout"); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	select {
+	case <-qctx.Done():
+		// expected
+	default:
+		t.Fatalf("expected QueryCtx canceled after session close")
+	}
+}

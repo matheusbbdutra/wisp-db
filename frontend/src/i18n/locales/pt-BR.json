@@ -227,6 +227,8 @@
     "readOnlyNoEditable": "Nenhuma coluna editável em {{schema}}.{{table}} (só expressões ou colunas geradas) — grade somente leitura.",
     "okRowsLoaded": "ok — {{count}} linha(s) carregada(s){{more}}",
     "moreAvailable": ", mais disponíveis",
+    "truncatedAtMaxRows": "truncado em {{count}} linha(s) — use LIMIT para resultados menores",
+    "truncatedBanner": "Resultado truncado em {{count}} linhas (cap de proteção). Use LIMIT ou refine o WHERE para ver mais.",
     "errorFetchRows": "erro ao buscar linhas: {{error}}",
     "errorNoConnection": "erro: nenhuma conexão ativa",
     "errorRun": "erro ao executar: {{error}}",

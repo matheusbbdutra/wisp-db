@@ -1720,3 +1720,65 @@ Regras ativas: não ler .env, não criar commit, manter escopo visual mínimo.
 
 Persistência no memory-mcp bloqueada pela política de aprovação `never`;
 checkpoint preservado neste STATE.md.
+
+## ✅ Camada 3 — Testes E2E sem dep nova (2026-09-23)
+
+Expansão cirúrgica dos testes Go do binding IPC do Wisp (camada do *App*, não do
+driver), sem adicionar nenhuma dependência nova. Motivação: o conjunto atual
+(`app_query_test.go` + `app_export_test.go`) cobre fetch/truncate e export
+streaming, mas não cobre dois caminhos críticos — ciclo de vida da conexão
+salva (criptografia round-trip via vault) e edição inline com checagem
+otimista de concorrência (ADR 0004).
+
+1. **Novo arquivo `app_integration_test.go`** com dois testes:
+   - `TestAppSaveConnectionRoundTrip` — `SaveConnection` → `ListSavedConnections`
+     → `ConnectSaved`. Inclui assertion de segurança por reflexão de que o struct
+     `SavedConnection` (internal/store/store.go:65-71) expõe apenas
+     `[ID, Name, Driver, CreatedAt]` — pega regressão se alguém adicionar campo
+     com DSN por engano. Também valida que `Disconnect` em tab já fechada é
+     no-op (não retorna erro) — pega race do UI "clicar disconnect duas vezes".
+   - `TestAppUpdateCellOptimisticConcurrency` — SQLite in-memory, PK simples,
+     `UpdateCell` com `oldValue` correto (afeta 1) e com `oldValue` stale após
+     mudança concorrente (afeta 0, **sem erro**). Sanity check final confirma
+     que o row NÃO foi parcialmente atualizado (prova que a cláusula `WHERE
+     pk = ? AND coluna_antiga = ?` é real).
+   - Helper `newTestAppWithStore(t)` reaproveita o padrão já usado em
+     `internal/store/store_test.go:14-23`: `vault.NewWithKey(make([]byte, 32))`
+     (chave zero determinística, sem OS keychain) + `t.TempDir()` +
+     `store.Open(path, v)`. Sem `Wails runtime`, sem `schemaCache`, sem
+     eventos — os bindings exercitados não precisam deles.
+
+2. **Correção de baseline quebrada** — `TestFetchRowsTruncatesOnSingleOversizedBatch`
+   em `app_query_test.go` removido. O teste pressuponha que `FetchNext(n)`
+   devolveria mais que `n` linhas, mas todos os 3 drivers reais têm
+   `for len(result) < n` (sqlite.go:202, postgres.go:146, mysql.go:225) — o
+   cenário é fisicamente impossível no design atual. A cobertura equivalente
+   (atingir cap em múltiplas chamadas) já existe em `TestFetchRowsTruncatesAtMaxRows`
+   que passa. Teste introduzido em commit `a625e30` (v0.1.0-beta.17) e nunca
+   executado contra backend real — provável resíduo de refactor da ADR 0023.
+
+3. **Validação final**:
+   - `go vet ./...` — limpo.
+   - `go test -count=1 ./internal/... .` — **100% verde**, todos os pacotes
+     `ok` (db, errlog, export, session, sshtunnel, store, raiz `wisp`).
+   - Sem regressão colateral nos outros testes (`app_query_test.go` reduzido
+     de 4 para 3 testes, todos passando).
+
+4. **Fora do escopo desta leva, declarado explicitamente**:
+   - Cancelamento de query contra backend real (Postgres/MySQL) — não testado.
+   - Driver testado contra instância real via `testdata/docker-compose.yml` —
+     só SQLite in-memory. Cobertura Camada 2 fica pra quando for mexer no
+     driver de verdade.
+
+5. **Memória persistente gravada nesta sessão** (via `memory.record_event`,
+   `agent=opencode`, `kind=hypothesis_validated|decision`):
+   - `wisp-baseline-test-oversized-batch` — teste incorreto vs regressão.
+   - `pikaos-4-is-debian-sid-based` — ambiente da máquina.
+   - `wails-deps-debian-libgirepository` — pacote Debian correto.
+   - `opencode-shell-no-tty` — limitação do meu shell (sudo interativo não
+     funciona daqui; comandos precisam ser colados pelo usuário).
+   - `wisp-test-fixture-standard-pattern` — padrão reutilizável de fixture.
+   - `wisp-test-incorrect-test-removal-preference` — testes incorretos devem
+     ser deletados, não comentados.
+   - `wisp-integration-test-security-reflection-pattern` — assertion de
+     segurança via reflexão dos campos do struct exposto.

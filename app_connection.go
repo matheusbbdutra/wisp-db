@@ -93,6 +93,13 @@ func (a *App) connectWithTunnel(tabID string, driverName string, dsn string, con
 		}
 		return nil, err
 	}
+	// ADR 0023: bind guardrail defaults to the session so QueryTimeout applies on
+	// StartQuery and MaxRows applies on FetchRows. Hard-coded (no per-connection
+	// override yet) — see ADR 0023 follow-up note.
+	if s, sErr := a.sessions.Get(tabID); sErr == nil {
+		s.QueryTimeout = db.DefaultQueryTimeout
+		s.MaxRows = db.DefaultMaxRows
+	}
 	if tunnel != nil {
 		a.sessions.SetTunnel(tabID, tunnel)
 	}

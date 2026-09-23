@@ -1641,6 +1641,18 @@
     color: var(--text-muted);
 }
 
+/* ADR 0023: surfaced when the session's MaxRows cap (default 1M) is reached.
+   Visually distinct from the regular load-more bar so users notice they hit a
+   safety limit, not a normal exhaustion. */
+.truncation-banner {
+    padding: 8px 12px;
+    background: rgba(245, 158, 11, 0.15);
+    border-top: 1px solid rgba(245, 158, 11, 0.4);
+    color: #fbbf24;
+    font-size: 12px;
+    text-align: center;
+}
+
 /* --------------------------------------------------------------------------
    Abas de resultado (múltiplas execuções por console, estilo DBeaver)
    -------------------------------------------------------------------------- */

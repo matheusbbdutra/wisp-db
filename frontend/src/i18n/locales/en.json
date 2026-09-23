@@ -227,6 +227,8 @@
     "readOnlyNoEditable": "No editable columns in {{schema}}.{{table}} (only expressions or generated columns) — read-only grid.",
     "okRowsLoaded": "ok — {{count}} row(s) loaded{{more}}",
     "moreAvailable": ", more available",
+    "truncatedAtMaxRows": "truncated at {{count}} row(s) — use LIMIT for smaller results",
+    "truncatedBanner": "Result truncated at {{count}} rows (safety cap). Use LIMIT or refine the WHERE to see more.",
     "errorFetchRows": "error fetching rows: {{error}}",
     "errorNoConnection": "error: no active connection",
     "errorRun": "error running query: {{error}}",

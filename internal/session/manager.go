@@ -70,6 +70,17 @@ type Session struct {
 	PendingHistoryID int64
 	FetchedRowCount  int
 
+	// QueryTimeout bounds the lifetime of a single query's QueryCtx — applies to
+	// ExecuteStreaming + every FetchNext for that cursor (ADR 0023). Set by the App
+	// during connect from db.DefaultQueryTimeout (no per-connection override yet —
+	// deferred to a follow-up ADR that extends the SavedConnection envelope).
+	QueryTimeout time.Duration
+
+	// MaxRows caps the cumulative rows returned by one streaming query (ADR 0023).
+	// When FetchedRowCount reaches this value, FetchRows returns Truncated=true and
+	// closes the cursor. Set by the App during connect from db.DefaultMaxRows.
+	MaxRows int
+
 	baseCancel  context.CancelFunc
 	queryCancel context.CancelFunc
 }
@@ -187,6 +198,14 @@ func (m *Manager) StartQuery(tabID string) (context.Context, error) {
 		return nil, fmt.Errorf("nenhuma sessão ativa para tabId %q", tabID)
 	}
 	qctx, qcancel := context.WithCancel(s.Ctx)
+	if s.QueryTimeout > 0 {
+		// ADR 0023: bound the lifetime of every individual query — covers cases where
+		// the driver misses ctx propagation in native code paths (documented in pgx
+		// issues) and protects the server from runaway queries when the user walks
+		// away. Drivers also enforce server-side timeouts (statement_timeout /
+		// MAX_EXECUTION_TIME) as defense-in-depth.
+		qctx, qcancel = context.WithTimeout(s.Ctx, s.QueryTimeout)
+	}
 	s.QueryCtx = qctx
 	s.queryCancel = qcancel
 	return qctx, nil

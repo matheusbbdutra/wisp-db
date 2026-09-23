@@ -7,10 +7,26 @@ package db
 import (
 	"context"
 	"net"
+	"time"
 )
 
 // Dialer connects to the address on the named network with a context.
 type Dialer func(ctx context.Context, network, addr string) (net.Conn, error)
+
+// Guardrail defaults for heavy query protection (ADR 0023). Hard-coded here
+// rather than per-connection to avoid a schema migration in the connections
+// table; per-connection overrides are deferred to a follow-up ADR that adds
+// fields to the SavedConnection envelope.
+//
+// 1M rows × ~10 cols × ~50B/cell ≈ 500MB worst case — the upper bound of the
+// RAM idle target in AGENTS.md. 60s is generous for analytical queries while
+// still bounding wasted server-side work on hung queries.
+const (
+	DefaultMaxRows          = 1_000_000
+	DefaultQueryTimeout     = 60 * time.Second
+	DefaultConnMaxLifetime  = 30 * time.Minute
+	DefaultConnMaxIdleTime  = 5 * time.Minute
+)
 
 // TunneledDriver is implemented by drivers that support routing traffic through a custom dialer (e.g. SSH tunnel).
 type TunneledDriver interface {

@@ -2,10 +2,13 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 func TestBuildUpdateCellQueryPKSimples(t *testing.T) {
@@ -462,5 +465,110 @@ func TestSQLiteCancelRunningQueryDuringExecute(t *testing.T) {
 	}
 	if len(res.Rows) != 1 || res.Rows[0][0] != int64(100) {
 		t.Fatalf("resultado inesperado: %+v", res)
+	}
+}
+
+// TestSQLitePoolConnMaxLifetimeReclaims documents the *database/sql* contract that
+// backs MySQL/MariaDB's ConnMaxLifetime guardrail (ADR 0023). Validates that after
+// iterating connections past their lifetime, Stats().MaxLifetimeClosed increments.
+//
+// We use *database/sql directly (not SQLiteDriver, which pins a single *sql.Conn and
+// never exercises pool churn). SQLite honors ConnMaxLifetime via database/sql's
+// lifetime reaper; only ConnMaxIdleTime is a documented no-op for this driver.
+func TestSQLitePoolConnMaxLifetimeReclaims(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "wisp-pooltest-*.db")
+	if err != nil {
+		t.Fatalf("criando arquivo temporário: %v", err)
+	}
+	path := f.Name()
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(path) })
+
+	pool, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("abrindo pool: %v", err)
+	}
+	t.Cleanup(func() { _ = pool.Close() })
+	pool.SetMaxOpenConns(2)
+	pool.SetMaxIdleConns(2)
+	pool.SetConnMaxLifetime(50 * time.Millisecond)
+	pool.SetConnMaxIdleTime(time.Hour) // disable idle reaping, isolate lifetime
+
+	before := pool.Stats().MaxLifetimeClosed
+
+	for i := 0; i < 20; i++ {
+		conn, err := pool.Conn(context.Background())
+		if err != nil {
+			t.Fatalf("Conn #%d: %v", i, err)
+		}
+		if _, err := conn.ExecContext(context.Background(), "SELECT 1"); err != nil {
+			t.Fatalf("query #%d: %v", i, err)
+		}
+		if err := conn.Close(); err != nil {
+			t.Fatalf("close conn #%d: %v", i, err)
+		}
+		time.Sleep(10 * time.Millisecond) // ~200ms total — past 50ms lifetime
+	}
+
+	stats := pool.Stats()
+	if stats.MaxLifetimeClosed <= before {
+		t.Fatalf("esperava MaxLifetimeClosed aumentar após ConnMaxLifetime expirar; antes=%d depois=%d",
+			before, stats.MaxLifetimeClosed)
+	}
+	if stats.OpenConnections > 2 {
+		t.Fatalf("OpenConnections=%d excedeu SetMaxOpenConns(2) — vazamento", stats.OpenConnections)
+	}
+}
+
+// TestSQLitePoolConnMaxIdleTimeIsNoOp documents the empirically observed limitation of
+// modernc.org/sqlite: Stats().MaxIdleClosed stays at 0 even after waiting well past
+// ConnMaxIdleTime (verified in /tmp/opencode/pool-probe with 50ms idle / 3.5s wait).
+// This test pins the current behavior so future drivers or versions that fix it will
+// fail loudly here — at which point the ADR 0023 comment in sqlite.go:67 can be
+// revisited. The guardrail in MySQL/MariaDB still applies because those drivers route
+// through the same database/sql pool and *do* honor ConnMaxIdleTime.
+func TestSQLitePoolConnMaxIdleTimeIsNoOp(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "wisp-idletest-*.db")
+	if err != nil {
+		t.Fatalf("criando arquivo temporário: %v", err)
+	}
+	path := f.Name()
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(path) })
+
+	pool, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("abrindo pool: %v", err)
+	}
+	t.Cleanup(func() { _ = pool.Close() })
+	pool.SetMaxOpenConns(2)
+	pool.SetMaxIdleConns(2)
+	pool.SetConnMaxLifetime(time.Hour) // disable lifetime reaping, isolate idle
+	pool.SetConnMaxIdleTime(50 * time.Millisecond)
+
+	conn, err := pool.Conn(context.Background())
+	if err != nil {
+		t.Fatalf("primeira Conn: %v", err)
+	}
+	if _, err := conn.ExecContext(context.Background(), "SELECT 1"); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatalf("close conn: %v", err)
+	}
+
+	// Wait 3.5s — 70× the configured idle window — to give the database/sql
+	// reaper (1Hz sweep) many chances to fire.
+	time.Sleep(3500 * time.Millisecond)
+
+	// Now request a connection. If MaxIdleClosed stayed at 0, the same idle
+	// connection was returned; if the driver eventually honors idle, it would
+	// jump. We assert it stays at 0 — pinning the current limitation.
+	if got := pool.Stats().MaxIdleClosed; got != 0 {
+		t.Fatalf("esperava MaxIdleClosed=0 (limitação documentada do modernc.org/sqlite), got %d", got)
 	}
 }

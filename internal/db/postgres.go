@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -54,6 +55,14 @@ func (d *PostgresDriver) Connect(ctx context.Context, dsn string) error {
 	conn, err := pgx.ConnectConfig(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("conectando ao postgres: %w", err)
+	}
+	// ADR 0023: server-side statement_timeout (defense-in-depth for native code paths
+	// where Go ctx propagation is missed). Configured once per connection via SET
+	// LOCAL-free SET — session-scoped, so it survives until the connection closes.
+	// Postgres SET accepts a duration string ('60s', '60000ms').
+	if _, err := conn.Exec(ctx, fmt.Sprintf("SET statement_timeout = %d", int(DefaultQueryTimeout/time.Millisecond))); err != nil {
+		_ = conn.Close(context.Background())
+		return fmt.Errorf("configurando statement_timeout: %w", err)
 	}
 	d.conn = conn
 	return nil

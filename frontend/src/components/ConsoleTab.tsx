@@ -435,6 +435,11 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                             <span className="load-more-hint">{t('consoleTab.loadMoreHint')}</span>
                         </div>
                     )}
+                    {execution.activeResult?.truncated && (
+                        <div className="truncation-banner" role="status">
+                            {t('consoleTab.truncatedBanner', {count: execution.activeResult.rows.length})}
+                        </div>
+                    )}
                 </main>
 
                 {showScripts && (

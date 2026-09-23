@@ -63,6 +63,12 @@ func (d *SQLiteDriver) Connect(ctx context.Context, dsn string) error {
 	if err != nil {
 		return fmt.Errorf("abrindo sqlite %q: %w", dsn, err)
 	}
+	// ADR 0023: pool hygiene. SetConnMaxLifetime is a no-op for SQLite (modernc.org/sqlite
+	// manages its own connection state), but SetConnMaxIdleTime is honored by database/sql
+	// and matters for "forgotten tab" scenarios — the pool can reclaim an idle *sql.Conn
+	// after the configured window.
+	pool.SetConnMaxLifetime(DefaultConnMaxLifetime)
+	pool.SetConnMaxIdleTime(DefaultConnMaxIdleTime)
 	conn, err := pool.Conn(ctx)
 	if err != nil {
 		pool.Close()

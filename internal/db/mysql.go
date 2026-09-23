@@ -111,6 +111,13 @@ func (d *MySQLDriver) Connect(ctx context.Context, dsn string) error {
 		}
 		return fmt.Errorf("abrindo pool mysql: %w", err)
 	}
+	// ADR 0023: pool hygiene — recycle connections that sit idle too long or have
+	// been alive past the lifetime limit (covers VPN reconnects, DHCP renewals, NAT
+	// timeouts). SetConnMaxIdleTime=0 is a no-op for database/sql (Go stdlib applies
+	// it correctly); SetConnMaxLifetime=0 means no expiry, so non-zero values are
+	// mandatory here.
+	dataPool.SetConnMaxLifetime(DefaultConnMaxLifetime)
+	dataPool.SetConnMaxIdleTime(DefaultConnMaxIdleTime)
 	dataConn, err := dataPool.Conn(ctx)
 	if err != nil {
 		dataPool.Close()
@@ -119,6 +126,19 @@ func (d *MySQLDriver) Connect(ctx context.Context, dsn string) error {
 			d.customNet = ""
 		}
 		return fmt.Errorf("obtendo conexão mysql: %w", err)
+	}
+	// ADR 0023: server-side execution timeout (MySQL 5.7.8+ / MariaDB 10.1.1+).
+	// Defense-in-depth: native driver calls occasionally miss ctx propagation in
+	// blocking code paths, so the server enforces the budget independently.
+	if _, err := dataConn.ExecContext(ctx,
+		fmt.Sprintf("SET SESSION MAX_EXECUTION_TIME = %d", int(DefaultQueryTimeout/time.Millisecond))); err != nil {
+		_ = dataConn.Close()
+		dataPool.Close()
+		if d.customNet != "" {
+			mysql.DeregisterDialContext(d.customNet)
+			d.customNet = ""
+		}
+		return fmt.Errorf("configurando MAX_EXECUTION_TIME: %w", err)
 	}
 	d.dataDB = dataPool
 	d.dataConn = dataConn

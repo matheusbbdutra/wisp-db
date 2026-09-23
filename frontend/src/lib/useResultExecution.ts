@@ -39,6 +39,10 @@ export interface ResultTabState {
     columns: string[];
     rows: any[][];
     hasMore: boolean;
+    // ADR 0023: true when the cumulative row count hit the session's MaxRows cap
+    // (default 1M). hasMore is also false in this case; the user sees a truncation
+    // banner instead of the "Load more" button.
+    truncated: boolean;
     fetching: boolean;
     durationMs: number | null;
     errorMsg: string | null;
@@ -189,13 +193,23 @@ export function useResultExecution({tabId, batchSize, driver, catalog, setStatus
         try {
             const batch = await FetchRows(tabId, batchSize);
             const combined = replace ? (batch.Rows ?? []) : [...currentRows, ...(batch.Rows ?? [])];
-            updateResultTab(id, tab => ({...tab, rows: combined, hasMore: batch.HasMore, fetching: false}));
-            setStatus(t('consoleTab.okRowsLoaded', {count: combined.length, more: batch.HasMore ? t('consoleTab.moreAvailable') : ''}));
-            return {rows: combined, hasMore: batch.HasMore};
+            updateResultTab(id, tab => ({
+                ...tab,
+                rows: combined,
+                hasMore: batch.HasMore,
+                truncated: batch.Truncated || tab.truncated,
+                fetching: false,
+            }));
+            if (batch.Truncated) {
+                setStatus(t('consoleTab.truncatedAtMaxRows', {count: combined.length}));
+            } else {
+                setStatus(t('consoleTab.okRowsLoaded', {count: combined.length, more: batch.HasMore ? t('consoleTab.moreAvailable') : ''}));
+            }
+            return {rows: combined, hasMore: batch.HasMore, truncated: batch.Truncated};
         } catch (err) {
             updateResultTab(id, tab => ({...tab, fetching: false}));
             setStatus(t('consoleTab.errorFetchRows', {error: err}));
-            return {rows: currentRows, hasMore: false};
+            return {rows: currentRows, hasMore: false, truncated: false};
         }
     }
 
@@ -228,6 +242,7 @@ export function useResultExecution({tabId, batchSize, driver, catalog, setStatus
             columns: [],
             rows: [],
             hasMore: false,
+            truncated: false,
             fetching: false,
             durationMs: null,
             errorMsg: null,
@@ -381,6 +396,7 @@ export function useResultExecution({tabId, batchSize, driver, catalog, setStatus
                             columns: [],
                             rows: [],
                             hasMore: false,
+                            truncated: false,
                             fetching: false,
                             durationMs: null,
                             errorMsg: String(err),
@@ -417,6 +433,7 @@ export function useResultExecution({tabId, batchSize, driver, catalog, setStatus
                             columns: resultColumns,
                             rows: [],
                             hasMore: false,
+                            truncated: false,
                             fetching: false,
                             durationMs: meta.DurationMs ?? null,
                             errorMsg: null,
