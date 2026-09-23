@@ -1,5 +1,5 @@
 export namespace db {
-	
+
 	export class BatchOp {
 	    Kind: string;
 	    Schema: string;
@@ -8,11 +8,11 @@ export namespace db {
 	    Values: any[];
 	    PKColumns: string[];
 	    PKValues: any[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new BatchOp(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Kind = source["Kind"];
@@ -30,11 +30,11 @@ export namespace db {
 	    IsPrimaryKey: boolean;
 	    IsGenerated: boolean;
 	    Nullable: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Column(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Name = source["Name"];
@@ -51,11 +51,11 @@ export namespace db {
 	    RefTable: string;
 	    RefColumns: string[];
 	    Definition: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ForeignKey(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Name = source["Name"];
@@ -69,11 +69,11 @@ export namespace db {
 	export class Function {
 	    Name: string;
 	    Definition: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Function(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Name = source["Name"];
@@ -87,11 +87,11 @@ export namespace db {
 	    FromColumns: string[];
 	    ToColumns: string[];
 	    OnDelete: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new IncomingForeignKey(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Name = source["Name"];
@@ -107,11 +107,11 @@ export namespace db {
 	    Columns: string[];
 	    Unique: boolean;
 	    Definition: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Index(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Name = source["Name"];
@@ -125,11 +125,11 @@ export namespace db {
 	    DataType: string;
 	    StartValue: number;
 	    Increment: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Sequence(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Name = source["Name"];
@@ -143,11 +143,11 @@ export namespace db {
 	    Name: string;
 	    Columns: Column[];
 	    Kind: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Table(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Schema = source["Schema"];
@@ -155,7 +155,7 @@ export namespace db {
 	        this.Columns = this.convertValues(source["Columns"], Column);
 	        this.Kind = source["Kind"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -179,11 +179,11 @@ export namespace db {
 	    views: Table[];
 	    functions: Function[];
 	    sequences: Sequence[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new SchemaObjects(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.tables = this.convertValues(source["tables"], Table);
@@ -191,7 +191,7 @@ export namespace db {
 	        this.functions = this.convertValues(source["functions"], Function);
 	        this.sequences = this.convertValues(source["sequences"], Sequence);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -210,16 +210,16 @@ export namespace db {
 		    return a;
 		}
 	}
-	
-	
+
+
 	export class Trigger {
 	    Name: string;
 	    Definition: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Trigger(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Name = source["Name"];
@@ -230,30 +230,102 @@ export namespace db {
 }
 
 export namespace main {
-	
+
+	export class ExportOptions {
+	    tabId: string;
+	    query?: string;
+	    schema?: string;
+	    table?: string;
+	    filePath: string;
+	    format: string;
+	    batchSize?: number;
+
+	    static createFrom(source: any = {}) {
+	        return new ExportOptions(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.tabId = source["tabId"];
+	        this.query = source["query"];
+	        this.schema = source["schema"];
+	        this.table = source["table"];
+	        this.filePath = source["filePath"];
+	        this.format = source["format"];
+	        this.batchSize = source["batchSize"];
+	    }
+	}
+	export class ExportResult {
+	    totalRows: number;
+	    durationMs: number;
+	    fileSizeBytes: number;
+
+	    static createFrom(source: any = {}) {
+	        return new ExportResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.totalRows = source["totalRows"];
+	        this.durationMs = source["durationMs"];
+	        this.fileSizeBytes = source["fileSizeBytes"];
+	    }
+	}
 	export class FetchBatch {
 	    Rows: any[][];
 	    HasMore: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new FetchBatch(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Rows = source["Rows"];
 	        this.HasMore = source["HasMore"];
 	    }
 	}
+	export class HistoryPage {
+	    entries: store.QueryHistoryEntry[];
+	    totalCount: number;
+
+	    static createFrom(source: any = {}) {
+	        return new HistoryPage(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.entries = this.convertValues(source["entries"], store.QueryHistoryEntry);
+	        this.totalCount = source["totalCount"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class QueryMetadata {
 	    Columns: string[];
 	    Types: string[];
 	    DurationMs: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new QueryMetadata(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Columns = source["Columns"];
@@ -261,16 +333,34 @@ export namespace main {
 	        this.DurationMs = source["DurationMs"];
 	    }
 	}
+	export class SessionMetadata {
+	    tabId: string;
+	    driver: string;
+	    dialect: string;
+	    serverVersion: string;
+
+	    static createFrom(source: any = {}) {
+	        return new SessionMetadata(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.tabId = source["tabId"];
+	        this.driver = source["driver"];
+	        this.dialect = source["dialect"];
+	        this.serverVersion = source["serverVersion"];
+	    }
+	}
 	export class UpdateInfo {
 	    CurrentVersion: string;
 	    LatestVersion: string;
 	    HTMLURL: string;
 	    HasUpdate: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new UpdateInfo(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.CurrentVersion = source["CurrentVersion"];
@@ -282,8 +372,39 @@ export namespace main {
 
 }
 
+export namespace sshtunnel {
+
+	export class SSHConfig {
+	    enabled: boolean;
+	    host: string;
+	    port: number;
+	    user: string;
+	    authMethod: string;
+	    password?: string;
+	    keyPath?: string;
+	    keyPassphrase?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new SSHConfig(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.host = source["host"];
+	        this.port = source["port"];
+	        this.user = source["user"];
+	        this.authMethod = source["authMethod"];
+	        this.password = source["password"];
+	        this.keyPath = source["keyPath"];
+	        this.keyPassphrase = source["keyPassphrase"];
+	    }
+	}
+
+}
+
 export namespace store {
-	
+
 	export class QueryHistoryEntry {
 	    ID: number;
 	    ConnectionID: string;
@@ -294,11 +415,11 @@ export namespace store {
 	    RowCount: number;
 	    // Go type: time
 	    ExecutedAt: any;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new QueryHistoryEntry(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -310,7 +431,7 @@ export namespace store {
 	        this.RowCount = source["RowCount"];
 	        this.ExecutedAt = this.convertValues(source["ExecutedAt"], null);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -335,11 +456,11 @@ export namespace store {
 	    Driver: string;
 	    // Go type: time
 	    CreatedAt: any;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new SavedConnection(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -347,7 +468,7 @@ export namespace store {
 	        this.Driver = source["Driver"];
 	        this.CreatedAt = this.convertValues(source["CreatedAt"], null);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -367,18 +488,38 @@ export namespace store {
 		}
 	}
 	export class SavedConnectionEdit {
-	    Driver: string;
-	    DSN: string;
-	
+	    driver: string;
+	    dsn: string;
+	    ssh?: sshtunnel.SSHConfig;
+
 	    static createFrom(source: any = {}) {
 	        return new SavedConnectionEdit(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.Driver = source["Driver"];
-	        this.DSN = source["DSN"];
+	        this.driver = source["driver"];
+	        this.dsn = source["dsn"];
+	        this.ssh = this.convertValues(source["ssh"], sshtunnel.SSHConfig);
 	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class SavedScript {
 	    ID: string;
@@ -388,11 +529,11 @@ export namespace store {
 	    CreatedAt: any;
 	    // Go type: time
 	    UpdatedAt: any;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new SavedScript(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -401,7 +542,7 @@ export namespace store {
 	        this.CreatedAt = this.convertValues(source["CreatedAt"], null);
 	        this.UpdatedAt = this.convertValues(source["UpdatedAt"], null);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;

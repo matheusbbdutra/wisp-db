@@ -1,8 +1,18 @@
 import {useState, useEffect} from 'react';
 import {useTranslation} from 'react-i18next';
-import {SaveConnection, DeleteSavedConnection, GetConnectionForEdit, PickSQLiteFile, ListSavedConnections, TestConnection} from '../../wailsjs/go/main/App';
+import {
+    SaveConnection,
+    SaveConnectionWithSSH,
+    DeleteSavedConnection,
+    GetConnectionForEdit,
+    PickSQLiteFile,
+    PickSSHKeyFile,
+    ListSavedConnections,
+    TestConnection,
+    TestConnectionWithSSH,
+} from '../../wailsjs/go/main/App';
 import {ConnectSaved} from '../lib/tabApi';
-import type {store} from '../../wailsjs/go/models';
+import type {store, sshtunnel} from '../../wailsjs/go/models';
 
 type DriverKind = 'sqlite' | 'postgres' | 'mysql' | 'mariadb';
 
@@ -61,6 +71,16 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
     // false, preferred, required, skip-verify.
     const [mysqlSslMode, setMysqlSslMode] = useState('preferred');
 
+    // SSH Tunnel states (Bastion host)
+    const [sshEnabled, setSshEnabled] = useState(false);
+    const [sshHost, setSshHost] = useState('');
+    const [sshPort, setSshPort] = useState('22');
+    const [sshUser, setSshUser] = useState('');
+    const [sshAuthMethod, setSshAuthMethod] = useState<'key_file' | 'password' | 'agent'>('key_file');
+    const [sshPassword, setSshPassword] = useState('');
+    const [sshKeyPath, setSshKeyPath] = useState('');
+    const [sshKeyPassphrase, setSshKeyPassphrase] = useState('');
+
     const [savedList, setSavedList] = useState<store.SavedConnection[]>([]);
     const [error, setError] = useState('');
     const [saving, setSaving] = useState(false);
@@ -86,9 +106,21 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
             try {
                 const edit = await GetConnectionForEdit(cloneSourceId);
                 if (cancelled) return;
-                setDriver(edit.Driver as DriverKind);
-                setRawDsn(edit.DSN);
+                setDriver(edit.driver as DriverKind);
+                setRawDsn(edit.dsn);
                 setRawDsnMode(true);
+                if (edit.ssh && edit.ssh.enabled) {
+                    setSshEnabled(true);
+                    setSshHost(edit.ssh.host || '');
+                    setSshPort(String(edit.ssh.port || 22));
+                    setSshUser(edit.ssh.user || '');
+                    setSshAuthMethod((edit.ssh.authMethod as any) || 'key_file');
+                    setSshPassword(edit.ssh.password || '');
+                    setSshKeyPath(edit.ssh.keyPath || '');
+                    setSshKeyPassphrase(edit.ssh.keyPassphrase || '');
+                } else {
+                    setSshEnabled(false);
+                }
                 // Sugere nome como "<original> (cópia)" — usado como placeholder
                 // visível, o usuário digita o nome final ao salvar.
                 const src = savedList.find(c => c.ID === cloneSourceId);
@@ -191,6 +223,79 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
         return {driver: 'postgres', dsn};
     }
 
+    async function handlePickSSHKeyFile() {
+        try {
+            setError('');
+            const selected = await PickSSHKeyFile();
+            if (selected) {
+                setSshKeyPath(selected);
+            }
+        } catch (err) {
+            setError(t('connectionModal.pickKeyError', {error: String(err)}));
+        }
+    }
+
+    function buildSshConfig(): sshtunnel.SSHConfig | null {
+        if (!sshEnabled || driver === 'sqlite') {
+            return {
+                enabled: false,
+                host: '',
+                port: 22,
+                user: '',
+                authMethod: 'password',
+            } as sshtunnel.SSHConfig;
+        }
+
+        const host = sshHost.trim();
+        if (!host) {
+            setError(t('connectionModal.errorSshHost'));
+            return null;
+        }
+        const user = sshUser.trim();
+        if (!user) {
+            setError(t('connectionModal.errorSshUser'));
+            return null;
+        }
+        const port = parseInt(sshPort, 10) || 22;
+
+        if (sshAuthMethod === 'key_file') {
+            const keyPath = sshKeyPath.trim();
+            if (!keyPath) {
+                setError(t('connectionModal.errorSshKeyPath'));
+                return null;
+            }
+            return {
+                enabled: true,
+                host,
+                port,
+                user,
+                authMethod: 'key_file',
+                keyPath,
+                keyPassphrase: sshKeyPassphrase,
+            } as sshtunnel.SSHConfig;
+        }
+
+        if (sshAuthMethod === 'agent') {
+            return {
+                enabled: true,
+                host,
+                port,
+                user,
+                authMethod: 'agent',
+            } as sshtunnel.SSHConfig;
+        }
+
+        // password
+        return {
+            enabled: true,
+            host,
+            port,
+            user,
+            authMethod: 'password',
+            password: sshPassword,
+        } as sshtunnel.SSHConfig;
+    }
+
     // Testa a conexão sem persistir nada — só abre e fecha. Existe pra dar
     // confiança antes de salvar (evita salvar uma conexão com erro de
     // digitação, ex. nome de banco errado).
@@ -200,9 +305,12 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
         const built = buildDsn();
         if (!built) return;
 
+        const sshCfg = buildSshConfig();
+        if (!sshCfg) return;
+
         setTesting(true);
         try {
-            await TestConnection(built.driver, built.dsn);
+            await TestConnectionWithSSH(built.driver, built.dsn, sshCfg);
             setTestResult({ok: true, message: t('connectionModal.testSuccess')});
         } catch (err) {
             setTestResult({ok: false, message: String(err)});
@@ -226,11 +334,14 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
         const built = buildDsn();
         if (!built) return;
 
+        const sshCfg = buildSshConfig();
+        if (!sshCfg) return;
+
         setSaving(true);
         try {
-            await TestConnection(built.driver, built.dsn);
+            await TestConnectionWithSSH(built.driver, built.dsn, sshCfg);
 
-            const newId = await SaveConnection(trimmedName, built.driver, built.dsn);
+            const newId = await SaveConnectionWithSSH(trimmedName, built.driver, built.dsn, sshCfg);
             onConnectionsChanged();
 
             if (connectAfter) {
@@ -242,7 +353,16 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                 setName('');
                 setSqlitePath('');
                 setPgPassword('');
+                setMysqlPassword('');
                 setRawDsn('');
+                setSshEnabled(false);
+                setSshHost('');
+                setSshPort('22');
+                setSshUser('');
+                setSshAuthMethod('key_file');
+                setSshPassword('');
+                setSshKeyPath('');
+                setSshKeyPassphrase('');
                 setTestResult(null);
                 await loadSaved();
                 setActiveTab('manage');
@@ -533,6 +653,119 @@ export default function ConnectionModal({isOpen, tabId, onClose, onConnected, on
                                         <option value="skip-verify">{t('connectionModal.sslSkipVerify')}</option>
                                     </select>
                                 </div>
+                            </div>
+                        )}
+
+                        {driver !== 'sqlite' && (
+                            <div className="ssh-tunnel-section" style={{marginTop: '16px', borderTop: '1px solid var(--color-border, rgba(255,255,255,0.08))', paddingTop: '12px'}}>
+                                <div className="ssh-tunnel-header">
+                                    <label style={{display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 500}}>
+                                        <input
+                                            type="checkbox"
+                                            checked={sshEnabled}
+                                            onChange={e => setSshEnabled(e.target.checked)}
+                                        />
+                                        <span>{t('connectionModal.sshEnable')}</span>
+                                    </label>
+                                </div>
+
+                                {sshEnabled && (
+                                    <div className="postgres-form-grid" style={{marginTop: '12px', padding: '12px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.06)'}}>
+                                        <div className="form-group col-span-8">
+                                            <label className="form-label">{t('connectionModal.sshHostLabel')}</label>
+                                            <input
+                                                className="input-control modal-input"
+                                                value={sshHost}
+                                                onChange={e => setSshHost(e.target.value)}
+                                                placeholder="bastion.exemplo.com"
+                                            />
+                                        </div>
+                                        <div className="form-group col-span-4">
+                                            <label className="form-label">{t('connectionModal.sshPortLabel')}</label>
+                                            <input
+                                                className="input-control modal-input"
+                                                value={sshPort}
+                                                onChange={e => setSshPort(e.target.value)}
+                                                placeholder="22"
+                                            />
+                                        </div>
+                                        <div className="form-group col-span-6">
+                                            <label className="form-label">{t('connectionModal.sshUserLabel')}</label>
+                                            <input
+                                                className="input-control modal-input"
+                                                value={sshUser}
+                                                onChange={e => setSshUser(e.target.value)}
+                                                placeholder="ubuntu"
+                                            />
+                                        </div>
+                                        <div className="form-group col-span-6">
+                                            <label className="form-label">{t('connectionModal.sshAuthLabel')}</label>
+                                            <select
+                                                className="input-control modal-select"
+                                                value={sshAuthMethod}
+                                                onChange={e => setSshAuthMethod(e.target.value as any)}
+                                            >
+                                                <option value="key_file">{t('connectionModal.sshAuthKeyFile')}</option>
+                                                <option value="password">{t('connectionModal.sshAuthPassword')}</option>
+                                                <option value="agent">{t('connectionModal.sshAuthAgent')}</option>
+                                            </select>
+                                        </div>
+
+                                        {sshAuthMethod === 'key_file' && (
+                                            <>
+                                                <div className="form-group col-span-12">
+                                                    <label className="form-label">{t('connectionModal.sshKeyPathLabel')}</label>
+                                                    <div style={{display: 'flex', gap: '8px'}}>
+                                                        <input
+                                                            className="input-control modal-input"
+                                                            style={{flex: 1}}
+                                                            value={sshKeyPath}
+                                                            onChange={e => setSshKeyPath(e.target.value)}
+                                                            placeholder="~/.ssh/id_ed25519"
+                                                        />
+                                                        <button
+                                                            type="button"
+                                                            className="btn btn-secondary"
+                                                            onClick={handlePickSSHKeyFile}
+                                                            title={t('connectionModal.sshPickKeyTitle')}
+                                                        >
+                                                            {t('connectionModal.browse')}
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                <div className="form-group col-span-12">
+                                                    <label className="form-label">{t('connectionModal.sshPassphraseLabel')}</label>
+                                                    <input
+                                                        type="password"
+                                                        className="input-control modal-input"
+                                                        value={sshKeyPassphrase}
+                                                        onChange={e => setSshKeyPassphrase(e.target.value)}
+                                                        placeholder={t('connectionModal.sshPassphrasePlaceholder')}
+                                                    />
+                                                </div>
+                                            </>
+                                        )}
+
+                                        {sshAuthMethod === 'password' && (
+                                            <div className="form-group col-span-12">
+                                                <label className="form-label">{t('connectionModal.sshPasswordLabel')}</label>
+                                                <input
+                                                    type="password"
+                                                    className="input-control modal-input"
+                                                    value={sshPassword}
+                                                    onChange={e => setSshPassword(e.target.value)}
+                                                    placeholder="••••••••"
+                                                />
+                                            </div>
+                                        )}
+
+                                        {sshAuthMethod === 'agent' && (
+                                            <div className="form-group col-span-12" style={{fontSize: '12px', color: 'var(--color-text-muted, #888)'}}>
+                                                {t('connectionModal.sshAgentNote')}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                         )}
 

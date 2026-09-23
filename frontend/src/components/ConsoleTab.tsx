@@ -26,6 +26,7 @@ import {explainQuery} from '../lib/explainQuery';
 import {useConnection} from '../lib/useConnection';
 import {useResultExecution, DEFAULT_BATCH_SIZE} from '../lib/useResultExecution';
 import {useScriptState} from '../lib/useScriptState';
+import {normalizeDialect} from '../lib/sqlDialect';
 
 interface Props {
     tabId: string;
@@ -160,6 +161,20 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
     function handleSelectTable(schema: string, table: string) {
         scripts.handleNewScript();
         setQuery(`SELECT * FROM ${schema === 'main' ? table : `${schema}.${table}`} LIMIT 200`);
+    }
+
+    function handleInsertSql(sql: string) {
+        if (!query.trim()) {
+            setQuery(sql);
+            sqlEditorRef.current?.focus();
+            return;
+        }
+        if (sqlEditorRef.current?.insertTextAtCursor) {
+            sqlEditorRef.current.insertTextAtCursor(sql.endsWith('\n') ? sql : `${sql}\n`);
+        } else {
+            setQuery(prev => (prev ? `${prev}\n\n${sql}` : sql));
+        }
+        sqlEditorRef.current?.focus();
     }
 
     function handleOpenTableRequest(schema: string, table: string) {
@@ -318,9 +333,11 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                         <Sidebar
                             tabId={tabId}
                             connected={connection.connected}
+                            dialect={normalizeDialect(connection.driver ?? '')}
                             onSelectTable={handleSelectTable}
                             onOpenTable={handleOpenTableRequest}
                             onOpenSchema={handleOpenSchemaRequest}
+                            onInsertSql={handleInsertSql}
                             onCollapse={toggleSidebarCollapsed}
                             style={{width: sidebarResize.size, flex: '0 0 auto'}}
                         />
@@ -397,6 +414,7 @@ const ConsoleTab = forwardRef<ConsoleTabHandle, Props>(function ConsoleTab({tabI
                         columns={execution.activeResult?.columns ?? []}
                         rows={execution.activeResult?.rows ?? []}
                         tabId={tabId}
+                        query={execution.activeResult?.queryText}
                         editContext={execution.activeResult?.editContext ?? null}
                         readOnlyNotice={execution.activeResult?.readOnlyNotice ?? null}
                         onCellSaved={execution.handleCellSaved}

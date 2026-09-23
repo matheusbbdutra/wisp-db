@@ -144,3 +144,60 @@ func TestManagerCancelSQLiteQuery(t *testing.T) {
 		t.Fatalf("unexpected result: %+v", res)
 	}
 }
+
+func TestSessionMetadataAndDialect(t *testing.T) {
+	// Test DialectForDriver normalization
+	if d := DialectForDriver("mysql"); d != "mysql" {
+		t.Fatalf("expected mysql, got %s", d)
+	}
+	if d := DialectForDriver("mariadb"); d != "mysql" {
+		t.Fatalf("expected mysql, got %s", d)
+	}
+	if d := DialectForDriver("sqlite"); d != "sqlite" {
+		t.Fatalf("expected sqlite, got %s", d)
+	}
+	if d := DialectForDriver("postgres"); d != "postgres" {
+		t.Fatalf("expected postgres, got %s", d)
+	}
+	if d := DialectForDriver("unknown"); d != "postgres" {
+		t.Fatalf("expected postgres, got %s", d)
+	}
+
+	m := NewManager()
+	t.Cleanup(func() {
+		_ = m.Close("tab-meta")
+	})
+
+	d := newTestDriver(t)
+	initialMeta := SessionMetadata{
+		TabID:   "tab-meta",
+		Driver:  "sqlite",
+		Dialect: "sqlite",
+	}
+
+	if _, err := m.Open("tab-meta", d, d, "k1", "", initialMeta); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	meta, err := m.GetMetadata("tab-meta")
+	if err != nil {
+		t.Fatalf("GetMetadata: %v", err)
+	}
+	if meta.Driver != "sqlite" || meta.Dialect != "sqlite" {
+		t.Fatalf("unexpected metadata: %+v", meta)
+	}
+
+	// Update metadata (e.g. after querying version)
+	meta.ServerVersion = "SQLite 3.45.1"
+	if err := m.SetMetadata("tab-meta", meta); err != nil {
+		t.Fatalf("SetMetadata: %v", err)
+	}
+
+	updated, err := m.GetMetadata("tab-meta")
+	if err != nil {
+		t.Fatalf("GetMetadata after update: %v", err)
+	}
+	if updated.ServerVersion != "SQLite 3.45.1" {
+		t.Fatalf("expected version SQLite 3.45.1, got %s", updated.ServerVersion)
+	}
+}

@@ -4,10 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
+	"time"
 
-	_ "github.com/go-sql-driver/mysql"
+	"github.com/go-sql-driver/mysql"
 )
 
 // MySQLDriver implements DatabaseDriver for MySQL 8.0+ and MariaDB 10.11+ via the
@@ -36,11 +38,19 @@ type MySQLDriver struct {
 	cursor       *sql.Rows
 	cursorBinary []bool
 
+	dialer    Dialer
+	customNet string
+
 	mu sync.Mutex // protects Close + reopen race during cancel
 }
 
 func NewMySQLDriver() *MySQLDriver {
 	return &MySQLDriver{}
+}
+
+// SetDialer configures a custom dialer (e.g. SSH tunnel) for outbound connections.
+func (d *MySQLDriver) SetDialer(dialer Dialer) {
+	d.dialer = dialer
 }
 
 // quoteIdentMySQL wraps an identifier in backticks (MySQL's identifier quote character),
@@ -81,13 +91,33 @@ func qualifyTableNameMySQL(schema, table string) string {
 // (the modal always sets it as a default); without it, DATE/DATETIME columns arrive as
 // []byte and the IPC bridge serializes them as base64 — unreadable in the grid.
 func (d *MySQLDriver) Connect(ctx context.Context, dsn string) error {
-	dataPool, err := sql.Open("mysql", dsn)
+	finalDSN := dsn
+	if d.dialer != nil {
+		netName := fmt.Sprintf("sshtun_%p_%d", d, time.Now().UnixNano())
+		d.customNet = netName
+		mysql.RegisterDialContext(netName, func(ctx context.Context, addr string) (net.Conn, error) {
+			return d.dialer(ctx, "tcp", addr)
+		})
+		if strings.Contains(finalDSN, "@tcp(") {
+			finalDSN = strings.Replace(finalDSN, "@tcp(", "@"+netName+"(", 1)
+		}
+	}
+
+	dataPool, err := sql.Open("mysql", finalDSN)
 	if err != nil {
+		if d.customNet != "" {
+			mysql.DeregisterDialContext(d.customNet)
+			d.customNet = ""
+		}
 		return fmt.Errorf("abrindo pool mysql: %w", err)
 	}
 	dataConn, err := dataPool.Conn(ctx)
 	if err != nil {
 		dataPool.Close()
+		if d.customNet != "" {
+			mysql.DeregisterDialContext(d.customNet)
+			d.customNet = ""
+		}
 		return fmt.Errorf("obtendo conexão mysql: %w", err)
 	}
 	d.dataDB = dataPool
@@ -109,6 +139,10 @@ func (d *MySQLDriver) Close() error {
 			firstErr = err
 		}
 		d.dataDB = nil
+	}
+	if d.customNet != "" {
+		mysql.DeregisterDialContext(d.customNet)
+		d.customNet = ""
 	}
 	return firstErr
 }

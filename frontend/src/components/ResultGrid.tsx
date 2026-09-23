@@ -16,12 +16,16 @@ import ResultGridToolbar from './ResultGridToolbar';
 import GridCanvas from './GridCanvas';
 import GridContextMenu, {MenuState} from './GridContextMenu';
 import GridEditPopover from './GridEditPopover';
+import ExportModal from './ExportModal';
 import type {db} from '../../wailsjs/go/models';
 
 import type {ForeignKeyReference} from '../lib/foreignKeyNav';
 import {findForeignKeyReference} from '../lib/foreignKeyNav';
+import type {SortConfig} from '../lib/tableTabQuery';
 
 // Contexto de edição inline (ADR 0004): só existe quando a query é um
+import type {Dialect} from '../lib/sqlDialect';
+
 // SELECT simples de tabela única com PK real detectada no catálogo.
 // editableColumns já é a interseção entre as colunas do resultado e as
 // colunas reais da tabela (expressões/aliases ficam de fora), excluídas
@@ -36,14 +40,18 @@ export interface EditContext {
     // campos oferecer; geradas ficam de fora do rascunho).
     allColumns: db.Column[];
     foreignKeys?: ForeignKeyReference[];
+    dialect?: Dialect;
 }
 
 interface Props {
     columns: string[];
     rows: any[][];
     tabId: string;
+    query?: string;
     editContext?: EditContext | null;
     foreignKeys?: ForeignKeyReference[];
+    sortConfig?: SortConfig | null;
+    onSortChange?: (column: string) => void;
     readOnlyNotice?: string | null;
     onCellSaved?: (rowIndex: number, colIndex: number, newValue: any) => void;
     // rowIndex é o índice ORIGINAL em `rows` (já traduzido pelo ResultGrid,
@@ -65,9 +73,10 @@ interface Props {
 // INSERT/DELETE (usePendingBatch), edição de célula (useCellEditing),
 // regras de editabilidade (useEditability), painel de valor (useValuePanel),
 // canvas (GridCanvas), toolbar, menu e popover.
-export default function ResultGrid({columns, rows, tabId, editContext, foreignKeys, readOnlyNotice, onCellSaved, onRowDeleted, onRowInserted, onStatus, onCopied, onNavigateForeignKey}: Props) {
+export default function ResultGrid({columns, rows, tabId, query, editContext, foreignKeys, sortConfig, onSortChange, readOnlyNotice, onCellSaved, onRowDeleted, onRowInserted, onStatus, onCopied, onNavigateForeignKey}: Props) {
     const {t} = useTranslation();
     const [gridSelection, setGridSelection] = useState<GridSelection | undefined>(undefined);
+    const [isExportOpen, setIsExportOpen] = useState<boolean>(false);
     const [menu, setMenu] = useState<MenuState | null>(null);
     const menuRef = useRef<HTMLDivElement | null>(null);
     const gridRef = useRef<DataEditorRef | null>(null);
@@ -240,6 +249,7 @@ export default function ResultGrid({columns, rows, tabId, editContext, foreignKe
                 valuePanelOpen={valuePanelOpen}
                 onFilterChange={setFilterText}
                 onToggleValuePanel={() => (valuePanelOpen ? closeValuePanel() : openValuePanel())}
+                onExportClick={() => setIsExportOpen(true)}
                 onInsertRow={addPendingInsert}
                 onReview={openReview}
                 onDiscard={discardPendingChanges}
@@ -265,6 +275,8 @@ export default function ResultGrid({columns, rows, tabId, editContext, foreignKe
                 gridRef={gridRef}
                 directEdit={directEdit}
                 foreignKeys={effectiveForeignKeys}
+                sortConfig={sortConfig}
+                onSortChange={onSortChange}
                 onNavigateForeignKey={onNavigateForeignKey}
                 onDirectEditChange={value => setDirectEdit(prev => (prev ? {...prev, value} : prev))}
                 onCommitDirectEdit={commitDirectEdit}
@@ -335,6 +347,14 @@ export default function ResultGrid({columns, rows, tabId, editContext, foreignKe
                 />
             )}
             </div>
+            <ExportModal
+                isOpen={isExportOpen}
+                onClose={() => setIsExportOpen(false)}
+                tabId={tabId}
+                query={query}
+                schema={editContext?.schema}
+                table={editContext?.table}
+            />
         </div>
     );
 }

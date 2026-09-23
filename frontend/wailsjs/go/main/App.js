@@ -10,6 +10,10 @@ export function CheckForUpdate() {
   return window['go']['main']['App']['CheckForUpdate']();
 }
 
+export function ClearQueryHistory() {
+  return window['go']['main']['App']['ClearQueryHistory']();
+}
+
 export function ConfirmQuit() {
   return window['go']['main']['App']['ConfirmQuit']();
 }
@@ -20,6 +24,10 @@ export function Connect(arg1, arg2, arg3) {
 
 export function ConnectSaved(arg1, arg2) {
   return window['go']['main']['App']['ConnectSaved'](arg1, arg2);
+}
+
+export function ConnectWithSSH(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['ConnectWithSSH'](arg1, arg2, arg3, arg4);
 }
 
 export function DeleteRow(arg1, arg2, arg3, arg4, arg5) {
@@ -42,6 +50,10 @@ export function ExecuteBatch(arg1, arg2) {
   return window['go']['main']['App']['ExecuteBatch'](arg1, arg2);
 }
 
+export function ExportToFile(arg1) {
+  return window['go']['main']['App']['ExportToFile'](arg1);
+}
+
 export function FetchRows(arg1, arg2) {
   return window['go']['main']['App']['FetchRows'](arg1, arg2);
 }
@@ -60,6 +72,18 @@ export function GetConnectionForEdit(arg1) {
 
 export function GetQueryHistory(arg1) {
   return window['go']['main']['App']['GetQueryHistory'](arg1);
+}
+
+export function GetQueryHistoryPaged(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GetQueryHistoryPaged'](arg1, arg2, arg3);
+}
+
+export function GetSessionDialect(arg1) {
+  return window['go']['main']['App']['GetSessionDialect'](arg1);
+}
+
+export function GetSessionMetadata(arg1) {
+  return window['go']['main']['App']['GetSessionMetadata'](arg1);
 }
 
 export function GetTableDDL(arg1, arg2, arg3) {
@@ -122,8 +146,16 @@ export function OpenReleaseURL(arg1) {
   return window['go']['main']['App']['OpenReleaseURL'](arg1);
 }
 
+export function PickExportFile(arg1, arg2) {
+  return window['go']['main']['App']['PickExportFile'](arg1, arg2);
+}
+
 export function PickSQLiteFile() {
   return window['go']['main']['App']['PickSQLiteFile']();
+}
+
+export function PickSSHKeyFile() {
+  return window['go']['main']['App']['PickSSHKeyFile']();
 }
 
 export function RefreshSchema(arg1) {
@@ -142,12 +174,20 @@ export function SaveConnection(arg1, arg2, arg3) {
   return window['go']['main']['App']['SaveConnection'](arg1, arg2, arg3);
 }
 
+export function SaveConnectionWithSSH(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['SaveConnectionWithSSH'](arg1, arg2, arg3, arg4);
+}
+
 export function SaveScript(arg1, arg2) {
   return window['go']['main']['App']['SaveScript'](arg1, arg2);
 }
 
 export function TestConnection(arg1, arg2) {
   return window['go']['main']['App']['TestConnection'](arg1, arg2);
+}
+
+export function TestConnectionWithSSH(arg1, arg2, arg3) {
+  return window['go']['main']['App']['TestConnectionWithSSH'](arg1, arg2, arg3);
 }
 
 export function UpdateCell(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) {

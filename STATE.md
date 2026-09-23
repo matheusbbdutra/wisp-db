@@ -1,5 +1,192 @@
 # STATE — Wisp
 
+## 🚀 Release v0.1.0-beta.17 — (2026-09-23)
+- Conclusão e integração de 7 ADRs do MVP:
+  - **ADR 0016**: Streaming Data Export (CSV, JSON, SQL) com bufferização em disco e modal com progresso em tempo real.
+  - **ADR 0017**: Object Tree Context Menu & SQL Generator (SELECT, INSERT, UPDATE, CREATE, DROP).
+  - **ADR 0018**: TableTab Server-Side Sorting & Filtering (ordenação no grid, filtros por operador e rawWhere).
+  - **ADR 0019**: Dialect-Aware Identifier Quoting para PostgreSQL, MySQL e SQLite.
+  - **ADR 0020**: Native SSH Tunneling via `crypto/ssh` (autenticação por chave, senha ou SSH Agent).
+  - **ADR 0021**: Modular Backend Decomposition (`app_connection.go`, `app_query.go`, `app_schema.go`, `app_scripts.go`, `app_updater.go`, `app_export.go`) e `TabsContext.tsx`.
+  - **ADR 0022**: Quick Open (`Ctrl+P`) e paginação/busca no histórico de queries.
+- Ajuste de branding pré-release: ícone oficial do Wisp (átomo orbital) no modal "Sobre" e About/Topics atualizados no repositório GitHub.
+- 100% de testes unitários passando (Go e Vitest) e build limpo.
+
+## ✅ ADR 0020 — Native SSH Tunneling via `crypto/ssh` — FEITO (2026-09-22)
+1. **Módulo de Túnel SSH (`internal/sshtunnel/`)**:
+   - `SSHConfig`: struct com suporte a host, porta, usuário, authMethod (`password`, `key_file`, `agent`), senha, chave privada (com/sem passphrase).
+   - `OpenTunnel(ctx, cfg)`: handshake SSH nativo em Go puro sem binários externos (`crypto/ssh`), timeout com contexto, suporte a `$SSH_AUTH_SOCK` (ssh-agent).
+   - `Tunnel.DialContext(ctx, network, addr)`: roteamento TCP direto através do canal SSH.
+   - Suíte unitária em `internal/sshtunnel/tunnel_test.go` validada contra servidor SSH em memória (`crypto/ssh`), cobrindo auth com sucesso, erro de credenciais e validação.
+2. **Integração com Drivers (`internal/db/`)**:
+   - `Dialer` func type e interface `TunneledDriver` em `internal/db/driver.go`.
+   - `PostgresDriver`: suporte a `SetDialer` e integração com `pgx.ParseConfig` + `pgx.ConnectConfig` (`cfg.DialFunc = d.dialer`).
+   - `MySQLDriver`: suporte a `SetDialer`, registro de protocolo único via `mysql.RegisterDialContext` (`sshtun_%p_%d`), reescrita automática de DSN `@tcp(` -> `@customNet(`, e limpeza automática com `mysql.DeregisterDialContext` em `Close()`.
+3. **Gerenciamento de Sessão & Store Seguro (`internal/session/` e `internal/store/`)**:
+   - `session.Session`: campo `Tunnel io.Closer` mantido ativo enquanto a aba estiver conectada, com encerramento automático em `session.Manager.Close(tabID)` e ao reconectar a aba.
+   - `internal/store/store.go`: envelope `StoredConnectionSecret` gravado em `encrypted_secret` (ChaCha20-Poly1305 no keychain do SO). Senhas SSH e passphrases nunca gravadas em texto puro. 100% retrocompatível com conexões legadas (testado em `internal/store/store_test.go`).
+4. **Backend App & Frontend Wails (`app_connection.go` e `ConnectionModal.tsx`)**:
+   - Novos bindings expostos: `ConnectWithSSH`, `SaveConnectionWithSSH`, `TestConnectionWithSSH`, `PickSSHKeyFile`.
+   - `ConnectionModal.tsx`: painel expansível de SSH Tunnel para conexões PostgreSQL e MySQL/MariaDB (e modo Raw DSN), seletor de auth method (Chave com file picker, Senha, SSH Agent), validação prévia de campos, suporte no fluxo de clonagem (`GetConnectionForEdit`), testes e conexões funcionais.
+   - Internacionalização completa em `pt-BR.json` e `en.json`.
+5. **Validações**:
+   - `npx vitest run`: 11 arquivos / 150 testes passando (100%).
+   - `npm run build`: `tsc` e `vite build` 100% limpos.
+   - `go test -count=1 ./internal/... .`: 100% passando.
+   - `git diff --check`: 0 avisos / 100% limpo.
+   - Isolamento de empacotamento: adicionado `packaging/go.mod` para delimitar o diretório `packaging/` e impedir que artefatos de build do Arch (`makepkg`/`$srcdir/go/pkg/mod`) interfiram no `go mod tidy`, `wails dev` ou `go test ./...` do módulo principal.
+
+## ✅ ADR 0021 — Modular Backend Decomposition & TabsContext — FEITO (2026-09-22)
+1. **Decomposição Modular de `app.go` (`package main`)**:
+   - Reduzido de 999 linhas para ~125 linhas focadas apenas no struct `App`, ciclo de vida Wails (`startup`, `shutdown`, `beforeClose`, `ConfirmQuit`) e `ReportFrontendError`.
+   - `app_connection.go`: métodos de conexão (`Connect`, `connect`, `Disconnect`, `SaveConnection`, `ListSavedConnections`, `ConnectSaved`, `GetSessionDialect`, `GetSessionMetadata`, `TestConnection`, `DeleteSavedConnection`, `GetConnectionForEdit`, `PickSQLiteFile`, `PickSSHKeyFile`).
+   - `app_query.go`: execução e edição de queries (`RunQuery`, `FetchRows`, `CancelQuery`, `UpdateCell`, `InsertRow`, `DeleteRow`, `ExecuteBatch`).
+   - `app_schema.go`: catálogo e introspecção de schema (`ListSchemas`, `ListTables`, `ListSchemaObjects`, `IntrospectTable`, `IntrospectSchemaTables`, `RefreshSchema`, `GetCachedCatalog`, `WarmupCatalog`, `ListIncomingForeignKeys`, `GetTableDDL`, `ListTriggers`, `ListFunctions`, `ListIndexes`, `ListForeignKeys`).
+   - `app_scripts.go`: histórico e scripts salvos (`GetQueryHistory`, `GetQueryHistoryPaged`, `ClearQueryHistory`, `SaveScript`, `ListScripts`, `UpdateScript`, `DeleteScript`).
+   - `app_updater.go`: verificação de updates no GitHub Releases (`CheckForUpdate`, `OpenReleaseURL`, `GetAppVersion`).
+   - `app_export.go`: exportação em streaming (`PickExportFile`, `ExportToFile`).
+2. **Frontend `TabsContext` (`frontend/src/context/TabsContext.tsx`)**:
+   - Centraliza o estado global de abas (`tabs`, `activeId`, `addConsoleTab`, `openTableTab`, `openSchemaTab`, `openRoutineTab`, `closeTab`, `updateTabConnected`, `registerConsoleRef`).
+   - Refatoração cirúrgica de `App.tsx` para usar `TabsProvider` e `useTabs()` reduzindo boilerplate e eliminando prop-drilling desnecessário.
+3. **Validações**:
+   - `npx vitest run`: 100% passando.
+   - `npm run build`: 100% limpo.
+   - `go test -count=1 ./internal/... .`: 100% passando.
+
+## ✅ ADR 0016 — Streaming Data Export (CSV, JSON, SQL) — FEITO (2026-09-22)
+1. **Core de Exportação em Streaming (`internal/export/writer.go`)**:
+   - Suporte aos formatos CSV (RFC 4180), JSON (stream de array com objetos JSON) e SQL (comandos `INSERT INTO` em batches de 100 linhas com escaping dialeto-consciente).
+   - Bufferização via `bufio.Writer` (chunk de 64KB) para escrita eficiente em disco com consumo mínimo de memória RAM.
+   - Suíte de testes unitários reais em `internal/export/export_test.go` cobrindo CSV, JSON e SQL com caracteres especiais, nulos e aspas.
+2. **Endpoints Backend (`app_export.go`)**:
+   - `PickExportFile(defaultFilename, format)`: diálogo nativo do sistema para escolha de destino do arquivo.
+   - `ExportToFile(opts)`: itera sobre o cursor de streaming do driver ativo (`FetchNext`) em batches de 1000 linhas, grava via streamer e emite eventos periódicos de progresso `export:progress` para a UI.
+   - Teste de integração real em `app_export_test.go` validando o fluxo completo com banco SQLite em arquivo temporário.
+3. **Interface de Exportação (`ExportModal.tsx` & `ResultGridToolbar.tsx`)**:
+   - Modal completo de exportação com escolha de formato (CSV, JSON, SQL), escopo (resultados visíveis / query atual vs tabela inteira), file picker nativo, barra de progresso em tempo real e cancelamento cooperativo via `CancelQuery(tabId)`.
+   - Internacionalização completa em `pt-BR.json` e `en.json`, estilos no tema escuro do Wisp.
+4. **Validações**:
+   - `npx vitest run`: 100% passando.
+   - `npm run build`: 100% limpo.
+   - `go test -count=1 ./internal/... .`: 100% passando.
+
+## ✅ ADR 0022 — Quick Object Search & History Pagination — FEITO (2026-09-22)
+1. **Backend History Pagination & Search (`internal/store/` e `app_scripts.go`)**:
+   - `GetQueryHistoryPaged(search, limit, offset)`: ordenação determinística por `executed_at DESC, id DESC` (evita paginação instável em SQLite com timestamps de granularidade em segundos), com contagem total de registros para paginação infinita / carregar mais.
+   - `ClearQueryHistory()`: limpeza rápida do histórico com reindexação.
+   - Testes unitários cobrindo busca, paginação e limpeza em `internal/store/store_test.go`.
+2. **Interface do Histórico (`QueryHistory.tsx`)**:
+   - Input de pesquisa de queries com debounce de 200ms.
+   - Botão "Carregar mais (X de Y)" dinâmico.
+   - Botão de limpar histórico com diálogo de confirmação.
+3. **Quick Open Global (`QuickOpenModal.tsx` & `quickOpenSearch.ts`)**:
+   - Atalho global `Ctrl+P` / `Cmd+P` para busca rápida em todas as tabelas e views do catálogo conectado.
+   - Algoritmo puro de busca (`quickOpenSearch.ts`) com suporte a fuzzy / prefix-match priorizado, busca qualificada por schema e limite configurável (24 testes unitários).
+   - Navegação por teclado (`ArrowUp`, `ArrowDown`, `Enter`, `Escape`), badges para indicar tabela vs view e abertura instantânea na `TableTab`.
+   - Internacionalização completa em `pt-BR.json` e `en.json`.
+4. **Validações**:
+   - `npx vitest run`: 100% passando.
+   - `npm run build`: 100% limpo.
+   - `go test -count=1 ./internal/... .`: 100% passando.
+
+## ✅ ADR 0018 — TableTab Server-Side Sorting and Filtering — FEITO (2026-09-22)
+1. **Query Builder e Ciclo de Ordenação (`frontend/src/lib/tableTabQuery.ts`)**:
+   - `buildColumnCondition(filter, dialect)`: quotes de coluna dialeto-conscientes (`quoteIdent`), suporte completo a operadores (`=`, `!=`, `>`, `<`, `LIKE`, `ILIKE`, `IS NULL`, `IS NOT NULL`), escape de aspas simples dobradas (`''`) e fallback de `ILIKE` para PostgreSQL nativo e `LOWER(...) LIKE LOWER(...)` para MySQL/SQLite.
+   - `buildFkCondition(fkFilter, dialect)`: quotes dialeto-conscientes, formatação tipada (`IS NULL` para nulos, números as-is, booleanos como true/false, strings com aspas simples escapadas).
+   - `buildTableQuery(qualifiedTable, filter, fkFilter, sort, batchSize, dialect)`: geração dinâmica de query `SELECT * FROM ...`, combinação de cláusulas `WHERE` (`fkFilter`, `rawWhere` e/ou `columnFilter`), ordenação `ORDER BY ${quotedCol} ${direction}` e limite `LIMIT ${batchSize}`.
+   - `toggleSort(currentSort, column)`: ciclo de 3 estados (null / outra coluna -> ASC -> DESC -> null/reset).
+   - Suíte unitária em `frontend/src/lib/tableTabQuery.test.ts` (25 testes cobrindo toggleSort, buildColumnCondition com PostgreSQL/MySQL/SQLite/ILIKE/escape, buildFkCondition e buildTableQuery combinando todas as cláusulas).
+2. **Integração de Ordenação no Grid (`GridCanvas.tsx` e `ResultGrid.tsx`)**:
+   - Adicionadas props `sortConfig?: SortConfig | null` e `onSortChange?: (column: string) => void`.
+   - `GridCanvas.tsx`: conectado evento `onHeaderClicked` no `<DataEditor />` invocando `onSortChange(column)`; cálculo de `gridColumns` exibe affordance visual ` ▲` (ASC) ou ` ▼` (DESC) no cabeçalho da coluna ativa.
+   - `ResultGrid.tsx`: repassa `sortConfig` e `onSortChange` para o `GridCanvas`.
+3. **Barra de Filtros e Ordenação na TableTab (`TableTab.tsx`)**:
+   - Estados reativos `sortConfig: SortConfig | null` e `tableFilter: TableFilterConfig | null`.
+   - `loadDados` atualizado para montar a consulta via `buildTableQuery` combinando tabela qualificada, `tableFilter`, `activeFilter` (FK filter), `sortConfig`, tamanho do batch (`BATCH_SIZE = 200`) e dialeto da sessão.
+   - Reset do cursor e reload imediato de linhas ao alterar ordenação ou filtros; `handleLoadMore` preserva o cursor ativo no servidor.
+   - Barra de filtros `.table-filter-bar` na sub-aba "Dados":
+     - Seletor de coluna (a partir de `tableColumns` ou `columns`).
+     - Seletor de operador (`=`, `!=`, `>`, `<`, `LIKE`, `ILIKE`, `IS NULL`, `IS NOT NULL`).
+     - Input de valor com ocultação inteligente para `IS NULL` e `IS NOT NULL`.
+     - Botões "Aplicar" (com submit em Enter) e "Limpar".
+     - Modo alternável para WHERE SQL avançado com input livre de expressão SQL (`rawWhere`).
+     - Badge/indicador visual `.table-filter-badge` quando filtro está ativo no servidor.
+4. **Internacionalização e Estilização**:
+   - Chaves completas em `pt-BR.json` e `en.json`.
+   - Estilização em `App.css` para `.table-filter-bar`, `.table-filter-select`, `.table-filter-input`, `.table-filter-raw-input`, `.table-filter-mode-btn` e `.table-filter-badge` alinhadas ao design system escuro do Wisp.
+5. **Validações**:
+   - `npx vitest run`: 10 arquivos / 144 testes passando (100%).
+   - `npm run build`: `tsc` e `vite build` 100% limpos.
+   - `go test -count=1 ./internal/... .`: 100% passando.
+   - `git diff --check`: 0 avisos / 100% limpo.
+
+## ✅ ADR 0017 — Object Tree Context Menu & SQL Generator — FEITO (2026-09-22)
+1. **Gerador SQL com Suporte a Dialetos (`frontend/src/lib/sqlGenerator.ts`)**:
+   - `generateSelect(schema, table, dialect)`: gera `SELECT * FROM target LIMIT 50;` com quoting dialeto-consciente (`qualifyTable`).
+   - `generateInsert(schema, table, columns, dialect)`: exclui colunas geradas (`IsGenerated` e `Generated`), mapeia nomes e provê placeholders de valor padrão tipados (`defaultValueForType`) ou `DEFAULT VALUES` se não houver colunas inseríveis.
+   - `generateUpdate(schema, table, columns, dialect)`: atualiza colunas não-PK e não-geradas. Se PKs existirem, usa na cláusula `WHERE`; caso contrário, aplica dummy condition e aviso de segurança: `WHERE 1 = 0; -- WARNING: No primary key detected`.
+   - `generateDelete(schema, table, pkColumns, dialect)`: se `pkColumns` presente, gera `WHERE pk = 1`; se vazio, gera `WHERE 1 = 0; -- WARNING: No primary key detected`.
+   - `generateCreateTable(schema, table, dialect)`: gera template DDL dialeto-específico (PostgreSQL BIGSERIAL, MySQL AUTO_INCREMENT, SQLite AUTOINCREMENT).
+   - Suíte unitária em `frontend/src/lib/sqlGenerator.test.ts` (24 testes cobrindo PostgreSQL, MySQL, SQLite, quoting com escape de aspas embutidas, colunas geradas, composite PKs e fallbacks).
+2. **Componente de Menu de Contexto e Confirmação Segura (`frontend/src/components/SidebarContextMenu.tsx`)**:
+   - Menu flutuante posicionado em coordenadas `(x, y)` com ajuste automático de limites da janela (`useLayoutEffect`).
+   - Fechamento imediato ao clicar fora (`pointerdown`), rolagem (`scroll`) ou tecla `Escape`.
+   - Ações por tipo de nó:
+     - Tabela: Copiar nome, Copiar nome qualificado, Gerar SQL (SELECT, INSERT, UPDATE, DELETE, CREATE DDL via `GetTableDDL`), Abrir tabela, Truncar tabela, Excluir tabela.
+     - View: Copiar nome, Copiar nome qualificado, Gerar SELECT, Ver DDL, Excluir view.
+     - Schema: Copiar nome, Atualizar este schema, Nova tabela.
+   - Modal de confirmação segura para ações destrutivas (Truncate e Drop):
+     - Exibição de preview SQL do comando exato antes da execução.
+     - Drop exige digitação do nome exato do objeto para habilitar o botão de exclusão.
+     - Tratamento de erro inline com `.modal-error-banner` e atualização reativa da árvore pós-execução.
+   - Internacionalização completa em `pt-BR.json` e `en.json`.
+3. **Integração na Sidebar e ConsoleTab**:
+   - `Sidebar.tsx`: escuta `onContextMenu` nos nós de schema e tabela/view, acionando o menu de contexto correspondente; adicionado `handleRefreshSingleSchema`.
+   - `SqlEditor.tsx`: `SqlEditorHandle` estendido com métodos `insertTextAtCursor` e `focus` via `editor.executeEdits`.
+   - `ConsoleTab.tsx`: conecta `onInsertSql` direcionando para inserção no editor/buffer e repassa `dialect` normalizado.
+   - `App.css`: estilização completa para `.sidebar-context-menu`, `.sidebar-context-menu-item`, `.sidebar-danger-sql-preview`, alinhada ao design system escuro do Wisp.
+4. **Validações**:
+   - `npx vitest run`: 9 arquivos / 119 testes passando (100%).
+   - `npm run build`: `tsc` e `vite build` 100% limpos.
+   - `go test -count=1 ./internal/... .`: 100% passando.
+   - `git diff --check`: 0 avisos / 100% limpo.
+
+## ✅ ADR 0019 — Dialect-Aware Identifier Quoting & Session Metadata — FEITO (2026-09-22)
+1. **Frontend Identifier Quoting & Qualification (`frontend/src/lib/sqlDialect.ts`)**:
+   - `normalizeDialect(driver: string): Dialect` ('postgres' | 'mysql' | 'sqlite'). Mapeia 'mysql'/'mariadb' -> 'mysql', 'sqlite' -> 'sqlite', padrão 'postgres'.
+   - `quoteIdent(identifier: string, dialect: Dialect): string`: usa backticks (`` `ident` ``) para MySQL (com escape de backtick dobrado `` `a``b` ``) e aspas duplas (`"ident"`) para Postgres/SQLite (com escape de aspas duplas dobradas `"a""b"`).
+   - `qualifyTable(schema: string | undefined, table: string, dialect: Dialect): string`: omite schema se vazio, 'main' (SQLite) ou 'def' (MySQL catálogo default); caso contrário devolve schema e tabela devidamente escapados e qualificados.
+   - Suíte de 22 testes unitários em `frontend/src/lib/sqlDialect.test.ts`.
+2. **Atualização dos Consumidores do Frontend**:
+   - `TableTab.tsx`: rastreia `dialect` da sessão, substitui interpolação crua de aspas duplas por `qualifyTable` e `quoteIdent` no `loadDados` e repassa `dialect` no `editContext`.
+   - `foreignKeyNav.ts`: `buildForeignKeyFilterQuery` agora recebe `dialect: Dialect = 'postgres'` e usa `qualifyTable` e `quoteIdent`. Testes atualizados em `foreignKeyNav.test.ts` (12 testes passando).
+   - `gridEditPreview.ts`: `buildUpdatePreview`, `buildDeletePreview`, e `buildInsertPreview` atualizados com suporte a `dialect: Dialect = 'postgres'`. Criada suíte dedicada `gridEditPreview.test.ts` (16 testes passando).
+   - `useCellEditing.ts`, `usePendingBatch.ts`, e `useResultExecution.ts`: conectados com `editContext.dialect` propagado automaticamente.
+3. **Backend Session Metadata (`internal/session/manager.go` e `app.go`)**:
+   - Struct `SessionMetadata` (`tabId`, `driver`, `dialect`, `serverVersion`).
+   - `DialectForDriver(driver string)` e cache em `Session.Metadata` no `session.Manager` com métodos `GetMetadata` e `SetMetadata`.
+   - `Connect` e `ConnectSaved` em `app.go` estendidos para retornar `(*SessionMetadata, error)` sem quebrar chamadores existentes.
+   - Novos bindings `GetSessionDialect(tabID string)` e `GetSessionMetadata(tabID string)`.
+   - Detecção automática de versão do servidor ao conectar (`SELECT sqlite_version()` / `SELECT version()`) via conexão dedicada de metadados sem interferir no cursor de queries.
+   - Testes unitários em `internal/session/session_test.go` (`TestSessionMetadataAndDialect`).
+4. **Validações**:
+   - `npx vitest run`: 8 arquivos / 95 testes passando (100%).
+   - `npm run build`: `tsc` e `vite build` 100% limpos.
+   - `go test -count=1 ./internal/... .`: 100% passando.
+   - `git diff --check`: 0 avisos / 100% limpo.
+
+## 📋 Roadmap do MVP & ADRs 0016 a 0022 — CRIADAS (2026-09-22)
+1. **Definição e Registro Arquitetural das 7 ADRs do MVP**:
+   - `docs/adr/0016-streaming-data-export.md`: Exportação de dados em streaming para disco (CSV, JSON, SQL).
+   - `docs/adr/0017-object-tree-context-menu-and-sql-generator.md`: Menu de contexto da árvore de objetos na Sidebar e gerador de SQL.
+   - `docs/adr/0018-table-tab-server-side-sorting-and-filtering.md`: Ordenação por coluna e filtro no banco na TableTab.
+   - `docs/adr/0019-dialect-aware-identifier-quoting.md`: Normalização de quoting de identificadores e metadados de dialeto.
+   - `docs/adr/0020-native-ssh-tunneling.md`: Túnel SSH nativo embutido via crypto/ssh.
+   - `docs/adr/0021-modular-backend-decomposition.md`: Decomposição modular do app.go e TabsContext.
+   - `docs/adr/0022-quick-object-search-and-history-pagination.md`: Quick Open (Ctrl+P) e paginação/busca no histórico.
+2. **Execução em Andamento**:
+   - ADR 0019 (Dialect Quoting) concluída e validada. Próximas ADRs do MVP prontas para implementação.
+
 ## 🚀 Release v0.1.0-beta.16 — PUBLICADA (2026-09-22)
 - **Tag**: `v0.1.0-beta.16`
 - **Release GitHub**: https://github.com/matheusbbdutra/wisp-db/releases/tag/v0.1.0-beta.16

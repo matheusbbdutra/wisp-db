@@ -3,6 +3,8 @@ import {useTranslation} from 'react-i18next';
 import {ListSchemas, ListTables, RefreshSchema} from '../lib/tabApi';
 import type {db} from '../../wailsjs/go/models';
 import {isCtrlHeld} from '../lib/modifierKeyTracker';
+import type {Dialect} from '../lib/sqlDialect';
+import SidebarContextMenu, {type SidebarContextTarget} from './SidebarContextMenu';
 
 // Árvore de schemas/tabelas com introspecção lazy: só busca tabelas de um
 // schema quando ele é expandido, nunca faz dump completo do catálogo de
@@ -13,12 +15,15 @@ import {isCtrlHeld} from '../lib/modifierKeyTracker';
 interface Props {
     tabId: string;
     connected: boolean;
+    dialect?: Dialect;
     onSelectTable: (schema: string, table: string) => void;
     // Affordance separada do clique simples: abre a tabela numa aba própria
     // (TableTab, com conexão dedicada). Opcional pra não quebrar outros usos.
     onOpenTable?: (schema: string, table: string) => void;
     // Ctrl+click no nome do schema abre uma SchemaTab listando as tabelas.
     onOpenSchema?: (schema: string) => void;
+    // Callback para inserir SQL gerado no console/editor
+    onInsertSql?: (sql: string) => void;
     // Largura controlada por fora (redimensionamento por arrasto, ver
     // lib/useDragResize.ts em ConsoleTab.tsx) — inline style vence a largura
     // fixa do CSS.
@@ -28,11 +33,26 @@ interface Props {
     onCollapse?: () => void;
 }
 
-export default function Sidebar({tabId, connected, onSelectTable, onOpenTable, onOpenSchema, style, onCollapse}: Props) {
+export default function Sidebar({
+    tabId,
+    connected,
+    dialect = 'postgres',
+    onSelectTable,
+    onOpenTable,
+    onOpenSchema,
+    onInsertSql,
+    style,
+    onCollapse,
+}: Props) {
     const {t} = useTranslation();
     const [schemas, setSchemas] = useState<string[]>([]);
     const [tablesBySchema, setTablesBySchema] = useState<Record<string, db.Table[]>>({});
     const [expanded, setExpanded] = useState<Set<string>>(new Set());
+    const [contextMenu, setContextMenu] = useState<{
+        x: number;
+        y: number;
+        target: SidebarContextTarget;
+    } | null>(null);
     const [loading, setLoading] = useState(false);
     // Busca client-side (nome de schema/tabela) — nunca dispara requery no
     // servidor; ver useEffect abaixo pro único caso em que ela busca dado
@@ -51,6 +71,15 @@ export default function Sidebar({tabId, connected, onSelectTable, onOpenTable, o
             setExpanded(new Set());
         } finally {
             setLoading(false);
+        }
+    }
+
+    async function handleRefreshSingleSchema(schema: string) {
+        try {
+            const tables = await ListTables(tabId, schema);
+            setTablesBySchema(prev => ({...prev, [schema]: tables ?? []}));
+        } catch (err) {
+            console.error('Failed to refresh schema tables:', err);
         }
     }
 
@@ -228,6 +257,15 @@ export default function Sidebar({tabId, connected, onSelectTable, onOpenTable, o
                                         }
                                         toggleSchema(schema);
                                     }}
+                                    onContextMenu={e => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        setContextMenu({
+                                            x: e.clientX,
+                                            y: e.clientY,
+                                            target: {type: 'schema', schema},
+                                        });
+                                    }}
                                     title={t('sidebar.nodeTitle', {schema})}
                                 >
                                     <span className="tree-arrow">
@@ -259,6 +297,18 @@ export default function Sidebar({tabId, connected, onSelectTable, onOpenTable, o
                                                             return;
                                                         }
                                                         onSelectTable(schema, row.Name);
+                                                    }}
+                                                    onContextMenu={e => {
+                                                        e.preventDefault();
+                                                        e.stopPropagation();
+                                                        setContextMenu({
+                                                            x: e.clientX,
+                                                            y: e.clientY,
+                                                            target:
+                                                                row.Kind === 'view'
+                                                                    ? {type: 'view', schema, view: row.Name}
+                                                                    : {type: 'table', schema, table: row.Name},
+                                                        });
                                                     }}
                                                     title={t('sidebar.leafTitle', {kind: row.Kind === 'view' ? t('sidebar.view') : t('sidebar.table'), schema, table: row.Name})}
                                                 >
@@ -297,6 +347,27 @@ export default function Sidebar({tabId, connected, onSelectTable, onOpenTable, o
                     })}
                 </ul>
             </div>
+
+            {contextMenu && (
+                <SidebarContextMenu
+                    x={contextMenu.x}
+                    y={contextMenu.y}
+                    target={contextMenu.target}
+                    tabId={tabId}
+                    dialect={dialect}
+                    onClose={() => setContextMenu(null)}
+                    onInsertSql={sql => {
+                        if (onInsertSql) {
+                            onInsertSql(sql);
+                        } else if (contextMenu.target.type === 'table') {
+                            onSelectTable(contextMenu.target.schema, contextMenu.target.table);
+                        }
+                    }}
+                    onOpenTable={onOpenTable}
+                    onRefreshSchema={handleRefreshSingleSchema}
+                    onRefreshAll={handleRefresh}
+                />
+            )}
         </aside>
     );
 }

@@ -1,5 +1,6 @@
 import type {db} from '../../wailsjs/go/models';
 import {formatPreviewValue} from './gridEditPreview';
+import {qualifyTable, quoteIdent, type Dialect} from './sqlDialect';
 
 export interface ForeignKeyReference {
     column: string;
@@ -66,11 +67,13 @@ export function buildForeignKeyFilterQuery(
     column: string,
     value: any,
     limit = 200,
+    dialect: Dialect = 'postgres',
 ): string {
-    const qualified = schema && schema !== 'main' ? `"${schema}"."${table}"` : `"${table}"`;
+    const qualified = qualifyTable(schema, table, dialect);
+    const quotedCol = quoteIdent(column, dialect);
     const where =
         value === null || value === undefined
-            ? `"${column}" IS NULL`
-            : `"${column}" = ${formatPreviewValue(value)}`;
+            ? `${quotedCol} IS NULL`
+            : `${quotedCol} = ${formatPreviewValue(value)}`;
     return `SELECT * FROM ${qualified} WHERE ${where} LIMIT ${limit}`;
 }

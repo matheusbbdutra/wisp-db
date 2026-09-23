@@ -127,5 +127,23 @@ describe('foreignKeyNav', () => {
             const q = buildForeignKeyFilterQuery('public', 'users', 'id', null);
             expect(q).toBe('SELECT * FROM "public"."users" WHERE "id" IS NULL LIMIT 200');
         });
+
+        it('builds query with backticks for mysql dialect', () => {
+            const q = buildForeignKeyFilterQuery('mydb', 'customers', 'id', 42, 100, 'mysql');
+            expect(q).toBe('SELECT * FROM `mydb`.`customers` WHERE `id` = 42 LIMIT 100');
+        });
+
+        it('omits def schema for mysql dialect', () => {
+            const q = buildForeignKeyFilterQuery('def', 'orders', 'id', 1, 50, 'mysql');
+            expect(q).toBe('SELECT * FROM `orders` WHERE `id` = 1 LIMIT 50');
+        });
+
+        it('escapes embedded quotes per dialect', () => {
+            const qPg = buildForeignKeyFilterQuery('sch"1', 'tbl"2', 'col"3', 'val', 200, 'postgres');
+            expect(qPg).toBe('SELECT * FROM "sch""1"."tbl""2" WHERE "col""3" = \'val\' LIMIT 200');
+
+            const qMy = buildForeignKeyFilterQuery('db`1', 'tbl`2', 'col`3', 'val', 200, 'mysql');
+            expect(qMy).toBe('SELECT * FROM `db``1`.`tbl``2` WHERE `col``3` = \'val\' LIMIT 200');
+        });
     });
 });

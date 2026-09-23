@@ -6,9 +6,18 @@ import SqlEditor from './SqlEditor';
 import ResultGrid, {type EditContext} from './ResultGrid';
 import {withQueue} from '../lib/tabCallQueue';
 import {extractForeignKeyReferences} from '../lib/foreignKeyNav';
-import {formatPreviewValue} from '../lib/gridEditPreview';
+import {qualifyTable, normalizeDialect, type Dialect} from '../lib/sqlDialect';
+import {
+    buildTableQuery,
+    toggleSort,
+    type SortConfig,
+    type TableFilterConfig,
+} from '../lib/tableTabQuery';
 
 type SubTab = 'dados' | 'colunas' | 'indices' | 'fks' | 'ddl' | 'triggers' | 'funcoes';
+
+type ColumnFilterOperator = NonNullable<TableFilterConfig['columnFilter']>['operator'];
+const OPERATORS: ColumnFilterOperator[] = ['=', '!=', '>', '<', 'LIKE', 'ILIKE', 'IS NULL', 'IS NOT NULL'];
 
 const BATCH_SIZE = 200;
 
@@ -18,6 +27,7 @@ interface Props {
     schema: string;
     table: string;
     initialFilter?: { column: string; value: any };
+    dialect?: Dialect;
     hidden: boolean;
     onConnectedChange: (connected: boolean) => void;
     // Abre a definição completa de um trigger/função numa aba própria (App.tsx
@@ -31,12 +41,22 @@ interface Props {
 // PRÓPRIOS — reconecta no mount via ConnectSaved com o mesmo connectionId
 // salvo da origem, nunca reusa a sessão do console (ver AGENTS.md:
 // 1 tabId = 1 conexão dedicada). Disconnect centralizado em App.tsx.
-export default function TableTab({tabId, connectionId, schema, table, initialFilter, hidden, onConnectedChange, onOpenRoutine, onOpenTable}: Props) {
+export default function TableTab({tabId, connectionId, schema, table, initialFilter, dialect: initialDialect, hidden, onConnectedChange, onOpenRoutine, onOpenTable}: Props) {
     const {t} = useTranslation();
     const [connected, setConnected] = useState(false);
     const [status, setStatus] = useState(() => t('tableTab.statusConnecting'));
     const [subTab, setSubTab] = useState<SubTab>('dados');
     const [activeFilter, setActiveFilter] = useState<{ column: string; value: any } | null>(initialFilter ?? null);
+    const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
+    const [tableFilter, setTableFilter] = useState<TableFilterConfig | null>(null);
+    const [dialect, setDialect] = useState<Dialect>(initialDialect ?? 'postgres');
+    const dialectRef = useRef<Dialect>(initialDialect ?? 'postgres');
+
+    const [filterCol, setFilterCol] = useState<string>('');
+    const [filterOp, setFilterOp] = useState<ColumnFilterOperator>('=');
+    const [filterVal, setFilterVal] = useState<string>('');
+    const [rawWhereInput, setRawWhereInput] = useState<string>('');
+    const [isAdvancedFilter, setIsAdvancedFilter] = useState<boolean>(false);
 
     // Colunas reais da tabela (via IntrospectTable, antes de qualquer cursor
     // aberto) — base pro editContext, computado após o primeiro fetch.
@@ -65,9 +85,8 @@ export default function TableTab({tabId, connectionId, schema, table, initialFil
     const [metaLoading, setMetaLoading] = useState(false);
     const [metaError, setMetaError] = useState<string | null>(null);
 
-    // Nome qualificado com identificadores entre aspas (nomes com espaço,
-    // maiúsculas ou palavra reservada não quebram o SELECT).
-    const qualified = schema === 'main' ? `"${table}"` : `"${schema}"."${table}"`;
+    // Nome qualificado conforme dialeto (MySQL backticks, Postgres/SQLite aspas duplas).
+    const qualified = qualifyTable(schema, table, dialect);
 
     const subTabLabel: Record<SubTab, string> = {
         dados: t('tableTab.subDados'),
@@ -103,8 +122,16 @@ export default function TableTab({tabId, connectionId, schema, table, initialFil
             // busy"). Por isso todo bloco que faz RunQuery/FetchRows ou
             // qualquer outra query nesta aba usa esta MESMA chave.
             await withQueue(`${tabId}:query`, async () => {
+                let sessionDialect = dialectRef.current;
                 try {
-                    await ConnectSaved(tabId, connectionId);
+                    const meta = await ConnectSaved(tabId, connectionId);
+                    if (meta?.dialect) {
+                        sessionDialect = normalizeDialect(meta.dialect);
+                    } else if (meta?.driver) {
+                        sessionDialect = normalizeDialect(meta.driver);
+                    }
+                    dialectRef.current = sessionDialect;
+                    setDialect(sessionDialect);
                 } catch (err) {
                     if (cancelled) return;
                     setStatus(t('tableTab.statusError', {error: err}));
@@ -145,7 +172,7 @@ export default function TableTab({tabId, connectionId, schema, table, initialFil
                     }
                 }
                 if (cancelled) return;
-                await loadDados();
+                await loadDados(undefined, undefined, undefined, sessionDialect);
             });
         }
         void init();
@@ -155,17 +182,17 @@ export default function TableTab({tabId, connectionId, schema, table, initialFil
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    function computeEditContext(resultColumns: string[]) {
+    function computeEditContext(resultColumns: string[], currentDialect: Dialect = dialectRef.current) {
         const cols = tableColumnsRef.current;
         const foreignKeys = extractForeignKeyReferences(tableFksRef.current, schema);
         if (cols.length === 0) {
-            setEditContext({schema, table, pkColumns: [], editableColumns: [], allColumns: cols, foreignKeys});
+            setEditContext({schema, table, pkColumns: [], editableColumns: [], allColumns: cols, foreignKeys, dialect: currentDialect});
             setReadOnlyNotice(t('tableTab.readOnlyNotFound', {schema, table}));
             return;
         }
         const pkColumns = cols.filter(c => c.IsPrimaryKey).map(c => c.Name);
         if (pkColumns.length === 0) {
-            setEditContext({schema, table, pkColumns: [], editableColumns: [], allColumns: cols, foreignKeys});
+            setEditContext({schema, table, pkColumns: [], editableColumns: [], allColumns: cols, foreignKeys, dialect: currentDialect});
             setReadOnlyNotice(t('tableTab.readOnlyNoPk', {schema, table}));
             return;
         }
@@ -175,33 +202,36 @@ export default function TableTab({tabId, connectionId, schema, table, initialFil
             return !!c && !c.IsGenerated && !c.IsPrimaryKey;
         });
         if (editableColumns.length === 0) {
-            setEditContext({schema, table, pkColumns: [], editableColumns: [], allColumns: cols, foreignKeys});
+            setEditContext({schema, table, pkColumns: [], editableColumns: [], allColumns: cols, foreignKeys, dialect: currentDialect});
             setReadOnlyNotice(t('tableTab.readOnlyNoEditable', {schema, table}));
             return;
         }
-        setEditContext({schema, table, pkColumns, editableColumns, allColumns: cols, foreignKeys});
+        setEditContext({schema, table, pkColumns, editableColumns, allColumns: cols, foreignKeys, dialect: currentDialect});
         setReadOnlyNotice(null);
     }
 
-    async function loadDados(filterOverride?: { column: string; value: any } | null) {
+    async function loadDados(
+        fkOverride?: { column: string; value: any } | null,
+        filterOverride?: TableFilterConfig | null,
+        sortOverride?: SortConfig | null,
+        dialectOverride?: Dialect,
+    ) {
         setFetching(true);
         setDadosError(null);
-        const filter = filterOverride !== undefined ? filterOverride : activeFilter;
+        const fk = fkOverride !== undefined ? fkOverride : activeFilter;
+        const tf = filterOverride !== undefined ? filterOverride : tableFilter;
+        const sc = sortOverride !== undefined ? sortOverride : sortConfig;
+        const currentDialect = dialectOverride ?? dialectRef.current;
         try {
-            let sql = `SELECT * FROM ${qualified} LIMIT ${BATCH_SIZE}`;
-            if (filter) {
-                const whereClause = filter.value === null || filter.value === undefined
-                    ? `"${filter.column}" IS NULL`
-                    : `"${filter.column}" = ${formatPreviewValue(filter.value)}`;
-                sql = `SELECT * FROM ${qualified} WHERE ${whereClause} LIMIT ${BATCH_SIZE}`;
-            }
+            const tableQualified = qualifyTable(schema, table, currentDialect);
+            const sql = buildTableQuery(tableQualified, tf, fk, sc, BATCH_SIZE, currentDialect);
             const meta = await RunQuery(tabId, sql);
             const resultColumns = meta.Columns ?? [];
             setColumns(resultColumns);
             const batch = await FetchRows(tabId, BATCH_SIZE);
             setRows(batch.Rows ?? []);
             setHasMore(batch.HasMore);
-            computeEditContext(resultColumns);
+            computeEditContext(resultColumns, currentDialect);
             setDadosLoaded(true);
         } catch (err) {
             setDadosError(String(err));
@@ -214,6 +244,50 @@ export default function TableTab({tabId, connectionId, schema, table, initialFil
         setActiveFilter(null);
         await withQueue(`${tabId}:query`, async () => {
             await loadDados(null);
+        });
+    }
+
+    async function handleSortChange(column: string) {
+        const nextSort = toggleSort(sortConfig, column);
+        setSortConfig(nextSort);
+        await withQueue(`${tabId}:query`, async () => {
+            await loadDados(undefined, undefined, nextSort);
+        });
+    }
+
+    const availableColumns = tableColumns.length > 0 ? tableColumns.map(c => c.Name) : columns;
+
+    async function handleApplyFilter() {
+        let newFilter: TableFilterConfig | null = null;
+        if (isAdvancedFilter) {
+            const trimmed = rawWhereInput.trim();
+            if (trimmed) {
+                newFilter = { rawWhere: trimmed };
+            }
+        } else {
+            const selectedCol = filterCol || availableColumns[0] || '';
+            if (selectedCol) {
+                newFilter = {
+                    columnFilter: {
+                        column: selectedCol,
+                        operator: filterOp,
+                        value: filterVal,
+                    },
+                };
+            }
+        }
+        setTableFilter(newFilter);
+        await withQueue(`${tabId}:query`, async () => {
+            await loadDados(undefined, newFilter);
+        });
+    }
+
+    async function handleClearTableFilter() {
+        setTableFilter(null);
+        setFilterVal('');
+        setRawWhereInput('');
+        await withQueue(`${tabId}:query`, async () => {
+            await loadDados(undefined, null);
         });
     }
 
@@ -328,6 +402,102 @@ export default function TableTab({tabId, connectionId, schema, table, initialFil
                             </button>
                         </div>
                     )}
+                    <div className="table-filter-bar">
+                        {!isAdvancedFilter ? (
+                            <>
+                                <select
+                                    className="table-filter-select"
+                                    value={filterCol || (availableColumns[0] ?? '')}
+                                    onChange={e => setFilterCol(e.target.value)}
+                                    title={t('tableTab.filterColumnTitle')}
+                                >
+                                    {availableColumns.map(col => (
+                                        <option key={col} value={col}>{col}</option>
+                                    ))}
+                                </select>
+                                <select
+                                    className="table-filter-select"
+                                    value={filterOp}
+                                    onChange={e => setFilterOp(e.target.value as ColumnFilterOperator)}
+                                    title={t('tableTab.filterOperatorTitle')}
+                                >
+                                    {OPERATORS.map(op => (
+                                        <option key={op} value={op}>{op}</option>
+                                    ))}
+                                </select>
+                                {filterOp !== 'IS NULL' && filterOp !== 'IS NOT NULL' && (
+                                    <input
+                                        type="text"
+                                        className="table-filter-input"
+                                        placeholder={t('tableTab.filterValuePlaceholder')}
+                                        value={filterVal}
+                                        onChange={e => setFilterVal(e.target.value)}
+                                        onKeyDown={e => {
+                                            if (e.key === 'Enter') {
+                                                e.preventDefault();
+                                                void handleApplyFilter();
+                                            }
+                                        }}
+                                    />
+                                )}
+                            </>
+                        ) : (
+                            <input
+                                type="text"
+                                className="table-filter-input table-filter-raw-input"
+                                placeholder={t('tableTab.filterRawPlaceholder')}
+                                value={rawWhereInput}
+                                onChange={e => setRawWhereInput(e.target.value)}
+                                onKeyDown={e => {
+                                    if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        void handleApplyFilter();
+                                    }
+                                }}
+                            />
+                        )}
+                        <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => void handleApplyFilter()}
+                            disabled={fetching}
+                            title={t('tableTab.filterApplyTitle')}
+                        >
+                            {t('tableTab.filterApply')}
+                        </button>
+                        <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => void handleClearTableFilter()}
+                            disabled={fetching || !tableFilter}
+                            title={t('tableTab.filterClearTitle')}
+                        >
+                            {t('tableTab.filterClear')}
+                        </button>
+                        <button
+                            type="button"
+                            className={`btn btn-secondary btn-sm table-filter-mode-btn ${isAdvancedFilter ? 'active' : ''}`}
+                            onClick={() => setIsAdvancedFilter(prev => !prev)}
+                            title={t('tableTab.filterAdvancedTitle')}
+                        >
+                            {isAdvancedFilter ? t('tableTab.filterSimpleMode') : t('tableTab.filterAdvancedMode')}
+                        </button>
+                        {tableFilter && (
+                            <div className="table-filter-badge" title={t('tableTab.activeFilterTitle')}>
+                                <span>
+                                    {tableFilter.rawWhere ? (
+                                        `WHERE ${tableFilter.rawWhere}`
+                                    ) : tableFilter.columnFilter ? (
+                                        tableFilter.columnFilter.operator === 'IS NULL' || tableFilter.columnFilter.operator === 'IS NOT NULL' ? (
+                                            `${tableFilter.columnFilter.column} ${tableFilter.columnFilter.operator}`
+                                        ) : (
+                                            `${tableFilter.columnFilter.column} ${tableFilter.columnFilter.operator} '${tableFilter.columnFilter.value}'`
+                                        )
+                                    ) : null}
+                                </span>
+                            </div>
+                        )}
+                    </div>
                     {dadosError && !dadosLoaded ? (
                         <div className="meta-empty">{t('tableTab.loadDataError', {error: dadosError})}</div>
                     ) : (
@@ -338,6 +508,8 @@ export default function TableTab({tabId, connectionId, schema, table, initialFil
                                 tabId={tabId}
                                 editContext={editContext}
                                 readOnlyNotice={readOnlyNotice}
+                                sortConfig={sortConfig}
+                                onSortChange={handleSortChange}
                                 onCellSaved={handleCellSaved}
                                 onRowDeleted={handleRowDeleted}
                                 onRowInserted={handleRowInserted}

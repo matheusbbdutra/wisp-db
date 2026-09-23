@@ -9,6 +9,7 @@ import {RunQuery, FetchRows, IntrospectTable, ListForeignKeys} from './tabApi';
 import type {db} from '../../wailsjs/go/models';
 import {detectSingleTable, type SingleTableRef} from './detectSingleTable';
 import {extractForeignKeyReferences} from './foreignKeyNav';
+import {normalizeDialect} from './sqlDialect';
 import {makeResultLabel} from './resultTabLabel';
 import {splitStatements} from './sqlStatements';
 import {withQueue} from './tabCallQueue';
@@ -149,11 +150,12 @@ export function useResultExecution({tabId, batchSize, driver, catalog, setStatus
         }
         const foreignKeys = extractForeignKeyReferences(fks, schema);
 
+        const dialect = normalizeDialect(driver ?? '');
         const pkColumns = cols.filter(c => c.IsPrimaryKey).map(c => c.Name);
         if (pkColumns.length === 0) {
             updateResultTab(id, tab => ({
                 ...tab,
-                editContext: {schema, table: ref.table, pkColumns: [], editableColumns: [], allColumns: cols, foreignKeys},
+                editContext: {schema, table: ref.table, pkColumns: [], editableColumns: [], allColumns: cols, foreignKeys, dialect},
                 readOnlyNotice: t('consoleTab.readOnlyNoPk', {schema, table: ref.table}),
             }));
             return;
@@ -170,14 +172,14 @@ export function useResultExecution({tabId, batchSize, driver, catalog, setStatus
         if (editableColumns.length === 0) {
             updateResultTab(id, tab => ({
                 ...tab,
-                editContext: {schema, table: ref.table, pkColumns: [], editableColumns: [], allColumns: cols, foreignKeys},
+                editContext: {schema, table: ref.table, pkColumns: [], editableColumns: [], allColumns: cols, foreignKeys, dialect},
                 readOnlyNotice: t('consoleTab.readOnlyNoEditable', {schema, table: ref.table}),
             }));
             return;
         }
         updateResultTab(id, tab => ({
             ...tab,
-            editContext: {schema, table: ref.table, pkColumns, editableColumns, allColumns: cols, foreignKeys},
+            editContext: {schema, table: ref.table, pkColumns, editableColumns, allColumns: cols, foreignKeys, dialect},
             readOnlyNotice: null,
         }));
     }

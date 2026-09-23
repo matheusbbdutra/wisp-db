@@ -13,12 +13,15 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 
+	"wisp/internal/sshtunnel"
 	"wisp/internal/vault"
 )
 
@@ -67,13 +70,20 @@ type SavedConnection struct {
 	CreatedAt time.Time
 }
 
-// SavedConnectionEdit carries the decrypted DSN for the modal's clone flow — kept as a
-// distinct struct from SavedConnection so the list endpoint (which never decrypts) does
-// not accidentally leak the same shape to consumers that don't need the secret. See
-// GetConnectionForEdit in app.go for the audit rule.
+// SavedConnectionEdit carries the decrypted DSN and optional SSH config for the modal's
+// clone flow — kept as a distinct struct from SavedConnection so the list endpoint (which
+// never decrypts) does not accidentally leak the same shape to consumers that don't need
+// the secret. See GetConnectionForEdit in app.go for the audit rule.
 type SavedConnectionEdit struct {
-	Driver string
-	DSN    string
+	Driver string               `json:"driver"`
+	DSN    string               `json:"dsn"`
+	SSH    *sshtunnel.SSHConfig `json:"ssh,omitempty"`
+}
+
+// StoredConnectionSecret is the JSON envelope stored in encrypted_secret when SSH configuration is present.
+type StoredConnectionSecret struct {
+	DSN string               `json:"dsn"`
+	SSH *sshtunnel.SSHConfig `json:"ssh,omitempty"`
 }
 
 // SavedScript is a named SQL script that can be edited and reopened (unlike history,
@@ -122,10 +132,27 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-// SaveConnection encrypts dsn and saves a new named connection. It returns the generated
-// id.
+// SaveConnection encrypts dsn and saves a new named connection. It returns the generated id.
 func (s *Store) SaveConnection(name, driver, dsn string) (string, error) {
-	ciphertext, err := s.vault.Encrypt(dsn)
+	return s.SaveConnectionWithSSH(name, driver, dsn, nil)
+}
+
+// SaveConnectionWithSSH encrypts dsn and optional SSH configuration, saving a new named connection.
+func (s *Store) SaveConnectionWithSSH(name, driver, dsn string, sshCfg *sshtunnel.SSHConfig) (string, error) {
+	secretPayload := dsn
+	if sshCfg != nil && sshCfg.Enabled {
+		sec := StoredConnectionSecret{
+			DSN: dsn,
+			SSH: sshCfg,
+		}
+		b, err := json.Marshal(sec)
+		if err != nil {
+			return "", fmt.Errorf("serializando credenciais com ssh: %w", err)
+		}
+		secretPayload = string(b)
+	}
+
+	ciphertext, err := s.vault.Encrypt(secretPayload)
 	if err != nil {
 		return "", fmt.Errorf("cifrando dsn: %w", err)
 	}
@@ -163,18 +190,32 @@ func (s *Store) ListConnections() ([]SavedConnection, error) {
 // ResolveConnection decrypts a saved connection's DSN — it should only be called when
 // actually connecting, never for display in the UI.
 func (s *Store) ResolveConnection(id string) (driver string, dsn string, err error) {
+	driver, dsn, _, err = s.ResolveConnectionWithSSH(id)
+	return driver, dsn, err
+}
+
+// ResolveConnectionWithSSH decrypts a saved connection's DSN and optional SSH configuration.
+func (s *Store) ResolveConnectionWithSSH(id string) (driver string, dsn string, sshCfg *sshtunnel.SSHConfig, err error) {
 	var ciphertext []byte
 	err = s.db.QueryRow(`SELECT driver, encrypted_secret FROM connections WHERE id = ?`, id).
 		Scan(&driver, &ciphertext)
 	if err != nil {
-		return "", "", fmt.Errorf("buscando conexão %q: %w", id, err)
+		return "", "", nil, fmt.Errorf("buscando conexão %q: %w", id, err)
 	}
 
-	dsn, err = s.vault.Decrypt(ciphertext)
+	rawSecret, err := s.vault.Decrypt(ciphertext)
 	if err != nil {
-		return "", "", fmt.Errorf("decifrando dsn da conexão %q: %w", id, err)
+		return "", "", nil, fmt.Errorf("decifrando dsn da conexão %q: %w", id, err)
 	}
-	return driver, dsn, nil
+
+	// Try unmarshaling JSON envelope containing SSH config
+	var sec StoredConnectionSecret
+	if err := json.Unmarshal([]byte(rawSecret), &sec); err == nil && sec.DSN != "" {
+		return driver, sec.DSN, sec.SSH, nil
+	}
+
+	// Fallback to legacy plaintext DSN format
+	return driver, rawSecret, nil, nil
 }
 
 // DeleteConnection removes a saved connection and its associated query history atomically.
@@ -241,7 +282,7 @@ func (s *Store) FinishQuery(id int64, status string, rowCount int) error {
 // ListQueryHistory returns the last N history entries, newest to oldest.
 func (s *Store) ListQueryHistory(limit int) ([]QueryHistoryEntry, error) {
 	rows, err := s.db.Query(
-		`SELECT id, connection_id, tab_id, query_text, executed_at, duration_ms, status, row_count FROM query_history ORDER BY executed_at DESC LIMIT ?`,
+		`SELECT id, connection_id, tab_id, query_text, executed_at, duration_ms, status, row_count FROM query_history ORDER BY executed_at DESC, id DESC LIMIT ?`,
 		limit,
 	)
 	if err != nil {
@@ -259,6 +300,64 @@ func (s *Store) ListQueryHistory(limit int) ([]QueryHistoryEntry, error) {
 	}
 	return result, rows.Err()
 }
+
+// GetQueryHistoryPaged returns paginated history entries with optional text search.
+func (s *Store) GetQueryHistoryPaged(search string, limit int, offset int) ([]QueryHistoryEntry, int64, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	search = strings.TrimSpace(search)
+	var countQuery string
+	var selectQuery string
+	var args []any
+	var countArgs []any
+
+	if search != "" {
+		countQuery = `SELECT count(*) FROM query_history WHERE query_text LIKE '%' || ? || '%'`
+		countArgs = []any{search}
+		selectQuery = `SELECT id, connection_id, tab_id, query_text, executed_at, duration_ms, status, row_count FROM query_history WHERE query_text LIKE '%' || ? || '%' ORDER BY executed_at DESC, id DESC LIMIT ? OFFSET ?`
+		args = []any{search, limit, offset}
+	} else {
+		countQuery = `SELECT count(*) FROM query_history`
+		selectQuery = `SELECT id, connection_id, tab_id, query_text, executed_at, duration_ms, status, row_count FROM query_history ORDER BY executed_at DESC, id DESC LIMIT ? OFFSET ?`
+		args = []any{limit, offset}
+	}
+
+	var totalCount int64
+	if err := s.db.QueryRow(countQuery, countArgs...).Scan(&totalCount); err != nil {
+		return nil, 0, fmt.Errorf("contando histórico de queries: %w", err)
+	}
+
+	rows, err := s.db.Query(selectQuery, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("listando histórico paginado: %w", err)
+	}
+	defer rows.Close()
+
+	var result []QueryHistoryEntry
+	for rows.Next() {
+		var e QueryHistoryEntry
+		if err := rows.Scan(&e.ID, &e.ConnectionID, &e.TabID, &e.QueryText, &e.ExecutedAt, &e.DurationMs, &e.Status, &e.RowCount); err != nil {
+			return nil, 0, err
+		}
+		result = append(result, e)
+	}
+	return result, totalCount, rows.Err()
+}
+
+// ClearQueryHistory removes all recorded query history.
+func (s *Store) ClearQueryHistory() error {
+	_, err := s.db.Exec(`DELETE FROM query_history`)
+	if err != nil {
+		return fmt.Errorf("limpando histórico de queries: %w", err)
+	}
+	return nil
+}
+
 
 // SaveScript saves a new named SQL script. It returns the generated id.
 func (s *Store) SaveScript(name, queryText string) (string, error) {

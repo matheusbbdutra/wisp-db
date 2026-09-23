@@ -28,11 +28,27 @@
 // cancelar, nunca executando a tempo. Importar CancelQuery direto de
 // wailsjs/go/main/App, não daqui.
 import * as App from '../../wailsjs/go/main/App';
-import type {main, db} from '../../wailsjs/go/models';
+import type {main, db, sshtunnel} from '../../wailsjs/go/models';
 import {withQueue} from './tabCallQueue';
 
-export function ConnectSaved(tabId: string, connectionId: string): Promise<void> {
+export function Connect(tabId: string, driverName: string, dsn: string): Promise<main.SessionMetadata> {
+    return withQueue(tabId, () => App.Connect(tabId, driverName, dsn));
+}
+
+export function ConnectWithSSH(tabId: string, driverName: string, dsn: string, sshCfg: sshtunnel.SSHConfig): Promise<main.SessionMetadata> {
+    return withQueue(tabId, () => App.ConnectWithSSH(tabId, driverName, dsn, sshCfg));
+}
+
+export function ConnectSaved(tabId: string, connectionId: string): Promise<main.SessionMetadata> {
     return withQueue(tabId, () => App.ConnectSaved(tabId, connectionId));
+}
+
+export function GetSessionDialect(tabId: string): Promise<string> {
+    return withQueue(`${tabId}:metadata`, () => App.GetSessionDialect(tabId));
+}
+
+export function GetSessionMetadata(tabId: string): Promise<main.SessionMetadata> {
+    return withQueue(`${tabId}:metadata`, () => App.GetSessionMetadata(tabId));
 }
 
 export function Disconnect(tabId: string): Promise<void> {
@@ -138,4 +154,12 @@ export function ListIndexes(tabId: string, schema: string, table: string): Promi
 
 export function ListForeignKeys(tabId: string, schema: string, table: string): Promise<db.ForeignKey[]> {
     return withQueue(tabId, () => App.ListForeignKeys(tabId, schema, table));
+}
+
+export function PickExportFile(defaultName: string, format: string): Promise<string> {
+    return App.PickExportFile(defaultName, format);
+}
+
+export function ExportToFile(opts: main.ExportOptions): Promise<main.ExportResult> {
+    return withQueue(opts.tabId, () => App.ExportToFile(opts));
 }

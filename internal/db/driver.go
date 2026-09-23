@@ -4,7 +4,18 @@
 // layer. See docs/ARCHITECTURE.md and docs/adr/0002-cgo-policy.md.
 package db
 
-import "context"
+import (
+	"context"
+	"net"
+)
+
+// Dialer connects to the address on the named network with a context.
+type Dialer func(ctx context.Context, network, addr string) (net.Conn, error)
+
+// TunneledDriver is implemented by drivers that support routing traffic through a custom dialer (e.g. SSH tunnel).
+type TunneledDriver interface {
+	SetDialer(dialer Dialer)
+}
 
 // normalizeCellValue converts []byte to string before the row becomes QueryResult.Rows —
 // Go serializes []byte as base64 in JSON (that is how json.Marshal handles the type),

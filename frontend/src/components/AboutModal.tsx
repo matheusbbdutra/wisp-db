@@ -63,9 +63,32 @@ export default function AboutModal({isOpen, onClose}: Props) {
                 <div className="modal-body about-modal-body">
                     <div className="about-brand-section">
                         <div className="about-logo-wrapper">
-                            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="about-logo-svg">
-                                <path d="M12 2c-4 4-6 7.5-6 11a6 6 0 0 0 12 0c0-3.5-2-7-6-11z" />
-                                <path d="M12 18a2 2 0 0 1-2-2c0-1.5 2-3 2-3s2 1.5 2 3a2 2 0 0 1-2 2z" />
+                            <svg width="40" height="40" viewBox="0 0 1024 1024" className="about-logo-svg">
+                                <defs>
+                                    <linearGradient id="aboutRing1" x1="0%" y1="0%" x2="100%" y2="0%">
+                                        <stop offset="0%" stopColor="#1e40af" stopOpacity="0.15"/>
+                                        <stop offset="55%" stopColor="#3b82f6"/>
+                                        <stop offset="100%" stopColor="#a5f3fc"/>
+                                    </linearGradient>
+                                    <linearGradient id="aboutRing2" x1="100%" y1="100%" x2="0%" y2="0%">
+                                        <stop offset="0%" stopColor="#1e40af" stopOpacity="0.15"/>
+                                        <stop offset="55%" stopColor="#2563eb"/>
+                                        <stop offset="100%" stopColor="#7dd3fc"/>
+                                    </linearGradient>
+                                    <radialGradient id="aboutCore" cx="50%" cy="50%" r="50%">
+                                        <stop offset="0%" stopColor="#ffffff"/>
+                                        <stop offset="100%" stopColor="#7dd3fc"/>
+                                    </radialGradient>
+                                </defs>
+                                <g transform="translate(512 512)">
+                                    <ellipse cx="0" cy="0" rx="290" ry="150" transform="rotate(-24)"
+                                             fill="none" stroke="url(#aboutRing1)" strokeWidth="34" strokeLinecap="round"/>
+                                    <ellipse cx="0" cy="0" rx="290" ry="150" transform="rotate(24)"
+                                             fill="none" stroke="url(#aboutRing2)" strokeWidth="34" strokeLinecap="round"/>
+                                    <circle cx="0" cy="0" r="66" fill="#0c0f14"/>
+                                    <circle cx="0" cy="0" r="50" fill="url(#aboutCore)"/>
+                                    <circle cx="243" cy="-14" r="17" fill="#e0f7ff"/>
+                                </g>
                             </svg>
                         </div>
                         <div className="about-brand-info">

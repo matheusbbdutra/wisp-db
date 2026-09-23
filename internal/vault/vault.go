@@ -36,6 +36,11 @@ func Open() (*Vault, error) {
 	if err != nil {
 		return nil, fmt.Errorf("carregando chave mestra: %w", err)
 	}
+	return NewWithKey(key)
+}
+
+// NewWithKey creates a Vault with an explicit key (used for tests and deterministic encryption).
+func NewWithKey(key []byte) (*Vault, error) {
 	aead, err := chacha20poly1305.New(key)
 	if err != nil {
 		return nil, fmt.Errorf("inicializando cifra: %w", err)

@@ -506,6 +506,8 @@ export interface SqlEditorHandle {
     getScriptTextOrSelection: () => { text: string; baseOffset: number };
     highlightRange: (startOffset: number, endOffset: number) => void;
     formatStatementOrSelection: (formatter: (text: string) => string) => void;
+    insertTextAtCursor: (text: string) => void;
+    focus: () => void;
 }
 
 const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({value, onChange, onRunRequested, onRunSelectionRequested, onRunNewTabRequested, onRunScriptRequested, onFormatRequested, catalog, driver, autoUppercase = true, wordWrap, readOnly = false, onOpenIdentifier, onCatalogNeeded, onEnsureTableColumns}, ref) {
@@ -591,6 +593,29 @@ const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({value, 
                 },
             ]);
             editor.focus();
+        },
+        insertTextAtCursor: (text: string) => {
+            const editor = editorRef.current;
+            if (!editor) return;
+            const model = editor.getModel();
+            if (!model) return;
+            let selection = editor.getSelection();
+            if (!selection) {
+                const lastLine = model.getLineCount();
+                const lastCol = model.getLineMaxColumn(lastLine);
+                selection = new monaco.Selection(lastLine, lastCol, lastLine, lastCol);
+            }
+            editor.executeEdits('insert-sql', [
+                {
+                    range: selection,
+                    text,
+                    forceMoveMarkers: true,
+                },
+            ]);
+            editor.focus();
+        },
+        focus: () => {
+            editorRef.current?.focus();
         },
     }));
     const catalogRef = useRef(catalog);

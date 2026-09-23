@@ -102,7 +102,7 @@ export function usePendingBatch({editContext, tabId, rows, columns, onRowDeleted
                 PKColumns: [],
                 PKValues: [],
             } as db.BatchOp);
-            statements.push(buildInsertPreview(editContext.schema, editContext.table, insertColumns, insertValues));
+            statements.push(buildInsertPreview(editContext.schema, editContext.table, insertColumns, insertValues, editContext.dialect));
         }
 
         const deleteIndexes = Array.from(pendingDeleteRows).sort((a, b) => a - b);
@@ -118,7 +118,7 @@ export function usePendingBatch({editContext, tabId, rows, columns, onRowDeleted
                 PKColumns: editContext.pkColumns,
                 PKValues: pkValues,
             } as db.BatchOp);
-            statements.push(buildDeletePreview(editContext.schema, editContext.table, editContext.pkColumns, pkValues));
+            statements.push(buildDeletePreview(editContext.schema, editContext.table, editContext.pkColumns, pkValues, editContext.dialect));
         }
 
         return {ops, statements, error: null};

@@ -27,6 +27,7 @@ func binaryColumnMask(fields []pgconn.FieldDescription) []bool {
 // internal/session).
 type PostgresDriver struct {
 	conn   *pgx.Conn
+	dialer Dialer
 	cursor pgx.Rows // cursor opened by ExecuteStreaming, see FetchNext/CloseCursor
 	// cursorBinaryCols marks which columns of the open cursor are bytea (by column index) —
 	// see normalizeRow/binaryColumnMask, both in driver.go.
@@ -37,8 +38,20 @@ func NewPostgresDriver() *PostgresDriver {
 	return &PostgresDriver{}
 }
 
+// SetDialer configures a custom dialer (e.g. SSH tunnel) for outbound connections.
+func (d *PostgresDriver) SetDialer(dialer Dialer) {
+	d.dialer = dialer
+}
+
 func (d *PostgresDriver) Connect(ctx context.Context, dsn string) error {
-	conn, err := pgx.Connect(ctx, dsn)
+	cfg, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		return fmt.Errorf("analisando dsn postgres: %w", err)
+	}
+	if d.dialer != nil {
+		cfg.DialFunc = pgconn.DialFunc(d.dialer)
+	}
+	conn, err := pgx.ConnectConfig(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("conectando ao postgres: %w", err)
 	}

@@ -21,6 +21,7 @@ type SQLiteDriver struct {
 	// cursorBinaryCols marks BLOB columns in the open cursor — for the same reason as the
 	// field of the same name in PostgresDriver (see normalizeRowSkipping).
 	cursorBinaryCols []bool
+	queryCtx         context.Context
 	cancelQuery      context.CancelFunc
 }
 
@@ -116,12 +117,14 @@ func (d *SQLiteDriver) ExecuteStreaming(ctx context.Context, query string) ([]st
 
 	queryCtx, cancel := context.WithCancel(ctx)
 	d.mu.Lock()
+	d.queryCtx = queryCtx
 	d.cancelQuery = cancel
 	d.mu.Unlock()
 
 	rows, err := d.conn.QueryContext(queryCtx, query)
 	if err != nil {
 		d.mu.Lock()
+		d.queryCtx = nil
 		d.cancelQuery = nil
 		d.mu.Unlock()
 		cancel()
@@ -131,6 +134,7 @@ func (d *SQLiteDriver) ExecuteStreaming(ctx context.Context, query string) ([]st
 	columns, err := rows.Columns()
 	if err != nil {
 		d.mu.Lock()
+		d.queryCtx = nil
 		d.cancelQuery = nil
 		d.mu.Unlock()
 		cancel()
@@ -140,6 +144,7 @@ func (d *SQLiteDriver) ExecuteStreaming(ctx context.Context, query string) ([]st
 	colTypes, err := rows.ColumnTypes()
 	if err != nil {
 		d.mu.Lock()
+		d.queryCtx = nil
 		d.cancelQuery = nil
 		d.mu.Unlock()
 		cancel()
@@ -158,6 +163,7 @@ func (d *SQLiteDriver) ExecuteStreaming(ctx context.Context, query string) ([]st
 			d.cancelQuery()
 			d.cancelQuery = nil
 		}
+		d.queryCtx = nil
 		d.cursor = nil
 		d.mu.Unlock()
 		return columns, types, nil
@@ -174,6 +180,7 @@ func (d *SQLiteDriver) FetchNext(ctx context.Context, n int) ([][]any, bool, err
 	d.mu.Lock()
 	cursor := d.cursor
 	cursorBinaryCols := d.cursorBinaryCols
+	queryCtx := d.queryCtx
 	d.mu.Unlock()
 
 	if cursor == nil {
@@ -191,8 +198,15 @@ func (d *SQLiteDriver) FetchNext(ctx context.Context, n int) ([][]any, bool, err
 			_ = d.CloseCursor()
 			return result, false, ctx.Err()
 		}
+		if queryCtx != nil && queryCtx.Err() != nil {
+			_ = d.CloseCursor()
+			return result, false, queryCtx.Err()
+		}
 		if !cursor.Next() {
 			err := cursor.Err()
+			if err == nil && queryCtx != nil && queryCtx.Err() != nil {
+				err = queryCtx.Err()
+			}
 			_ = d.CloseCursor()
 			return result, false, err
 		}
@@ -213,6 +227,7 @@ func (d *SQLiteDriver) CloseCursor() error {
 	d.mu.Lock()
 	cancel := d.cancelQuery
 	d.cancelQuery = nil
+	d.queryCtx = nil
 	cursor := d.cursor
 	d.cursor = nil
 	d.mu.Unlock()

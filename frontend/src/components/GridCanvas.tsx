@@ -16,6 +16,7 @@ import DataEditor, {
 import type {DirectEdit} from '../lib/useCellEditing';
 import type {MenuState} from './GridContextMenu';
 import type {ForeignKeyReference} from '../lib/foreignKeyNav';
+import type {SortConfig} from '../lib/tableTabQuery';
 import {isCtrlHeld} from '../lib/modifierKeyTracker';
 
 interface GridCanvasProps {
@@ -32,6 +33,8 @@ interface GridCanvasProps {
     gridRef: RefObject<DataEditorRef | null>;
     directEdit: DirectEdit | null;
     foreignKeys?: ForeignKeyReference[];
+    sortConfig?: SortConfig | null;
+    onSortChange?: (column: string) => void;
     onNavigateForeignKey?: (targetSchema: string, targetTable: string, targetColumn: string, value: any) => void;
     onDirectEditChange: (value: string) => void;
     onCommitDirectEdit: () => void;
@@ -58,6 +61,8 @@ export default function GridCanvas({
     gridRef,
     directEdit,
     foreignKeys,
+    sortConfig,
+    onSortChange,
     onNavigateForeignKey,
     onDirectEditChange,
     onCommitDirectEdit,
@@ -105,13 +110,23 @@ export default function GridCanvas({
     const gridColumns = useMemo<GridColumn[]>(() => {
         return columns.map(c => {
             const isFk = fkByCol.has(c.toLowerCase());
+            let title = isFk ? `${c} ↗` : c;
+            if (sortConfig && sortConfig.column === c) {
+                title += sortConfig.direction === 'ASC' ? ' ▲' : ' ▼';
+            }
             return {
                 id: c,
-                title: isFk ? `${c} ↗` : c,
-                width: columnWidths[c] ?? Math.max(120, Math.min(320, (c.length + (isFk ? 2 : 0)) * 10 + 48)),
+                title,
+                width: columnWidths[c] ?? Math.max(120, Math.min(320, (c.length + (isFk ? 2 : 0) + (sortConfig?.column === c ? 2 : 0)) * 10 + 48)),
             };
         });
-    }, [columns, columnWidths, fkByCol]);
+    }, [columns, columnWidths, fkByCol, sortConfig]);
+
+    const handleHeaderClicked = useCallback((colIndex: number) => {
+        if (colIndex >= 0 && colIndex < columns.length) {
+            onSortChange?.(columns[colIndex]);
+        }
+    }, [columns, onSortChange]);
 
     const onColumnResize = useCallback((column: GridColumn, newSize: number) => {
         if (column.id) {
@@ -255,6 +270,7 @@ export default function GridCanvas({
                 rows={displayRowCount}
                 getCellContent={getCellContent}
                 onCellClicked={handleCellClickedWrapper}
+                onHeaderClicked={handleHeaderClicked}
                 onPaste={false}
                 rowMarkers="number"
                 onColumnResize={onColumnResize}

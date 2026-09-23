@@ -1,6 +1,7 @@
 // Previews textuais e coerções de valor da edição inline (só exibição — as
 // queries reais são montadas parametrizadas no backend, nunca com literais).
 // Extraído do ResultGrid sem mudança de comportamento; funções puras, sem React.
+import {qualifyTable, quoteIdent, type Dialect} from './sqlDialect';
 
 export function formatPreviewValue(val: any): string {
     if (val === null || val === undefined) {
@@ -15,30 +16,54 @@ export function formatPreviewValue(val: any): string {
 // Preview legível do UPDATE com checagem otimista (WHERE pk... AND
 // coluna_antiga...), espelhando o que o backend executa de forma
 // parametrizada (ver db.buildUpdateCellQuery).
-export function buildUpdatePreview(schema: string, table: string, pkColumns: string[], pkValues: any[], column: string, oldValue: any, newValue: any): string {
-    const qualified = schema && schema !== 'main' ? `"${schema}"."${table}"` : `"${table}"`;
+export function buildUpdatePreview(
+    schema: string,
+    table: string,
+    pkColumns: string[],
+    pkValues: any[],
+    column: string,
+    oldValue: any,
+    newValue: any,
+    dialect: Dialect = 'postgres',
+): string {
+    const qualified = qualifyTable(schema, table, dialect);
+    const quotedCol = quoteIdent(column, dialect);
     const where = pkColumns.map((pk, i) => {
         const v = pkValues[i];
-        return v === null || v === undefined ? `"${pk}" IS NULL` : `"${pk}" = ${formatPreviewValue(v)}`;
+        const quotedPk = quoteIdent(pk, dialect);
+        return v === null || v === undefined ? `${quotedPk} IS NULL` : `${quotedPk} = ${formatPreviewValue(v)}`;
     });
-    where.push(oldValue === null || oldValue === undefined ? `"${column}" IS NULL` : `"${column}" = ${formatPreviewValue(oldValue)}`);
-    return `UPDATE ${qualified} SET "${column}" = ${formatPreviewValue(newValue)} WHERE ${where.join(' AND ')}`;
+    where.push(oldValue === null || oldValue === undefined ? `${quotedCol} IS NULL` : `${quotedCol} = ${formatPreviewValue(oldValue)}`);
+    return `UPDATE ${qualified} SET ${quotedCol} = ${formatPreviewValue(newValue)} WHERE ${where.join(' AND ')}`;
 }
 
 // Preview legível do DELETE, mesmo espírito de buildUpdatePreview.
-export function buildDeletePreview(schema: string, table: string, pkColumns: string[], pkValues: any[]): string {
-    const qualified = schema && schema !== 'main' ? `"${schema}"."${table}"` : `"${table}"`;
+export function buildDeletePreview(
+    schema: string,
+    table: string,
+    pkColumns: string[],
+    pkValues: any[],
+    dialect: Dialect = 'postgres',
+): string {
+    const qualified = qualifyTable(schema, table, dialect);
     const where = pkColumns.map((pk, i) => {
         const v = pkValues[i];
-        return v === null || v === undefined ? `"${pk}" IS NULL` : `"${pk}" = ${formatPreviewValue(v)}`;
+        const quotedPk = quoteIdent(pk, dialect);
+        return v === null || v === undefined ? `${quotedPk} IS NULL` : `${quotedPk} = ${formatPreviewValue(v)}`;
     });
     return `DELETE FROM ${qualified} WHERE ${where.join(' AND ')}`;
 }
 
 // Preview textual do INSERT (só exibição — ExecuteBatch usa bindings).
-export function buildInsertPreview(schema: string, table: string, columns: string[], values: any[]): string {
-    const qualified = schema && schema !== 'main' ? `"${schema}"."${table}"` : `"${table}"`;
-    const cols = columns.map(c => `"${c}"`).join(', ');
+export function buildInsertPreview(
+    schema: string,
+    table: string,
+    columns: string[],
+    values: any[],
+    dialect: Dialect = 'postgres',
+): string {
+    const qualified = qualifyTable(schema, table, dialect);
+    const cols = columns.map(c => quoteIdent(c, dialect)).join(', ');
     const vals = values.map(v => formatPreviewValue(v)).join(', ');
     return `INSERT INTO ${qualified} (${cols}) VALUES (${vals})`;
 }

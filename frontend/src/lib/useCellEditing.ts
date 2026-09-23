@@ -91,7 +91,7 @@ export function useCellEditing({
             columnName,
             oldValue,
             newValue: typed,
-            preview: buildUpdatePreview(editContext.schema, editContext.table, editContext.pkColumns, pkValues, columnName, oldValue, typed),
+            preview: buildUpdatePreview(editContext.schema, editContext.table, editContext.pkColumns, pkValues, columnName, oldValue, typed, editContext.dialect),
         });
     }, [editContext, rows, pkIndexes, columns]);
 

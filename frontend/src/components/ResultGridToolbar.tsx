@@ -14,6 +14,7 @@ interface ResultGridToolbarProps {
     valuePanelOpen: boolean;
     onFilterChange: (text: string) => void;
     onToggleValuePanel: () => void;
+    onExportClick?: () => void;
     onInsertRow: () => void;
     onReview: () => void;
     onDiscard: () => void;
@@ -30,6 +31,7 @@ export default function ResultGridToolbar({
     valuePanelOpen,
     onFilterChange,
     onToggleValuePanel,
+    onExportClick,
     onInsertRow,
     onReview,
     onDiscard,
@@ -66,6 +68,20 @@ export default function ResultGridToolbar({
             >
                 {t('resultGrid.value')}
             </button>
+            {onExportClick && (
+                <button
+                    className="btn btn-secondary"
+                    onClick={onExportClick}
+                    title={t('exportModal.toolbarTitle')}
+                >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: 4, verticalAlign: 'text-bottom'}}>
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                        <polyline points="7 10 12 15 17 10" />
+                        <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                    {t('exportModal.toolbarButton')}
+                </button>
+            )}
             {editContext && (
                 <button className="btn btn-secondary" onClick={onInsertRow} title={t('resultGrid.insertRowTitle')}>
                     {t('resultGrid.insertRow')}
