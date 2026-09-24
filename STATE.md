@@ -1,6 +1,12 @@
 # STATE — Wisp
 
-## 🚀 Release v0.1.0-beta.17 — (2026-09-23)
+## 🚀 Release v0.1.0-beta.19 — (2026-09-24)
+- **Correção de empacotamento CI (GoReleaser)**:
+  - Adicionadas as tags de build obrigatórias do framework Wails (`desktop` e `production`) em `.goreleaser.yaml` para alvos Linux e Windows.
+  - Corrige o erro ao inicializar o binário dos pacotes (`.deb`, `.rpm`, `.tar.gz`) que falhava com: `Wails applications will not build without the correct build tags`.
+- Bump de versão para `v0.1.0-beta.19`.
+
+## 🚀 Release v0.1.0-beta.18 — (2026-09-23)
 - Conclusão e integração de 7 ADRs do MVP:
   - **ADR 0016**: Streaming Data Export (CSV, JSON, SQL) com bufferização em disco e modal com progresso em tempo real.
   - **ADR 0017**: Object Tree Context Menu & SQL Generator (SELECT, INSERT, UPDATE, CREATE, DROP).

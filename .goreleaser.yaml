@@ -11,6 +11,8 @@ builds:
     binary: wisp
     main: .
     tags:
+      - desktop
+      - production
       - webkit2_41
     flags:
       - -trimpath
@@ -24,6 +26,9 @@ builds:
   - id: wisp-windows
     binary: wisp
     main: .
+    tags:
+      - desktop
+      - production
     flags:
       - -trimpath
     ldflags:
